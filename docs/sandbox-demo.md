@@ -1,0 +1,176 @@
+# Sandbox Demo Guide
+
+End-to-end test of the Phase 2 feature set against real AWS using the sandbox
+account (345678901234). No production resources are touched.
+
+## Prerequisites
+
+```bash
+# AWS CLI configured for sandbox account
+aws sts get-caller-identity   # should show 345678901234
+
+# Python venv with package installed
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+backup --help                 # should display command tree
+```
+
+## Step 1 — Create sandbox resources
+
+```bash
+scripts/sandbox_setup.sh setup
+```
+
+Creates in sandbox account:
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| S3 | `nzshm22-toshi-api-sandbox` | 5 seeded objects, mirrors `nzshm22-toshi-api-prod` |
+| S3 | `ths-dataset-sandbox` | 3 seeded objects, mirrors `ths-dataset-prod` |
+| DynamoDB | `ToshiFileObject-PROD` | PITR enabled, 3 items |
+| DynamoDB | `ToshiIdentity-PROD` | PITR enabled, 3 items |
+| DynamoDB | `ToshiTableObject-PROD` | PITR enabled, 3 items |
+| DynamoDB | `ToshiThingObject-PROD` | PITR enabled, 3 items |
+
+Also writes `backup-config.sandbox.yaml` with the sandbox account ID and ARNs
+pre-filled.
+
+## Step 2 — Set config path
+
+```bash
+export BACKUP_CONFIG_PATH=backup-config.sandbox.yaml
+```
+
+All subsequent `backup` commands pick this up automatically via the
+`BACKUP_CONFIG_PATH` env var. No need to rename files.
+
+## Step 3 — Dry run (no AWS writes)
+
+```bash
+backup --dry-run run --source toshi
+```
+
+Expected output:
+```
+[DRY RUN] Export initiated: ToshiFileObject-PROD → skipped
+[DRY RUN] Export initiated: ToshiIdentity-PROD → skipped
+[DRY RUN] Export initiated: ToshiTableObject-PROD → skipped
+[DRY RUN] Export initiated: ToshiThingObject-PROD → skipped
+
+Backup completed successfully
+[DRY RUN] Would copy N objects (X.XX MB)
+```
+
+## Step 4 — Live backup run
+
+```bash
+backup run --source toshi
+```
+
+This will:
+1. Create `nzshm22-toshi-api-sandbox-backup-ap-southeast-2-345678901234` (S3 backup bucket)
+2. Sync the 5 source objects into it
+3. Create `nzshm-dynamo-backup-toshi-ap-southeast-2-345678901234` (DynamoDB export bucket)
+4. Initiate PITR exports for all 4 tables — each returns an `ExportArn`
+
+```bash
+# Back up ths source too
+backup run --source ths
+
+# Or both at once
+backup run --source all
+```
+
+## Step 5 — Verify backup state
+
+```bash
+scripts/sandbox_setup.sh status
+```
+
+Shows source buckets, DynamoDB tables (item count + PITR status), backup output
+buckets (object count), and any EventBridge rules.
+
+## Step 6 — Schedule management
+
+```bash
+# List rules (empty at this point)
+backup schedule show
+
+# Create weekly rule for toshi — 14:00 UTC = 02:00 NZST (Sun)
+backup schedule set --source toshi --frequency weekly --time 14:00
+
+# Create daily rule
+backup schedule set --source toshi --frequency daily --time 13:00
+
+# Create weekly rule for ths
+backup schedule set --source ths --frequency weekly --time 14:30
+
+# List all rules
+backup schedule show
+
+# Disable / re-enable
+backup schedule disable toshi
+backup schedule show
+backup schedule enable toshi --frequency weekly
+backup schedule show
+```
+
+Note: Rules are created in ENABLED state. No Lambda target is registered until
+`lambda_arn` is set in the config (Phase 2 / deployment step).
+
+## Step 7 — Teardown
+
+```bash
+scripts/sandbox_setup.sh teardown
+```
+
+Deletes (with confirmation prompt):
+- Source S3 buckets and all objects
+- Backup output S3 buckets and all objects (lifecycle + delete-protection policies
+  removed first)
+- All 4 DynamoDB tables
+- Any `nzshm-backup-*` EventBridge rules
+- `backup-config.sandbox.yaml`
+
+---
+
+## Production resource reference
+
+| Resource | Production name | Prod account |
+|----------|----------------|--------------|
+| S3 | `nzshm22-toshi-api-prod` | 210987654321 |
+| S3 | `ths-dataset-prod` | 210987654321 |
+| DynamoDB | `ToshiFileObject-PROD` | 210987654321 |
+| DynamoDB | `ToshiIdentity-PROD` | 210987654321 |
+| DynamoDB | `ToshiTableObject-PROD` | 210987654321 |
+| DynamoDB | `ToshiThingObject-PROD` | 210987654321 |
+
+See `backup-config.example.yaml` for the full production config template.
+
+---
+
+## Troubleshooting
+
+**Wrong account error:**
+```
+[ERROR] Expected sandbox account 345678901234 but got XXXXXXXXXXXX
+```
+Switch AWS credentials to the sandbox account profile before running.
+
+**`backup` command not found:**
+```bash
+source .venv/bin/activate
+pip install -e .
+```
+
+**DynamoDB export shows FAILED in status:**
+PITR exports are async — the `INITIATED` status from `backup run` is correct.
+Check export progress in the AWS console under DynamoDB → Exports, or poll:
+```bash
+aws dynamodb list-exports --region ap-southeast-2
+```
+
+**Backup bucket already exists error (S3):**
+The S3 backup module ABENDs if a backup bucket exists but was not created by
+this tool. This is intentional (guards against clobbering existing data).
+Run `scripts/sandbox_setup.sh teardown` to clean up, then re-run setup.
