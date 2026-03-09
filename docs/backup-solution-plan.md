@@ -26,21 +26,21 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   AWS EventBridge                            │
-│                 (Cron: weekly/daily)                         │
+│                   AWS EventBridge                           │
+│                 (Cron: weekly/daily)                        │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    AWS Lambda                                │
+│                    AWS Lambda                               │
 │              (nzshm-backup CLI)                             │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │  • Schedule orchestration                             │   │
-│  │  • S3 → S3 Glacier transition                         │   │
-│  │  • DynamoDB → S3 export                               │   │
-│  │  • Pruning/retention policies                         │   │
-│  │  • Cost tracking & reporting                          │   │
-│  │  • Email notifications (SES/Slack)                    │   │
+│  │  • Schedule orchestration                            │   │
+│  │  • S3 → S3 Glacier transition                        │   │
+│  │  • DynamoDB → S3 export                              │   │
+│  │  • Pruning/retention policies                        │   │
+│  │  • Cost tracking & reporting                         │   │
+│  │  • Email notifications (SES/Slack)                   │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                       │
