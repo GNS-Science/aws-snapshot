@@ -85,7 +85,7 @@ def test_retention_config_defaults():
     config = RetentionConfig()
 
     assert config.hot_days == 30
-    assert config.warm_days == 90
+    assert config.warm_days == 120
     assert config.cold_days == 365
     assert config.max_age_days == 365
 

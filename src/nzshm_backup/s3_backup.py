@@ -36,10 +36,14 @@ class SyncResult:
 
 @dataclass
 class LifecycleConfig:
-    """S3 lifecycle policy configuration."""
+    """S3 lifecycle policy configuration.
+
+    AWS constraint: DEEP_ARCHIVE transition must be >= hot_days + 90.
+    Default warm_days=120 satisfies this for hot_days=30.
+    """
 
     hot_days: int = 30
-    warm_days: int = 90
+    warm_days: int = 120
     cold_days: int = 365
     max_age_days: int = 365
 
@@ -133,6 +137,9 @@ def apply_lifecycle_policy(
     if config is None:
         config = LifecycleConfig()
 
+    # AWS requires DEEP_ARCHIVE to be at least 90 days after GLACIER_IR
+    deep_archive_days = max(config.warm_days, config.hot_days + 90)
+
     lifecycle_config = {
         "Bucket": bucket_name,
         "LifecycleConfiguration": {
@@ -147,7 +154,7 @@ def apply_lifecycle_policy(
                             "StorageClass": "GLACIER_IR",
                         },
                         {
-                            "Days": config.warm_days,
+                            "Days": deep_archive_days,
                             "StorageClass": "DEEP_ARCHIVE",
                         },
                     ],

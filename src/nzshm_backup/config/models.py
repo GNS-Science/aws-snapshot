@@ -9,7 +9,7 @@ class RetentionConfig(BaseModel):
     """Retention policy configuration."""
 
     hot_days: int = 30
-    warm_days: int = 90
+    warm_days: int = 120  # must be >= hot_days + 90 (AWS constraint for GLACIER_IR → DEEP_ARCHIVE)
     cold_days: int = 365
     max_age_days: int = 365
 
