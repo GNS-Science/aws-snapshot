@@ -140,8 +140,7 @@ def apply_lifecycle_policy(
                 {
                     "ID": "BackupTierTransition",
                     "Status": "Enabled",
-                    "Prefix": "",
-                    "Filter": {},
+                    "Filter": {"Prefix": ""},
                     "Transitions": [
                         {
                             "Days": config.hot_days,
