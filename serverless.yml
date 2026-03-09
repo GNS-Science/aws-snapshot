@@ -29,6 +29,24 @@ provider:
           Action:
             - sts:GetCallerIdentity
           Resource: "*"
+        - Effect: Allow
+          Action:
+            - dynamodb:ExportTableToPointInTime
+            - dynamodb:DescribeExport
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+          Resource:
+            - "arn:aws:s3:::nzshm-dynamo-backup-*/*"
+        - Effect: Allow
+          Action:
+            - events:PutRule
+            - events:PutTargets
+            - events:ListRules
+            - events:EnableRule
+            - events:DisableRule
+          Resource: "*"
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:

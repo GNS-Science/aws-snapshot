@@ -4,6 +4,7 @@
 general:
   region: ap-southeast-2
   environment: production
+  lambda_arn: null
   tags:
     Project: NSHM
     ManagedBy: backup-cli
@@ -18,12 +19,14 @@ sources:
       - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-FileTable
       - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-ThingTable
     s3_backup_bucket_suffix: -backup
+    dynamodb_export_format: DYNAMODB_JSON
 
   ths:
     display_name: "THS_dataset_prod"
     s3_buckets:
       - arn:aws:s3:::THS_dataset_prod
     s3_backup_bucket_suffix: -backup
+    dynamodb_export_format: DYNAMODB_JSON
 
 retention:
   hot_days: 30
