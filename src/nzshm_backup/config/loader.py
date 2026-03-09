@@ -8,13 +8,19 @@ import yaml
 from nzshm_backup.config.models import ConfigModel
 
 DEFAULT_CONFIG_PATH = Path("backup-config.yaml")
+CONFIG_PATH_ENV_VAR = "BACKUP_CONFIG_PATH"
 
 
 def load_config(config_path: Path | None = None) -> ConfigModel:
     """Load configuration from YAML file.
 
+    Config path resolution order:
+    1. Explicit `config_path` argument
+    2. BACKUP_CONFIG_PATH environment variable
+    3. ./backup-config.yaml (default)
+
     Args:
-        config_path: Path to config file. Defaults to ./backup-config.yaml
+        config_path: Path to config file.
 
     Returns:
         Validated ConfigModel instance
@@ -25,7 +31,8 @@ def load_config(config_path: Path | None = None) -> ConfigModel:
         pydantic.ValidationError: If config schema validation fails
     """
     if config_path is None:
-        config_path = DEFAULT_CONFIG_PATH
+        env_path = os.environ.get(CONFIG_PATH_ENV_VAR)
+        config_path = Path(env_path) if env_path else DEFAULT_CONFIG_PATH
 
     config_path = Path(config_path).expanduser().resolve()
 
