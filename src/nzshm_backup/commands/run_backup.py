@@ -6,6 +6,7 @@ import boto3
 import typer
 
 from nzshm_backup.config import load_config
+from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
 from nzshm_backup.logging_config import setup_logging
 from nzshm_backup.s3_backup import backup_source
 from nzshm_backup.state import get_state
@@ -97,6 +98,31 @@ def run(
             except Exception as e:
                 logger.error(f"Backup failed for {bucket_name}: {e}")
                 total_results["errors"].append(f"{bucket_name}: {str(e)}")
+
+        dynamodb_client = session.client("dynamodb")
+        for table_arn in source_config.dynamodb_tables:
+            export_bucket = source_config.get_dynamodb_backup_bucket_name(
+                source_alias, region, account_id
+            )
+            if not state.dry_run:
+                ensure_dynamodb_backup_bucket_ready(session, export_bucket)
+            result = export_dynamodb_table(
+                dynamodb_client,
+                table_arn,
+                export_bucket,
+                source_config.dynamodb_export_format,
+                state.dry_run,
+            )
+            if result.success:
+                prefix = "[DRY RUN] " if state.dry_run else ""
+                typer.echo(
+                    f"{prefix}Export initiated: {result.table_name} → "
+                    f"{result.export_arn or 'skipped'}"
+                )
+            else:
+                total_results["errors"].extend(
+                    [f"{e['table_arn']}: {e['error']}" for e in result.errors]
+                )
 
     if total_results["errors"]:
         typer.echo(f"\nCompleted with {len(total_results['errors'])} error(s)", err=True)

@@ -116,11 +116,18 @@ class SourceConfig(BaseModel):
     s3_buckets: list[str] = Field(default_factory=list, description="S3 bucket ARNs")
     dynamodb_tables: list[str] = Field(default_factory=list, description="DynamoDB table ARNs")
     s3_backup_bucket_suffix: str = "-backup"
+    dynamodb_export_format: Literal["DYNAMODB_JSON", "ION"] = "DYNAMODB_JSON"
 
     def get_backup_bucket_name(self, bucket_arn: str, region: str, account_id: str) -> str:
         """Generate globally unique backup bucket name from source bucket ARN."""
         bucket_name = bucket_arn.split(":")[-1]
         return f"{bucket_name}-backup-{region}-{account_id}"
+
+    def get_dynamodb_backup_bucket_name(
+        self, source_alias: str, region: str, account_id: str
+    ) -> str:
+        """Generate globally unique DynamoDB export bucket name."""
+        return f"nzshm-dynamo-backup-{source_alias}-{region}-{account_id}"
 
 
 class GeneralConfig(BaseModel):
@@ -131,6 +138,7 @@ class GeneralConfig(BaseModel):
     tags: dict[str, str] = Field(
         default_factory=lambda: {"Project": "NSHM", "ManagedBy": "backup-cli"}
     )
+    lambda_arn: str | None = Field(None, description="ARN of the backup Lambda function")
 
 
 class ConfigModel(BaseModel):

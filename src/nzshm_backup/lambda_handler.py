@@ -7,6 +7,7 @@ import boto3
 
 from nzshm_backup.config.loader import load_config, load_config_from_env
 from nzshm_backup.config.models import ConfigModel
+from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
 from nzshm_backup.lambda_schema import BackupTask
 from nzshm_backup.logging_config import setup_logging
 from nzshm_backup.s3_backup import backup_source
@@ -104,6 +105,33 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         "status": "error",
                         "error": str(e),
                     }
+
+            dynamodb_client = session.client("dynamodb")
+            for table_arn in source_config.dynamodb_tables:
+                export_bucket = source_config.get_dynamodb_backup_bucket_name(
+                    source_alias, region, account_id
+                )
+                table_name = table_arn.split("/")[-1]
+
+                if not task.dry_run:
+                    ensure_dynamodb_backup_bucket_ready(session, export_bucket)
+
+                export_result = export_dynamodb_table(
+                    dynamodb_client,
+                    table_arn,
+                    export_bucket,
+                    source_config.dynamodb_export_format,
+                    task.dry_run,
+                )
+
+                results[table_name] = {
+                    "status": "success" if export_result.success else "error",
+                    "export_arn": export_result.export_arn,
+                    "export_bucket": export_result.export_bucket,
+                    "export_prefix": export_result.export_prefix,
+                    "dry_run": export_result.dry_run,
+                    "errors": export_result.errors,
+                }
 
         success = all(r.get("status") == "success" or "error" not in r for r in results.values())
 
