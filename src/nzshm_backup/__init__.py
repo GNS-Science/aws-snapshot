@@ -1,3 +1,3 @@
-"""NSHM Backup Solution - AWS-native backup management CLI."""
+"""NSHM Backup Solution."""
 
 __version__ = "0.1.0"

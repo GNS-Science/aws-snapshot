@@ -1,50 +1,53 @@
 """Restore operations commands."""
 
-import click
+import typer
+from typing import Optional, Literal
+
+app = typer.Typer()
 
 
-@click.group("restore")
-def restore():
-    """Manage backup restores."""
-    pass
-
-
-@restore.command("list")
-@click.option("--source", type=click.Choice(["toshi", "ths"]))
-@click.option("--limit", default=10, help="Number of restore points to show")
-@click.pass_context
-def list_restores(ctx, source, limit):
+@app.command("list")
+def list_restores(
+    source: Optional[Literal["toshi", "ths"]] = typer.Option(
+        None, help="Filter by source"
+    ),
+    limit: int = typer.Option(10, help="Number of restore points to show"),
+):
     """List available restore points."""
-    click.echo(
+    typer.echo(
         f"Listing restore points - coming soon (source: {source}, limit: {limit})"
     )
 
 
-@restore.command("preview")
-@click.option("--date", required=True, help="Backup date to restore (YYYY-MM-DD)")
-@click.option("--source", type=click.Choice(["toshi", "ths"]))
-@click.option("--target-bucket", help="Destination bucket for restore")
-@click.pass_context
-def preview(ctx, date, source, target_bucket):
+@app.command("preview")
+def preview(
+    date: str = typer.Option(..., help="Backup date to restore (YYYY-MM-DD)"),
+    source: Optional[Literal["toshi", "ths"]] = typer.Option(None, help="Data source"),
+    target_bucket: Optional[str] = typer.Option(
+        None, help="Destination bucket for restore"
+    ),
+):
     """Preview restore operation with cost estimate."""
-    click.echo(f"Restore preview - coming soon: {date} for {source}")
+    typer.echo(f"Restore preview - coming soon: {date} for {source}")
 
 
-@restore.command("run")
-@click.option("--date", required=True, help="Backup date to restore (YYYY-MM-DD)")
-@click.option("--source", type=click.Choice(["toshi", "ths"]))
-@click.option("--target-bucket", help="Destination bucket for restore")
-@click.option("--table", help="DynamoDB table to restore")
-@click.option("--prefix", help="S3 prefix to restore (subset)")
-@click.pass_context
-def run_restore(ctx, date, source, target_bucket, table, prefix):
+@app.command("run")
+def run_restore(
+    date: str = typer.Option(..., help="Backup date to restore (YYYY-MM-DD)"),
+    source: Optional[Literal["toshi", "ths"]] = typer.Option(None, help="Data source"),
+    target_bucket: Optional[str] = typer.Option(
+        None, help="Destination bucket for restore"
+    ),
+    table: Optional[str] = typer.Option(None, help="DynamoDB table to restore"),
+    prefix: Optional[str] = typer.Option(None, help="S3 prefix to restore (subset)"),
+):
     """Execute restore operation."""
-    click.echo(f"Restore execution - coming soon: {date}")
+    typer.echo(f"Restore execution - coming soon: {date}")
 
 
-@restore.command("cancel")
-@click.option("--job-id", required=True, help="Restore job ID to cancel")
-@click.pass_context
-def cancel(ctx, job_id):
+@app.command("cancel")
+def cancel(
+    job_id: str = typer.Option(..., help="Restore job ID to cancel"),
+):
     """Cancel in-progress restore."""
-    click.echo(f"Cancelling restore job {job_id} - coming soon")
+    typer.echo(f"Cancelling restore job {job_id} - coming soon")

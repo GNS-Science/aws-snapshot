@@ -1,15 +1,22 @@
 """Status command - current backup state."""
 
-import click
+import typer
+from typing import Optional, Literal
+
+app = typer.Typer()
 
 
-@click.command("status")
-@click.option("--source", type=click.Choice(["toshi", "ths", "all"]), default="all")
-@click.option("--output", type=click.Choice(["text", "json", "yaml"]), default="text")
-@click.pass_context
-def status(ctx, source, output):
+@app.command()
+def status(
+    source: Literal["toshi", "ths", "all"] = typer.Option(
+        "all", help="Data source to check"
+    ),
+    output: Literal["text", "json", "yaml"] = typer.Option(
+        "text", help="Output format"
+    ),
+):
     """Show current backup status.
 
     Displays last backup time, next scheduled run, and overall health.
     """
-    click.echo(f"Backup status - coming soon (source: {source}, format: {output})")
+    typer.echo(f"Backup status - coming soon (source: {source}, format: {output})")

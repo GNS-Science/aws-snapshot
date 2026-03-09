@@ -1,39 +1,37 @@
 """Configuration management commands."""
 
-import click
+import typer
+from typing import Optional
+
+app = typer.Typer()
 
 
-@click.group("config")
-def config():
-    """Manage backup configuration."""
-    pass
-
-
-@config.command("show")
-@click.argument("key", required=False)
-@click.pass_context
-def show(ctx, key):
+@app.command("show")
+def show_config(
+    key: Optional[str] = typer.Argument(
+        None, help="Configuration key (show all if not provided)"
+    ),
+):
     """Show configuration values.
 
     If KEY is provided, show specific value. Otherwise show all config.
     """
     if key:
-        click.echo(f"Config value for '{key}' - coming soon")
+        typer.echo(f"Config value for '{key}' - coming soon")
     else:
-        click.echo("Showing all configuration - coming soon")
+        typer.echo("Showing all configuration - coming soon")
 
 
-@config.command("set")
-@click.argument("key")
-@click.argument("value")
-@click.pass_context
-def set(ctx, key, value):
+@app.command("set")
+def set_config(
+    key: str = typer.Argument(..., help="Configuration key"),
+    value: str = typer.Argument(..., help="Configuration value"),
+):
     """Set configuration value."""
-    click.echo(f"Setting {key}={value} - coming soon")
+    typer.echo(f"Setting {key}={value} - coming soon")
 
 
-@config.command("validate")
-@click.pass_context
-def validate(ctx):
+@app.command()
+def validate():
     """Validate configuration file."""
-    click.echo("Validating configuration - coming soon")
+    typer.echo("Validating configuration - coming soon")

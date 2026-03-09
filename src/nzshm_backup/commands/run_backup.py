@@ -1,20 +1,25 @@
 """Manual backup execution command."""
 
-import click
+import typer
+from typing import Optional, Literal
+
+app = typer.Typer()
 
 
-@click.command("run")
-@click.option("--source", type=click.Choice(["toshi", "ths", "all"]), default="all")
-@click.option(
-    "--dry-run", is_flag=True, help="Show what would be done without executing"
-)
-@click.pass_context
-def run(ctx, source, dry_run):
+@app.command()
+def run(
+    source: Literal["toshi", "ths", "all"] = typer.Option(
+        "all", help="Data source to backup"
+    ),
+    dry_run: bool = typer.Option(
+        False, help="Show what would be done without executing"
+    ),
+):
     """Execute manual backup.
 
     Triggers backup for specified source(s). Use --dry-run to preview actions.
     """
     if dry_run:
-        click.echo(f"[DRY RUN] Would trigger backup for: {source}")
+        typer.echo(f"[DRY RUN] Would trigger backup for: {source}")
     else:
-        click.echo(f"Starting backup for: {source} - implementation coming soon")
+        typer.echo(f"Starting backup for: {source} - implementation coming soon")
