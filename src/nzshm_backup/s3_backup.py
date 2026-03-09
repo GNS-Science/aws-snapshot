@@ -144,7 +144,7 @@ def apply_lifecycle_policy(
                     "Transitions": [
                         {
                             "Days": config.hot_days,
-                            "StorageClass": "GLACIER_INSTANT",
+                            "StorageClass": "GLACIER_IR",
                         },
                         {
                             "Days": config.warm_days,
