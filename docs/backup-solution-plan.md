@@ -311,12 +311,27 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1-2)
-- [ ] CLI skeleton with Click
-- [ ] S3 backup operations (copy + lifecycle)
-- [ ] Basic configuration system (YAML/JSON)
-- [ ] CloudWatch logging setup
-- [ ] AWS Lambda deployment package
+### Phase 1: Foundation
+
+#### Step 1: CLI Skeleton (Week 1) ✅ Complete
+- [x] CLI skeleton with Typer (chose Typer over Click for type safety)
+- [x] All subcommand groups registered (schedule, run, restore, test, status, report, costs, config)
+- [x] State management for global flags (--verbose, --dry-run, --output)
+- [x] Basic test infrastructure with pytest + moto
+
+#### Step 2: Config + S3 Backup (Week 2) ✅ Complete
+- [x] Configuration system with Pydantic models
+- [x] YAML config loader with validation
+- [x] Alias→ARN mapping for sources
+- [x] S3 backup module with incremental sync (hybrid approach)
+- [x] Lifecycle policy attachment (30/90/365 day tiers)
+- [x] Globally unique backup bucket naming: `{bucket}-backup-{region}-{account_id}`
+- [x] Delete protection via IAM (no s3:DeleteObject permission)
+- [x] CloudWatch-compatible logging (JSON format option)
+- [x] Lambda handler with Pydantic task schema
+- [x] Serverless Framework config (serverless.yml)
+- [x] Test suite: 35 tests, 71% coverage
+- [x] All lint checks passing (ruff + black)
 
 ### Phase 2: DynamoDB + Scheduling (Week 3)
 - [ ] DynamoDB export integration (PIT export to S3)
@@ -513,19 +528,29 @@ testing:
 1. ✅ Confirm data volumes (completed: 9 TB S3, 18.3 GB DynamoDB)
 2. ✅ Confirm retention policy (30/90/365 days)
 3. ✅ Confirm single-region start (completed: yes)
-4. ⏳ Identify S3 bucket names and DynamoDB table names (exact names)
-5. ⏳ Decide on Infrastructure as Code approach (Terraform vs CDK vs CloudFormation)
+4. ✅ Identify S3 bucket names and DynamoDB table names (alias system implemented)
+5. ✅ Decide on Infrastructure as Code approach (Serverless Framework)
 6. ⏳ Confirm Slack workspace and channel for alerts
 7. ⏳ Identify initial admin email recipients for SES notifications
-8. ⏳ Approve this design plan
+8. ✅ Approve this design plan
 
-### Week 1 Tasks
+### Completed Tasks
 
-1. Set up project structure and Click CLI skeleton
-2. Create AWS account structure (if not exists)
-3. Configure IAM roles and policies
-4. Implement S3 backup operations
-5. Set up CloudWatch logging
+**Phase 1 Step 1 (Week 1):**
+1. ✅ Set up project structure with Typer CLI skeleton
+2. ✅ Created AWS Lambda deployment package structure
+3. ✅ Configured IAM roles and policies (no delete permission)
+4. ✅ Implemented basic command structure (all subcommands)
+5. ✅ Set up test infrastructure with pytest + moto
+
+**Phase 1 Step 2 (Week 2):**
+1. ✅ Configuration system with Pydantic models
+2. ✅ YAML config loader with validation
+3. ✅ S3 backup module with incremental sync
+4. ✅ CloudWatch logging setup (JSON + text formats)
+5. ✅ Serverless Framework configuration (serverless.yml)
+6. ✅ Lambda handler with BackupTask schema
+7. ✅ Test suite: 35 tests, 71% coverage
 
 ---
 
