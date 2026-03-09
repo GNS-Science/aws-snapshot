@@ -1,35 +1,46 @@
 #!/usr/bin/env bash
-# sandbox_setup.sh — Create / teardown lightweight sandbox resources for testing
-# backup run and backup schedule against real AWS without touching production.
+# sandbox_setup.sh — Create / teardown lightweight sandbox resources mirroring
+# production for testing backup run and backup schedule against real AWS.
 #
 # Usage:
 #   scripts/sandbox_setup.sh setup      # Create resources + write backup-config.sandbox.yaml
-#   scripts/sandbox_setup.sh teardown   # Delete all created resources
-#   scripts/sandbox_setup.sh status     # Show resource state
+#   scripts/sandbox_setup.sh teardown   # Delete all created resources (with confirmation)
+#   scripts/sandbox_setup.sh status     # Show state of all resources
 #
 # Prerequisites:
-#   - AWS CLI configured with sandbox account credentials
-#   - Python venv activated (for 'backup' command in post-setup check)
-#   - jq installed (brew install jq)
+#   - AWS CLI configured with sandbox account (595842668254) credentials
+#   - Python venv activated (pip install -e ".[dev]")
 #
-# Resources created (all names include "sandbox" so teardown is safe):
-#   S3:       nzshm-sandbox-toshi-source
-#             nzshm-sandbox-ths-source
-#   DynamoDB: nzshm-sandbox-filetable
-#             nzshm-sandbox-thingtable
+# Production resource mapping:
+#   PROD S3:       nzshm22-toshi-api-prod      → SANDBOX: nzshm22-toshi-api-sandbox
+#   PROD S3:       ths-dataset-prod             → SANDBOX: ths-dataset-sandbox
+#   PROD DynamoDB: ToshiFileObject-PROD         → SANDBOX: ToshiFileObject-PROD   (account-scoped, same name)
+#   PROD DynamoDB: ToshiIdentity-PROD           → SANDBOX: ToshiIdentity-PROD
+#   PROD DynamoDB: ToshiTableObject-PROD        → SANDBOX: ToshiTableObject-PROD
+#   PROD DynamoDB: ToshiThingObject-PROD        → SANDBOX: ToshiThingObject-PROD
 #
-# These are small, seeded resources — no large data, no production content.
+# Sandbox account: 595842668254   Production account: 461564345538
 
 set -euo pipefail
 
 REGION="${AWS_DEFAULT_REGION:-ap-southeast-2}"
-TOSHI_S3_BUCKET="nzshm-sandbox-toshi-source"
-THS_S3_BUCKET="nzshm-sandbox-ths-source"
-DYNAMO_FILE_TABLE="nzshm-sandbox-filetable"
-DYNAMO_THING_TABLE="nzshm-sandbox-thingtable"
+SANDBOX_ACCOUNT="595842668254"
+
+# S3: -prod suffix replaced with -sandbox (bucket names are global)
+TOSHI_S3_BUCKET="nzshm22-toshi-api-sandbox"
+THS_S3_BUCKET="ths-dataset-sandbox"
+
+# DynamoDB: same names as prod (tables are account-scoped, no collision)
+DYNAMO_TABLES=(
+    "ToshiFileObject-PROD"
+    "ToshiIdentity-PROD"
+    "ToshiTableObject-PROD"
+    "ToshiThingObject-PROD"
+)
+
 CONFIG_OUT="backup-config.sandbox.yaml"
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 info()  { echo "  [INFO]  $*"; }
 ok()    { echo "  [OK]    $*"; }
@@ -51,60 +62,71 @@ table_exists() {
         --query "Table.TableName" --output text 2>/dev/null | grep -q "$1"
 }
 
+assert_sandbox_account() {
+    local actual
+    actual=$(get_account_id)
+    if [ "$actual" != "$SANDBOX_ACCOUNT" ]; then
+        die "Expected sandbox account $SANDBOX_ACCOUNT but got $actual — check your AWS credentials."
+    fi
+}
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 cmd_setup() {
     require_cmd aws
-    require_cmd jq
 
     echo
     echo "=== Sandbox Setup ==="
     echo "Region:  $REGION"
+    assert_sandbox_account
     ACCOUNT_ID=$(get_account_id)
-    echo "Account: $ACCOUNT_ID"
+    echo "Account: $ACCOUNT_ID (sandbox ✓)"
     echo
 
-    # ── S3 source buckets ───────────────────────────────────────────────────
+    # ── S3 source buckets ────────────────────────────────────────────────────
     for BUCKET in "$TOSHI_S3_BUCKET" "$THS_S3_BUCKET"; do
         if bucket_exists "$BUCKET"; then
-            warn "S3 bucket already exists: $BUCKET (skipping)"
+            warn "S3 bucket already exists: $BUCKET (skipping creation)"
         else
             info "Creating S3 bucket: $BUCKET"
-            if [ "$REGION" = "us-east-1" ]; then
-                aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" >/dev/null
-            else
-                aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-                    --create-bucket-configuration LocationConstraint="$REGION" >/dev/null
-            fi
+            aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+                --create-bucket-configuration LocationConstraint="$REGION" >/dev/null
             aws s3api put-bucket-tagging --bucket "$BUCKET" --tagging \
-                'TagSet=[{Key=ManagedBy,Value=nzshm-backup-sandbox},{Key=Type,Value=sandbox-source}]'
+                'TagSet=[{Key=ManagedBy,Value=nzshm-backup-sandbox},{Key=Type,Value=sandbox-source},{Key=Environment,Value=sandbox}]'
             ok "Created: $BUCKET"
         fi
     done
 
-    # ── Seed S3 buckets with sample objects ────────────────────────────────
-    info "Seeding $TOSHI_S3_BUCKET with sample objects..."
-    for KEY in models/sample-model-001.json models/sample-model-002.json \
-               ruptures/sample-rupture.json metadata/index.json; do
+    # ── Seed toshi S3 bucket (mirrors nzshm22-toshi-api-prod object layout) ──
+    info "Seeding $TOSHI_S3_BUCKET..."
+    for KEY in \
+        "models/nshm22/solution-001.json" \
+        "models/nshm22/solution-002.json" \
+        "ruptures/nshm22/rupture-set-001.json" \
+        "hazard/nshm22/hazard-curve-001.json" \
+        "metadata/index.json"; do
         aws s3 cp /dev/stdin "s3://$TOSHI_S3_BUCKET/$KEY" \
             --content-type application/json >/dev/null \
-            <<< "{\"source\":\"sandbox\",\"key\":\"$KEY\",\"created\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            <<< "{\"source\":\"sandbox\",\"key\":\"$KEY\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
     done
-    ok "Seeded $TOSHI_S3_BUCKET (4 objects)"
+    ok "Seeded $TOSHI_S3_BUCKET (5 objects)"
 
-    info "Seeding $THS_S3_BUCKET with sample objects..."
-    for KEY in datasets/sample-dataset-001.nc datasets/sample-dataset-002.nc \
-               metadata/catalogue.json; do
+    # ── Seed ths S3 bucket (mirrors ths-dataset-prod layout) ─────────────────
+    info "Seeding $THS_S3_BUCKET..."
+    for KEY in \
+        "v8/ths-nz/hazard-curves/hc-sample-001.nc" \
+        "v8/ths-nz/hazard-curves/hc-sample-002.nc" \
+        "v8/ths-nz/metadata/catalogue.json"; do
         aws s3 cp /dev/stdin "s3://$THS_S3_BUCKET/$KEY" \
             --content-type application/octet-stream >/dev/null \
-            <<< "SANDBOX_PLACEHOLDER_$KEY"
+            <<< "SANDBOX_NC_PLACEHOLDER $KEY"
     done
     ok "Seeded $THS_S3_BUCKET (3 objects)"
 
-    # ── DynamoDB tables ─────────────────────────────────────────────────────
-    for TABLE in "$DYNAMO_FILE_TABLE" "$DYNAMO_THING_TABLE"; do
+    # ── DynamoDB tables ───────────────────────────────────────────────────────
+    for TABLE in "${DYNAMO_TABLES[@]}"; do
         if table_exists "$TABLE"; then
-            warn "DynamoDB table already exists: $TABLE (skipping)"
+            warn "DynamoDB table already exists: $TABLE (skipping creation)"
         else
             info "Creating DynamoDB table: $TABLE"
             aws dynamodb create-table \
@@ -117,16 +139,16 @@ cmd_setup() {
         fi
     done
 
-    # ── Wait for tables to be ACTIVE ───────────────────────────────────────
-    for TABLE in "$DYNAMO_FILE_TABLE" "$DYNAMO_THING_TABLE"; do
-        info "Waiting for $TABLE to become ACTIVE..."
+    # ── Wait for all tables to be ACTIVE ─────────────────────────────────────
+    for TABLE in "${DYNAMO_TABLES[@]}"; do
+        info "Waiting for $TABLE → ACTIVE..."
         aws dynamodb wait table-exists --table-name "$TABLE" --region "$REGION"
         ok "$TABLE is ACTIVE"
     done
 
-    # ── Enable PITR on DynamoDB tables ─────────────────────────────────────
-    for TABLE in "$DYNAMO_FILE_TABLE" "$DYNAMO_THING_TABLE"; do
-        info "Enabling Point-in-Time Recovery on $TABLE..."
+    # ── Enable PITR ───────────────────────────────────────────────────────────
+    for TABLE in "${DYNAMO_TABLES[@]}"; do
+        info "Enabling PITR on $TABLE..."
         aws dynamodb update-continuous-backups \
             --table-name "$TABLE" \
             --region "$REGION" \
@@ -134,30 +156,45 @@ cmd_setup() {
         ok "PITR enabled: $TABLE"
     done
 
-    # ── Seed DynamoDB tables ────────────────────────────────────────────────
-    info "Seeding $DYNAMO_FILE_TABLE..."
+    # ── Seed DynamoDB tables with realistic-shaped items ─────────────────────
+    info "Seeding ToshiFileObject-PROD..."
     for i in 1 2 3; do
-        aws dynamodb put-item \
-            --table-name "$DYNAMO_FILE_TABLE" \
-            --region "$REGION" \
-            --item "{\"id\":{\"S\":\"file-$i\"},\"name\":{\"S\":\"SandboxFile-$i\"},\"size\":{\"N\":\"$((i * 1024))\"},\"source\":{\"S\":\"sandbox\"}}" >/dev/null
+        aws dynamodb put-item --table-name "ToshiFileObject-PROD" --region "$REGION" \
+            --item "{\"id\":{\"S\":\"FileObject-$i\"},\"file_name\":{\"S\":\"sandbox-file-$i.json\"},\"file_size\":{\"N\":\"$((i * 2048))\"},\"md5_digest\":{\"S\":\"abc$i\"},\"source\":{\"S\":\"sandbox\"}}" >/dev/null
     done
-    ok "Seeded $DYNAMO_FILE_TABLE (3 items)"
+    ok "Seeded ToshiFileObject-PROD (3 items)"
 
-    info "Seeding $DYNAMO_THING_TABLE..."
+    info "Seeding ToshiIdentity-PROD..."
     for i in 1 2 3; do
-        aws dynamodb put-item \
-            --table-name "$DYNAMO_THING_TABLE" \
-            --region "$REGION" \
-            --item "{\"id\":{\"S\":\"thing-$i\"},\"name\":{\"S\":\"SandboxThing-$i\"},\"type\":{\"S\":\"FaultSection\"},\"source\":{\"S\":\"sandbox\"}}" >/dev/null
+        aws dynamodb put-item --table-name "ToshiIdentity-PROD" --region "$REGION" \
+            --item "{\"id\":{\"S\":\"Identity-$i\"},\"name\":{\"S\":\"SandboxIdentity-$i\"},\"clazz\":{\"S\":\"SandboxModel\"},\"source\":{\"S\":\"sandbox\"}}" >/dev/null
     done
-    ok "Seeded $DYNAMO_THING_TABLE (3 items)"
+    ok "Seeded ToshiIdentity-PROD (3 items)"
 
-    # ── Write backup-config.sandbox.yaml ───────────────────────────────────
+    info "Seeding ToshiTableObject-PROD..."
+    for i in 1 2 3; do
+        aws dynamodb put-item --table-name "ToshiTableObject-PROD" --region "$REGION" \
+            --item "{\"id\":{\"S\":\"TableObject-$i\"},\"table_name\":{\"S\":\"SandboxTable-$i\"},\"rows\":{\"N\":\"$((i * 100))\"},\"source\":{\"S\":\"sandbox\"}}" >/dev/null
+    done
+    ok "Seeded ToshiTableObject-PROD (3 items)"
+
+    info "Seeding ToshiThingObject-PROD..."
+    for i in 1 2 3; do
+        aws dynamodb put-item --table-name "ToshiThingObject-PROD" --region "$REGION" \
+            --item "{\"id\":{\"S\":\"ThingObject-$i\"},\"clazz\":{\"S\":\"FaultSection\"},\"created\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"},\"source\":{\"S\":\"sandbox\"}}" >/dev/null
+    done
+    ok "Seeded ToshiThingObject-PROD (3 items)"
+
+    # ── Write backup-config.sandbox.yaml ──────────────────────────────────────
     info "Writing $CONFIG_OUT..."
     cat > "$CONFIG_OUT" <<YAML
 # Sandbox backup config — generated by scripts/sandbox_setup.sh
-# Use with: BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup run --source toshi
+# Mirrors production resource names in sandbox account ${ACCOUNT_ID}.
+#
+# Usage:
+#   BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup --dry-run run --source toshi
+#   BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup run --source toshi
+#   BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup schedule show
 
 general:
   region: ${REGION}
@@ -166,16 +203,18 @@ general:
 
 sources:
   toshi:
-    display_name: "ToshiAPI (sandbox)"
+    display_name: "ToshiAPI (sandbox — mirrors nzshm22-toshi-api-prod)"
     s3_buckets:
       - arn:aws:s3:::${TOSHI_S3_BUCKET}
     dynamodb_tables:
-      - arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/${DYNAMO_FILE_TABLE}
-      - arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/${DYNAMO_THING_TABLE}
+      - arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ToshiFileObject-PROD
+      - arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ToshiIdentity-PROD
+      - arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ToshiTableObject-PROD
+      - arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ToshiThingObject-PROD
     dynamodb_export_format: DYNAMODB_JSON
 
   ths:
-    display_name: "THS_dataset_prod (sandbox)"
+    display_name: "THS_dataset_prod (sandbox — mirrors ths-dataset-prod)"
     s3_buckets:
       - arn:aws:s3:::${THS_S3_BUCKET}
     dynamodb_export_format: DYNAMODB_JSON
@@ -209,23 +248,28 @@ YAML
     echo
     echo "=== Setup complete ==="
     echo
-    echo "Next steps:"
-    echo "  1. Activate your venv:  source .venv/bin/activate"
-    echo "  2. Dry-run test:        BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup --dry-run run --source toshi"
-    echo "  3. Live run:            BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup run --source toshi"
-    echo "  4. Check schedules:     BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup schedule show"
-    echo "  5. Set a schedule:      BACKUP_CONFIG_PATH=backup-config.sandbox.yaml backup schedule set --source toshi --frequency weekly --time 14:00"
+    echo "Source resources:"
+    echo "  s3://$TOSHI_S3_BUCKET              (5 objects)"
+    echo "  s3://$THS_S3_BUCKET                (3 objects)"
+    echo "  DynamoDB: ToshiFileObject-PROD     (PITR, 3 items)"
+    echo "  DynamoDB: ToshiIdentity-PROD       (PITR, 3 items)"
+    echo "  DynamoDB: ToshiTableObject-PROD    (PITR, 3 items)"
+    echo "  DynamoDB: ToshiThingObject-PROD    (PITR, 3 items)"
     echo
-    echo "Resources created:"
-    echo "  S3:       s3://$TOSHI_S3_BUCKET  (4 objects)"
-    echo "  S3:       s3://$THS_S3_BUCKET  (3 objects)"
-    echo "  DynamoDB: $DYNAMO_FILE_TABLE  (PITR enabled, 3 items)"
-    echo "  DynamoDB: $DYNAMO_THING_TABLE  (PITR enabled, 3 items)"
+    echo "Backup output buckets (created on first 'backup run'):"
+    echo "  s3://${TOSHI_S3_BUCKET}-backup-${REGION}-${ACCOUNT_ID}"
+    echo "  s3://${THS_S3_BUCKET}-backup-${REGION}-${ACCOUNT_ID}"
+    echo "  s3://nzshm-dynamo-backup-toshi-${REGION}-${ACCOUNT_ID}"
     echo
-    echo "Backup output buckets will be created automatically by 'backup run':"
-    echo "  s3://$TOSHI_S3_BUCKET-backup-$REGION-$ACCOUNT_ID"
-    echo "  s3://$THS_S3_BUCKET-backup-$REGION-$ACCOUNT_ID"
-    echo "  s3://nzshm-dynamo-backup-toshi-$REGION-$ACCOUNT_ID"
+    echo "Demo commands:"
+    echo "  export BACKUP_CONFIG_PATH=backup-config.sandbox.yaml"
+    echo "  backup --dry-run run --source toshi"
+    echo "  backup run --source toshi"
+    echo "  backup run --source all"
+    echo "  backup schedule show"
+    echo "  backup schedule set --source toshi --frequency weekly --time 14:00"
+    echo "  scripts/sandbox_setup.sh status"
+    echo
 }
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -234,13 +278,14 @@ cmd_status() {
     require_cmd aws
     ACCOUNT_ID=$(get_account_id)
     echo
-    echo "=== Sandbox Status (account: $ACCOUNT_ID, region: $REGION) ==="
+    echo "=== Sandbox Status ==="
+    echo "Account: $ACCOUNT_ID   Region: $REGION"
     echo
 
     echo "--- Source S3 buckets ---"
     for BUCKET in "$TOSHI_S3_BUCKET" "$THS_S3_BUCKET"; do
         if bucket_exists "$BUCKET"; then
-            COUNT=$(aws s3 ls "s3://$BUCKET" --recursive | wc -l | tr -d ' ')
+            COUNT=$(aws s3 ls "s3://$BUCKET" --recursive 2>/dev/null | wc -l | tr -d ' ')
             echo "  ✓ s3://$BUCKET  ($COUNT objects)"
         else
             echo "  ✗ s3://$BUCKET  (NOT FOUND)"
@@ -249,7 +294,7 @@ cmd_status() {
 
     echo
     echo "--- DynamoDB source tables ---"
-    for TABLE in "$DYNAMO_FILE_TABLE" "$DYNAMO_THING_TABLE"; do
+    for TABLE in "${DYNAMO_TABLES[@]}"; do
         if table_exists "$TABLE"; then
             COUNT=$(aws dynamodb scan --table-name "$TABLE" --region "$REGION" \
                 --select COUNT --query Count --output text 2>/dev/null || echo "?")
@@ -265,9 +310,10 @@ cmd_status() {
     echo
     echo "--- Backup output buckets ---"
     for BUCKET in \
-        "$TOSHI_S3_BUCKET-backup-$REGION-$ACCOUNT_ID" \
-        "$THS_S3_BUCKET-backup-$REGION-$ACCOUNT_ID" \
-        "nzshm-dynamo-backup-toshi-$REGION-$ACCOUNT_ID"; do
+        "${TOSHI_S3_BUCKET}-backup-${REGION}-${ACCOUNT_ID}" \
+        "${THS_S3_BUCKET}-backup-${REGION}-${ACCOUNT_ID}" \
+        "nzshm-dynamo-backup-toshi-${REGION}-${ACCOUNT_ID}" \
+        "nzshm-dynamo-backup-ths-${REGION}-${ACCOUNT_ID}"; do
         if bucket_exists "$BUCKET"; then
             COUNT=$(aws s3 ls "s3://$BUCKET" --recursive 2>/dev/null | wc -l | tr -d ' ')
             echo "  ✓ s3://$BUCKET  ($COUNT objects)"
@@ -284,7 +330,9 @@ cmd_status() {
     if [ -z "$RULES" ]; then
         echo "  (none)"
     else
-        echo "$RULES" | while read -r line; do echo "  $line"; done
+        echo "$RULES" | while IFS=$'\t' read -r name schedule state; do
+            printf "  %-45s %-10s %s\n" "$name" "$state" "$schedule"
+        done
     fi
     echo
 }
@@ -293,10 +341,11 @@ cmd_status() {
 
 cmd_teardown() {
     require_cmd aws
+    assert_sandbox_account
     ACCOUNT_ID=$(get_account_id)
     echo
     echo "=== Sandbox Teardown ==="
-    echo "Account: $ACCOUNT_ID  Region: $REGION"
+    echo "Account: $ACCOUNT_ID (sandbox ✓)   Region: $REGION"
     echo
     read -r -p "  This will DELETE all sandbox resources. Type 'yes' to confirm: " CONFIRM
     [ "$CONFIRM" = "yes" ] || { echo "Aborted."; exit 0; }
@@ -316,13 +365,12 @@ cmd_teardown() {
 
     # Delete backup output buckets
     for BUCKET in \
-        "$TOSHI_S3_BUCKET-backup-$REGION-$ACCOUNT_ID" \
-        "$THS_S3_BUCKET-backup-$REGION-$ACCOUNT_ID" \
-        "nzshm-dynamo-backup-toshi-$REGION-$ACCOUNT_ID" \
-        "nzshm-dynamo-backup-ths-$REGION-$ACCOUNT_ID"; do
+        "${TOSHI_S3_BUCKET}-backup-${REGION}-${ACCOUNT_ID}" \
+        "${THS_S3_BUCKET}-backup-${REGION}-${ACCOUNT_ID}" \
+        "nzshm-dynamo-backup-toshi-${REGION}-${ACCOUNT_ID}" \
+        "nzshm-dynamo-backup-ths-${REGION}-${ACCOUNT_ID}"; do
         if bucket_exists "$BUCKET"; then
             info "Emptying + deleting s3://$BUCKET..."
-            # Remove lifecycle policy first (so delete works on Glacier objects)
             aws s3api delete-bucket-lifecycle --bucket "$BUCKET" 2>/dev/null || true
             aws s3api delete-bucket-policy --bucket "$BUCKET" 2>/dev/null || true
             aws s3 rm "s3://$BUCKET" --recursive >/dev/null 2>&1 || true
@@ -334,7 +382,7 @@ cmd_teardown() {
     done
 
     # Delete DynamoDB tables
-    for TABLE in "$DYNAMO_FILE_TABLE" "$DYNAMO_THING_TABLE"; do
+    for TABLE in "${DYNAMO_TABLES[@]}"; do
         if table_exists "$TABLE"; then
             info "Deleting DynamoDB table: $TABLE..."
             aws dynamodb delete-table --table-name "$TABLE" --region "$REGION" >/dev/null
@@ -344,7 +392,7 @@ cmd_teardown() {
         fi
     done
 
-    # Delete EventBridge rules created against sandbox sources
+    # Delete EventBridge rules
     for RULE in \
         "nzshm-backup-toshi-daily" "nzshm-backup-toshi-weekly" \
         "nzshm-backup-ths-daily"   "nzshm-backup-ths-weekly" \
@@ -352,11 +400,11 @@ cmd_teardown() {
         RULE_EXISTS=$(aws events list-rules --name-prefix "$RULE" --region "$REGION" \
             --query "Rules[?Name=='$RULE'].Name" --output text 2>/dev/null || echo "")
         if [ -n "$RULE_EXISTS" ]; then
-            info "Removing EventBridge targets + rule: $RULE"
-            # Remove targets first
+            info "Removing targets + rule: $RULE"
             TARGET_IDS=$(aws events list-targets-by-rule --rule "$RULE" --region "$REGION" \
                 --query "Targets[].Id" --output text 2>/dev/null || echo "")
             if [ -n "$TARGET_IDS" ]; then
+                # shellcheck disable=SC2086
                 aws events remove-targets --rule "$RULE" --region "$REGION" \
                     --ids $TARGET_IDS >/dev/null 2>/dev/null || true
             fi
@@ -365,7 +413,6 @@ cmd_teardown() {
         fi
     done
 
-    # Remove generated config
     if [ -f "$CONFIG_OUT" ]; then
         rm "$CONFIG_OUT"
         ok "Removed: $CONFIG_OUT"
@@ -385,9 +432,11 @@ case "${1:-help}" in
     *)
         echo "Usage: $0 {setup|status|teardown}"
         echo
-        echo "  setup     Create sandbox S3 buckets + DynamoDB tables + backup-config.sandbox.yaml"
-        echo "  status    Show state of sandbox resources and backup output buckets"
-        echo "  teardown  Delete all sandbox resources (with confirmation)"
+        echo "  setup     Create sandbox resources + backup-config.sandbox.yaml"
+        echo "  status    Show state of all sandbox + backup output resources"
+        echo "  teardown  Delete all sandbox resources (confirms before deleting)"
+        echo
+        echo "Sandbox account: $SANDBOX_ACCOUNT"
         exit 1
         ;;
 esac

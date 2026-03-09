@@ -1,10 +1,10 @@
 # NSHM Backup Configuration Template
-# Copy this file to backup-config.yaml and customize for your environment
+# Copy to backup-config.yaml and fill in ACCOUNT_ID (prod: 461564345538)
 
 general:
   region: ap-southeast-2
   environment: production
-  lambda_arn: null
+  lambda_arn: null   # Set after first 'serverless deploy'
   tags:
     Project: NSHM
     ManagedBy: backup-cli
@@ -14,18 +14,18 @@ sources:
   toshi:
     display_name: "ToshiAPI"
     s3_buckets:
-      - arn:aws:s3:::ToshiAPI
+      - arn:aws:s3:::nzshm22-toshi-api-prod
     dynamodb_tables:
-      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-FileTable
-      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-ThingTable
-    s3_backup_bucket_suffix: -backup
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiFileObject-PROD
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiIdentity-PROD
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiTableObject-PROD
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiThingObject-PROD
     dynamodb_export_format: DYNAMODB_JSON
 
   ths:
     display_name: "THS_dataset_prod"
     s3_buckets:
-      - arn:aws:s3:::THS_dataset_prod
-    s3_backup_bucket_suffix: -backup
+      - arn:aws:s3:::ths-dataset-prod
     dynamodb_export_format: DYNAMODB_JSON
 
 retention:
@@ -73,7 +73,7 @@ testing:
     enabled: true
     day: first-monday
     time: "09:00"
-    table: ToshiAPI-FileTable
+    table: ToshiFileObject-PROD
   quarterly_full_drill:
     enabled: true
     months:
