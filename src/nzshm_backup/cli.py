@@ -1,8 +1,11 @@
 """Main CLI entry point for NSHM Backup Solution."""
 
-import typer
 from typing import Optional
+
+import typer
+
 from nzshm_backup import __version__
+from nzshm_backup.state import AppState, _state
 
 app = typer.Typer(
     name="backup",
@@ -11,28 +14,33 @@ app = typer.Typer(
 Examples:
 
     $ backup schedule show
-    
+
     $ backup run --source toshi --dry-run
-    
+
     $ backup restore list --limit 10
-    
+
     $ backup status --output json
     """,
+    invoke_without_command=True,
 )
 
 
 @app.callback()
 def main(
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose output"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would be done without executing"
-    ),
-    output: str = typer.Option("text", "--output", "-o", help="Output format"),
+    ctx: typer.Context,
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    output: str = typer.Option("text", "--output", "-o", help="Output format (text, json, yaml)"),
+    version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ):
     """NSHM Backup Solution - Manage AWS backups for ToshiAPI and THS datasets."""
-    pass
+    if version:
+        typer.echo(f"backup {__version__}")
+        raise typer.Exit()
+
+    _state.verbose = verbose
+    _state.dry_run = dry_run
+    _state.output = output
 
 
 # Import and register subcommand groups
