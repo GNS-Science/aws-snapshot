@@ -30,7 +30,7 @@ sources:
 
 retention:
   hot_days: 30
-  warm_days: 90
+  warm_days: 120  # must be >= hot_days + 90 (AWS constraint: GLACIER_IR → DEEP_ARCHIVE gap)
   cold_days: 365
   max_age_days: 365
 
