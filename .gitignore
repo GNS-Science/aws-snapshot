@@ -6,7 +6,7 @@ __pycache__/
 dist/
 build/
 site/
-.llm/
+.llm/.session
 .env
 .mypy_cache/
 .ruff_cache/
