@@ -1,7 +1,8 @@
 """Testing and validation commands."""
 
+from typing import Literal
+
 import typer
-from typing import Optional, Literal
 
 app = typer.Typer()
 
@@ -9,9 +10,7 @@ app = typer.Typer()
 @app.command("restore")
 def test_restore(
     latest: bool = typer.Option(False, help="Test restore from latest backup"),
-    validate_integrity: bool = typer.Option(
-        False, help="Validate restored data integrity"
-    ),
+    validate_integrity: bool = typer.Option(False, help="Validate restored data integrity"),
     report_only: bool = typer.Option(False, help="Show test plan without executing"),
 ):
     """Run automated restore test."""
@@ -23,9 +22,7 @@ def test_restore(
 
 @app.command("integrity")
 def test_integrity(
-    date: Optional[str] = typer.Option(
-        None, help="Backup date to validate (YYYY-MM-DD)"
-    ),
+    date: str | None = typer.Option(None, help="Backup date to validate (YYYY-MM-DD)"),
     detail: bool = typer.Option(False, help="Show detailed validation results"),
 ):
     """Validate backup integrity (checksums, object counts)."""
@@ -35,9 +32,7 @@ def test_integrity(
 @app.command("full-drill")
 def test_full_drill(
     source: Literal["toshi", "ths"] = typer.Option(..., help="Data source to test"),
-    isolated_environment: bool = typer.Option(
-        False, help="Restore to isolated environment"
-    ),
+    isolated_environment: bool = typer.Option(False, help="Restore to isolated environment"),
 ):
     """Run quarterly full disaster recovery drill."""
     typer.echo(f"Full DR drill - coming soon for {source}")

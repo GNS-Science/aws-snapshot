@@ -1,0 +1,145 @@
+"""Pydantic models for backup configuration."""
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class RetentionConfig(BaseModel):
+    """Retention policy configuration."""
+
+    hot_days: int = 30
+    warm_days: int = 90
+    cold_days: int = 365
+    max_age_days: int = 365
+
+
+class RestoreConfig(BaseModel):
+    """Restore operation configuration."""
+
+    default_destination_type: Literal["temporary", "permanent"] = "temporary"
+    temporary_retention_days: int = 7
+    dynamodb_always_new_table: bool = True
+    auto_approve_threshold: float = 100.0  # NZD
+    dual_approval_threshold: float = 500.0  # NZD
+
+
+class SlackConfig(BaseModel):
+    """Slack notification configuration."""
+
+    enabled: bool = True
+    webhook_url_secret: str = "backup-slack-webhook"
+    channel: str = "#nsdm-backups"
+    notify_on: list[
+        Literal[
+            "backup_success",
+            "backup_failure",
+            "restore_initiated",
+            "restore_completed",
+            "test_failure",
+        ]
+    ] = [
+        "backup_success",
+        "backup_failure",
+        "restore_initiated",
+        "restore_completed",
+    ]
+
+
+class SESConfig(BaseModel):
+    """SES email notification configuration."""
+
+    enabled: bool = True
+    source_email: str = "noreply-backup@example.com"
+    recipients: list[str] = []
+
+
+class NotificationConfig(BaseModel):
+    """Notification configuration."""
+
+    ses: SESConfig = Field(default_factory=SESConfig)
+    slack: SlackConfig | None = None
+
+    def model_post_init(self, __context) -> None:
+        if self.slack is None:
+            self.slack = SlackConfig()
+
+
+class CostTrackingConfig(BaseModel):
+    """Cost tracking configuration."""
+
+    enabled: bool = True
+    budget_alerts: bool = True
+    monthly_budget: float = 700.0  # NZD
+    export_to_s3: str | None = None
+
+
+class TestingConfig(BaseModel):
+    """Automated testing configuration."""
+
+    class WeeklyTest(BaseModel):
+        enabled: bool = True
+        day: str = "wednesday"
+        time: str = "10:00"
+        sample_size_mb: int = 100
+
+    class MonthlyRestore(BaseModel):
+        enabled: bool = True
+        day: str = "first-monday"
+        time: str = "09:00"
+        table: str = "ToshiAPI-FileTable"
+
+    class QuarterlyDrill(BaseModel):
+        enabled: bool = True
+        months: list[Literal["january", "april", "july", "october"]] = [
+            "january",
+            "april",
+            "july",
+            "october",
+        ]
+        day: int = 15
+        isolated_environment: bool = True
+
+    weekly_small_test: WeeklyTest = Field(default_factory=lambda: TestingConfig.WeeklyTest())
+    monthly_table_restore: MonthlyRestore = Field(
+        default_factory=lambda: TestingConfig.MonthlyRestore()
+    )
+    quarterly_full_drill: QuarterlyDrill = Field(
+        default_factory=lambda: TestingConfig.QuarterlyDrill()
+    )
+
+
+class SourceConfig(BaseModel):
+    """Configuration for a single backup source."""
+
+    display_name: str = Field(..., description="Human-readable name")
+    s3_buckets: list[str] = Field(default_factory=list, description="S3 bucket ARNs")
+    dynamodb_tables: list[str] = Field(default_factory=list, description="DynamoDB table ARNs")
+    s3_backup_bucket_suffix: str = "-backup"
+
+    def get_backup_bucket_name(self, bucket_arn: str, region: str, account_id: str) -> str:
+        """Generate globally unique backup bucket name from source bucket ARN."""
+        bucket_name = bucket_arn.split(":")[-1]
+        return f"{bucket_name}-backup-{region}-{account_id}"
+
+
+class GeneralConfig(BaseModel):
+    """General configuration."""
+
+    region: Literal["ap-southeast-2"] = "ap-southeast-2"
+    environment: Literal["production", "staging", "development"] = "production"
+    tags: dict[str, str] = Field(
+        default_factory=lambda: {"Project": "NSHM", "ManagedBy": "backup-cli"}
+    )
+
+
+class ConfigModel(BaseModel):
+    """Root configuration model."""
+
+    general: GeneralConfig = Field(default_factory=lambda: GeneralConfig())
+    sources: dict[str, SourceConfig]
+    retention: RetentionConfig = Field(default_factory=lambda: RetentionConfig())
+    restore: RestoreConfig = Field(default_factory=lambda: RestoreConfig())
+    notifications: NotificationConfig = Field(default_factory=lambda: NotificationConfig())
+    cost_tracking: CostTrackingConfig = Field(default_factory=lambda: CostTrackingConfig())
+    testing: TestingConfig = Field(default_factory=lambda: TestingConfig())

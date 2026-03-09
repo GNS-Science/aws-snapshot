@@ -1,19 +1,16 @@
 """Status command - current backup state."""
 
+from typing import Literal
+
 import typer
-from typing import Optional, Literal
 
 app = typer.Typer()
 
 
 @app.command()
 def status(
-    source: Literal["toshi", "ths", "all"] = typer.Option(
-        "all", help="Data source to check"
-    ),
-    output: Literal["text", "json", "yaml"] = typer.Option(
-        "text", help="Output format"
-    ),
+    source: Literal["toshi", "ths", "all"] = typer.Option("all", help="Data source to check"),
+    output: Literal["text", "json", "yaml"] = typer.Option("text", help="Output format"),
 ):
     """Show current backup status.
 

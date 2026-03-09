@@ -1,11 +1,9 @@
 """Main CLI entry point for NSHM Backup Solution."""
 
-from typing import Optional
-
 import typer
 
 from nzshm_backup import __version__
-from nzshm_backup.state import AppState, _state
+from nzshm_backup.state import _state
 
 app = typer.Typer(
     name="backup",
@@ -29,7 +27,9 @@ Examples:
 def main(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
     output: str = typer.Option("text", "--output", "-o", help="Output format (text, json, yaml)"),
     version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ):
@@ -43,15 +43,15 @@ def main(
     _state.output = output
 
 
-# Import and register subcommand groups
-from nzshm_backup.commands.schedule import app as schedule_app
-from nzshm_backup.commands.run_backup import app as run_app
-from nzshm_backup.commands.restore import app as restore_app
-from nzshm_backup.commands.test import app as test_app
-from nzshm_backup.commands.status import app as status_app
-from nzshm_backup.commands.report import app as report_app
-from nzshm_backup.commands.costs import app as costs_app
-from nzshm_backup.commands.config import app as config_app
+# Import and register subcommand groups (must be after main() to avoid circular imports)
+from nzshm_backup.commands.config import app as config_app  # noqa: E402
+from nzshm_backup.commands.costs import app as costs_app  # noqa: E402
+from nzshm_backup.commands.report import app as report_app  # noqa: E402
+from nzshm_backup.commands.restore import app as restore_app  # noqa: E402
+from nzshm_backup.commands.run_backup import app as run_app  # noqa: E402
+from nzshm_backup.commands.schedule import app as schedule_app  # noqa: E402
+from nzshm_backup.commands.status import app as status_app  # noqa: E402
+from nzshm_backup.commands.test import app as test_app  # noqa: E402
 
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")
 app.add_typer(run_app, name="run", help="Execute manual backup.")

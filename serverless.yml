@@ -1,0 +1,72 @@
+service: nzshm-backup
+
+frameworkVersion: "4"
+
+provider:
+  name: aws
+  runtime: python3.10
+  region: ap-southeast-2
+  memorySize: 1024
+  timeout: 900
+  environment:
+    BACKUP_CONFIG: ${file(backup-config.yaml):}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+            - s3:GetObject
+            - s3:PutObject
+            - s3:CopyObject
+            - s3:CreateBucket
+            - s3:PutBucketLifecycleConfiguration
+            - s3:PutBucketPolicy
+            - s3:PutBucketTagging
+          Resource:
+            - "*"
+        - Effect: Allow
+          Action:
+            - sts:GetCallerIdentity
+          Resource: "*"
+        # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
+
+functions:
+  backup:
+    handler: nzshm_backup.lambda_handler.handler
+    description: Backup orchestration for NSHM datasets
+    events:
+      - eventBridge:
+          enabled: false
+          schedule: rate(7 days)
+          description: Weekly backup trigger
+          input:
+            source: "all"
+            trigger_type: "scheduled"
+      - eventBridge:
+          enabled: false
+          schedule: rate(1 day)
+          description: Daily backup for active experiment mode
+          input:
+            source: "all"
+            trigger_type: "scheduled"
+            full_sync: false
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: false
+    usePoetry: true
+    slim: true
+
+package:
+  individually: true
+  patterns:
+    - "!**.git/**"
+    - "!**.pytest_cache/**"
+    - "!**.mypy_cache/**"
+    - "!**tests/**"
+    - "!**docs/**"
+    - "!**.venv/**"

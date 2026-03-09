@@ -20,9 +20,7 @@ def report(
 
 @app.command()
 def compliance(
-    output_format: Literal["html", "pdf"] = typer.Option(
-        "pdf", "--format", help="Output format"
-    ),
+    output_format: Literal["html", "pdf"] = typer.Option("pdf", "--format", help="Output format"),
 ):
     """Generate compliance report for audit purposes."""
     typer.echo(f"Compliance report - coming soon (format: {output_format})")
