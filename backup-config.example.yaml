@@ -1,0 +1,82 @@
+# NSHM Backup Configuration Template
+# Copy this file to backup-config.yaml and customize for your environment
+
+general:
+  region: ap-southeast-2
+  environment: production
+  tags:
+    Project: NSHM
+    ManagedBy: backup-cli
+    CostCenter: GNS-Science
+
+sources:
+  toshi:
+    display_name: "ToshiAPI"
+    s3_buckets:
+      - arn:aws:s3:::ToshiAPI
+    dynamodb_tables:
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-FileTable
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-ThingTable
+    s3_backup_bucket_suffix: -backup
+
+  ths:
+    display_name: "THS_dataset_prod"
+    s3_buckets:
+      - arn:aws:s3:::THS_dataset_prod
+    s3_backup_bucket_suffix: -backup
+
+retention:
+  hot_days: 30
+  warm_days: 90
+  cold_days: 365
+  max_age_days: 365
+
+restore:
+  default_destination_type: temporary
+  temporary_retention_days: 7
+  dynamodb_always_new_table: true
+  auto_approve_threshold: 100
+  dual_approval_threshold: 500
+
+notifications:
+  ses:
+    enabled: true
+    source_email: noreply-backup@example.com
+    recipients:
+      - admin@example.com
+  slack:
+    enabled: false
+    webhook_url_secret: backup-slack-webhook
+    channel: "#nsdm-backups"
+    notify_on:
+      - backup_success
+      - backup_failure
+      - restore_initiated
+      - restore_completed
+
+cost_tracking:
+  enabled: true
+  budget_alerts: true
+  monthly_budget: 700
+  export_to_s3: null
+
+testing:
+  weekly_small_test:
+    enabled: true
+    day: wednesday
+    time: "10:00"
+    sample_size_mb: 100
+  monthly_table_restore:
+    enabled: true
+    day: first-monday
+    time: "09:00"
+    table: ToshiAPI-FileTable
+  quarterly_full_drill:
+    enabled: true
+    months:
+      - january
+      - april
+      - july
+      - october
+    day: 15
+    isolated_environment: true

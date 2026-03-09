@@ -1,11 +1,9 @@
 """Shared pytest fixtures for nzshm-backup tests."""
 
-import pytest
 import boto3
+import pytest
 from moto import mock_aws
 from typer.testing import CliRunner
-
-from nzshm_backup.cli import app
 
 
 @pytest.fixture

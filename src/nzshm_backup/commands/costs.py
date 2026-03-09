@@ -1,6 +1,6 @@
 """Cost management commands."""
 
-from typing import Literal, Optional
+from typing import Literal
 
 import typer
 
@@ -37,9 +37,7 @@ def breakdown(
 @app.command()
 def export(
     output_format: Literal["csv", "json"] = typer.Option("csv", "--format", help="Export format"),
-    output_to: Optional[str] = typer.Option(
-        None, help="S3 path or local directory for export"
-    ),
+    output_to: str | None = typer.Option(None, help="S3 path or local directory for export"),
 ):
     """Export cost data for finance systems."""
     typer.echo(f"Cost export - coming soon (format: {output_format})")

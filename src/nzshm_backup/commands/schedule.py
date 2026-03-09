@@ -1,7 +1,8 @@
 """Schedule management commands."""
 
+from typing import Literal
+
 import typer
-from typing import Optional, Literal
 
 app = typer.Typer()
 

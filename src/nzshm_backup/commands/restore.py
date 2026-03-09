@@ -1,31 +1,26 @@
 """Restore operations commands."""
 
+from typing import Literal
+
 import typer
-from typing import Optional, Literal
 
 app = typer.Typer()
 
 
 @app.command("list")
 def list_restores(
-    source: Optional[Literal["toshi", "ths"]] = typer.Option(
-        None, help="Filter by source"
-    ),
+    source: Literal["toshi", "ths"] | None = typer.Option(None, help="Filter by source"),
     limit: int = typer.Option(10, help="Number of restore points to show"),
 ):
     """List available restore points."""
-    typer.echo(
-        f"Listing restore points - coming soon (source: {source}, limit: {limit})"
-    )
+    typer.echo(f"Listing restore points - coming soon (source: {source}, limit: {limit})")
 
 
 @app.command("preview")
 def preview(
     date: str = typer.Option(..., help="Backup date to restore (YYYY-MM-DD)"),
-    source: Optional[Literal["toshi", "ths"]] = typer.Option(None, help="Data source"),
-    target_bucket: Optional[str] = typer.Option(
-        None, help="Destination bucket for restore"
-    ),
+    source: Literal["toshi", "ths"] | None = typer.Option(None, help="Data source"),
+    target_bucket: str | None = typer.Option(None, help="Destination bucket for restore"),
 ):
     """Preview restore operation with cost estimate."""
     typer.echo(f"Restore preview - coming soon: {date} for {source}")
@@ -34,12 +29,10 @@ def preview(
 @app.command("run")
 def run_restore(
     date: str = typer.Option(..., help="Backup date to restore (YYYY-MM-DD)"),
-    source: Optional[Literal["toshi", "ths"]] = typer.Option(None, help="Data source"),
-    target_bucket: Optional[str] = typer.Option(
-        None, help="Destination bucket for restore"
-    ),
-    table: Optional[str] = typer.Option(None, help="DynamoDB table to restore"),
-    prefix: Optional[str] = typer.Option(None, help="S3 prefix to restore (subset)"),
+    source: Literal["toshi", "ths"] | None = typer.Option(None, help="Data source"),
+    target_bucket: str | None = typer.Option(None, help="Destination bucket for restore"),
+    table: str | None = typer.Option(None, help="DynamoDB table to restore"),
+    prefix: str | None = typer.Option(None, help="S3 prefix to restore (subset)"),
 ):
     """Execute restore operation."""
     typer.echo(f"Restore execution - coming soon: {date}")
