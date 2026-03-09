@@ -1,16 +1,8 @@
 # NSHM Backup Solution
 
 AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
-
-## Features
-
-- **Configuration Management**: YAML-based config with alias→ARN mapping
-- **S3 Backup**: Incremental sync with lifecycle policies (Standard→Glacier→Deep Archive)
-- **Automated Scheduling**: EventBridge rules for weekly/daily backups (via Serverless Framework)
-- **Restore Operations**: Preview and execute restores with cost estimation
-- **Automated Testing**: Weekly/monthly/quarterly restore validation
-- **Cost Tracking**: Real-time cost monitoring and reporting
-- **Notifications**: SES email and Slack integration
+Replaces AWS Backup (~$1,700 NZD/month) with S3 Glacier lifecycle policies
+and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 
 ## Implementation Status
 
@@ -18,104 +10,217 @@ AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
 |-------|--------|-------------|
 | Phase 1 Step 1 | ✅ Complete | CLI skeleton with Typer |
 | Phase 1 Step 2 | ✅ Complete | Config system + S3 backup operations |
-| Phase 2 | 🔄 Coming Soon | DynamoDB export + EventBridge scheduling |
-| Phase 3 | 🔄 Coming Soon | Notifications + cost reporting |
-| Phase 4 | 🔄 Coming Soon | Restore functionality |
-| Phase 5 | 🔄 Coming Soon | Testing + validation |
+| Phase 2        | ✅ Complete | DynamoDB PITR export + EventBridge scheduling |
+| Phase 3        | 🔄 Planned  | Notifications (SES/Slack) + cost reporting |
+| Phase 4        | 🔄 Planned  | Restore functionality |
+| Phase 5        | 🔄 Planned  | Automated testing + validation |
+| Phase 6        | 🔄 Planned  | Parallel run + cutover from AWS Backup |
+
+**Tests:** 48 passing · **Coverage:** 72% · **Lint:** ruff + black clean
+
+---
+
+## Features (implemented)
+
+- **Configuration**: YAML config with Pydantic validation, alias→ARN mapping
+- **S3 Backup**: Incremental sync with 3-tier lifecycle policies (Standard → Glacier Instant → Deep Archive)
+- **DynamoDB Backup**: Point-in-Time export to S3, idempotent export bucket setup
+- **EventBridge Scheduling**: Create/enable/disable weekly or daily backup rules via CLI
+- **Lambda Handler**: EventBridge-triggered backup orchestration (S3 + DynamoDB)
+- **Dry-run mode**: All destructive operations support `--dry-run`
+- **JSON output**: `--output json` for scripting
+
+---
 
 ## Installation
 
 ```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install in development mode
-pip install -e .
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"   # includes pytest, moto, ruff, black, mypy
 ```
+
+The `backup` command is registered as a console script and available immediately after install.
+
+---
 
 ## Usage
 
+### Global flags
+
 ```bash
-# Show help
 backup --help
-
-# Configuration
-backup config show                  # Show full configuration
-backup config validate              # Validate config file
-backup config show retention.days   # Show specific config key
-
-# Run backup
-backup run --source toshi           # Backup ToshiAPI source
-backup run --source ths             # Backup THS source
-backup run --all                    # Backup all sources
-backup run --dry-run                # Preview backup without executing
-backup run --full-sync              # Force full copy (not incremental)
-
-# Status & reporting
-backup status                       # Show backup status
-backup costs report --period last-month
+backup --dry-run run --source toshi     # Simulate without executing
+backup --verbose run --source all       # Detailed logging
+backup --output json schedule show      # Machine-readable output
 ```
 
-## Documentation
+### Configuration
 
-- [Design Plan](docs/backup-solution-plan.md) - Complete architecture and cost analysis
-- [CLI Reference](docs/cli-reference.md) - Full command reference
-- [Configuration](docs/getting-started/configuration.md) - Config file schema and examples
+```bash
+backup config show                      # Display full loaded config
+backup config validate                  # Validate backup-config.yaml
+backup config show --key retention      # Show a specific section
+```
+
+### Run backup
+
+```bash
+backup run --source toshi               # S3 sync + DynamoDB PITR export for toshi
+backup run --source ths                 # S3 sync for ths
+backup run --source all                 # All sources
+backup run --source toshi --full-sync   # Force full copy (skip ETag check)
+backup --dry-run run --source toshi     # Preview without executing
+```
+
+### Schedule management
+
+```bash
+backup schedule show                    # List EventBridge rules (nzshm-backup-* prefix)
+
+# Times are UTC. NZST = UTC+12, NZDT = UTC+13.
+backup schedule set --source toshi --frequency weekly --time 14:00   # Sun 02:00 NZST
+backup schedule set --source toshi --frequency daily  --time 13:00   # 01:00 NZST
+
+backup schedule enable toshi            # Enable both daily + weekly rules
+backup schedule enable toshi --frequency weekly   # Enable weekly only
+backup schedule disable toshi           # Disable both rules
+```
+
+### Status & reporting (stubs — Phase 3)
+
+```bash
+backup status
+backup report --period 30d
+backup costs predict
+```
+
+---
 
 ## Configuration
 
-Copy `backup-config.example.yaml` to `backup-config.yaml` and customize:
+Copy `backup-config.example.yaml` to `backup-config.yaml` and fill in your account ID and resource names:
 
 ```yaml
 general:
   region: ap-southeast-2
   environment: production
+  lambda_arn: null          # Set after first serverless deploy
 
 sources:
   toshi:
     display_name: "ToshiAPI"
     s3_buckets:
-      - arn:aws:s3:::ToshiAPI
-    dynamodb_tables: []  # Phase 2
+      - arn:aws:s3:::YOUR-TOSHI-BUCKET-NAME
+    dynamodb_tables:
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-FileTable
+      - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiAPI-ThingTable
+    dynamodb_export_format: DYNAMODB_JSON
+
+  ths:
+    display_name: "THS_dataset_prod"
+    s3_buckets:
+      - arn:aws:s3:::YOUR-THS-BUCKET-NAME
+    dynamodb_export_format: DYNAMODB_JSON
 
 retention:
-  hot_days: 30    # S3 Standard
-  warm_days: 90   # Glacier Instant
-  cold_days: 365  # Deep Archive
+  hot_days: 30      # S3 Standard
+  warm_days: 90     # Glacier Instant
+  cold_days: 365    # Deep Archive
   max_age_days: 365
+
+restore:
+  auto_approve_threshold: 100    # NZD — auto-approve below this
+  dual_approval_threshold: 500   # NZD — two approvers above this
 ```
+
+---
 
 ## Deployment
 
-### Serverless Framework
+### Prerequisites
 
 ```bash
-# Install serverless
 npm install -g serverless
-
-# Deploy Lambda
-serverless deploy
-
-# Deploy with EventBridge schedules enabled
-serverless deploy --stage prod
+pip install -e .
+cp backup-config.example.yaml backup-config.yaml   # edit with real values
 ```
+
+### Deploy Lambda
+
+```bash
+serverless deploy                  # Deploy to AWS
+serverless deploy --stage prod     # Production stage
+
+# After deploy, update lambda_arn in backup-config.yaml, then re-deploy
+# to wire up EventBridge targets.
+```
+
+### Set schedules after deploy
+
+```bash
+backup schedule set --source toshi --frequency weekly --time 14:00
+backup schedule set --source ths   --frequency weekly --time 14:00
+backup schedule show
+```
+
+---
+
+## Sandbox testing
+
+See [`scripts/sandbox_setup.sh`](scripts/sandbox_setup.sh) — creates lightweight source
+resources (S3 buckets + DynamoDB tables with PITR, seeded with sample data) in a sandbox
+AWS account so you can run `backup run` and `backup schedule` against real AWS without
+touching production.
+
+```bash
+# One-time setup
+scripts/sandbox_setup.sh setup
+
+# Run backup against sandbox resources
+backup run --source toshi
+backup run --source all --dry-run
+
+# Tear down all sandbox resources when done
+scripts/sandbox_setup.sh teardown
+```
+
+See [`backup-config.sandbox.yaml`](backup-config.sandbox.yaml) for the matching config.
+
+---
 
 ## Development
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Format code
-black src/ tests/
-
-# Lint
-ruff check src/ tests/
+pytest                    # All tests with coverage
+pytest tests/test_foo.py  # Single file
+ruff check src/ tests/    # Lint
+black src/ tests/         # Format
+mypy src/                 # Type check
 ```
+
+---
+
+## Architecture
+
+```
+EventBridge (cron) → Lambda (nzshm-backup)
+                         ├── S3 sync → backup bucket (Standard → Glacier → Deep Archive)
+                         └── DynamoDB PITR export → export bucket (same lifecycle)
+```
+
+**Backup bucket naming:**
+- S3: `{source-bucket}-backup-{region}-{account_id}`
+- DynamoDB export: `nzshm-dynamo-backup-{source}-{region}-{account_id}`
+
+**IAM:** Lambda has no `s3:DeleteObject` permission. Lifecycle expiration still fires.
+DynamoDB restores always go to a new table (never overwrite in-place).
+
+---
+
+## Documentation
+
+- [Design Plan & Cost Analysis](docs/backup-solution-plan.md)
+- [Typer rationale](docs/TYPER_RATIONALE.md)
 
 ## License
 
