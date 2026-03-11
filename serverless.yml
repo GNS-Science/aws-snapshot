@@ -45,6 +45,16 @@ provider:
             - "arn:aws:s3:::nzshm-dynamo-backup-*/*"
         - Effect: Allow
           Action:
+            - s3control:CreateJob
+            - s3control:DescribeJob
+            - s3control:ListJobs
+          Resource: "*"  # s3control does not support resource-level ARN scoping
+        - Effect: Allow
+          Action:
+            - iam:PassRole
+          Resource: ${env:S3_BATCH_ROLE_ARN, "arn:aws:iam::*:role/nzshm-backup-batch-role"}
+        - Effect: Allow
+          Action:
             - events:PutRule
             - events:PutTargets
             - events:ListRules

@@ -9,6 +9,7 @@ from nzshm_backup.config import load_config
 from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
 from nzshm_backup.logging_config import setup_logging
 from nzshm_backup.s3_backup import backup_source
+from nzshm_backup.s3_batch import batch_backup_source
 from nzshm_backup.state import get_state
 
 app = typer.Typer()
@@ -71,29 +72,48 @@ def run(
             logger.info(f"Backing up {bucket_name} → {backup_bucket_name}")
 
             try:
-                result = backup_source(
-                    session=session,
-                    source_bucket=bucket_arn,
-                    backup_bucket_name=backup_bucket_name,
-                    dry_run=state.dry_run,
-                    full_sync=full_sync,
-                )
-
-                total_results["objects_copied"] += result.objects_copied
-                total_results["bytes_transferred"] += result.bytes_transferred
-                total_results["objects_skipped"] += result.objects_skipped
-
-                if state.dry_run:
-                    logger.info(
-                        f"[DRY RUN] Would copy {result.objects_copied} objects "
-                        f"({result.bytes_transferred} bytes)"
+                if source_config.use_s3_batch:
+                    batch_result = batch_backup_source(
+                        session=session,
+                        source_bucket=bucket_name,
+                        backup_bucket=backup_bucket_name,
+                        batch_role_arn=config.general.s3_batch_role_arn,
+                        account_id=account_id,
+                        dry_run=state.dry_run,
+                        full_sync=full_sync,
                     )
+                    prefix = "[DRY RUN] " if state.dry_run else ""
+                    if batch_result.status == "SKIPPED":
+                        typer.echo(f"{prefix}Batch: nothing to copy for {bucket_name}")
+                    else:
+                        typer.echo(
+                            f"{prefix}Batch job submitted: {batch_result.job_id} "
+                            f"({batch_result.objects_in_manifest} objects)"
+                        )
                 else:
-                    logger.info(
-                        f"Copied {result.objects_copied} objects "
-                        f"({result.bytes_transferred / (1024 * 1024):.2f} MB) "
-                        f"in {result.duration_seconds:.1f}s"
+                    result = backup_source(
+                        session=session,
+                        source_bucket=bucket_arn,
+                        backup_bucket_name=backup_bucket_name,
+                        dry_run=state.dry_run,
+                        full_sync=full_sync,
                     )
+
+                    total_results["objects_copied"] += result.objects_copied
+                    total_results["bytes_transferred"] += result.bytes_transferred
+                    total_results["objects_skipped"] += result.objects_skipped
+
+                    if state.dry_run:
+                        logger.info(
+                            f"[DRY RUN] Would copy {result.objects_copied} objects "
+                            f"({result.bytes_transferred} bytes)"
+                        )
+                    else:
+                        logger.info(
+                            f"Copied {result.objects_copied} objects "
+                            f"({result.bytes_transferred / (1024 * 1024):.2f} MB) "
+                            f"in {result.duration_seconds:.1f}s"
+                        )
 
             except Exception as e:
                 logger.error(f"Backup failed for {bucket_name}: {e}")

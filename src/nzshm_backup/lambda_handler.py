@@ -11,6 +11,7 @@ from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, ex
 from nzshm_backup.lambda_schema import BackupTask
 from nzshm_backup.logging_config import setup_logging
 from nzshm_backup.s3_backup import backup_source
+from nzshm_backup.s3_batch import batch_backup_source
 
 logger = setup_logging(json_format=True)
 
@@ -82,22 +83,44 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 logger.info(f"Backing up {bucket_name} → {backup_bucket_name}")
 
                 try:
-                    result = backup_source(
-                        session=session,
-                        source_bucket=bucket_arn,
-                        backup_bucket_name=backup_bucket_name,
-                        dry_run=task.dry_run,
-                        full_sync=task.full_sync,
-                    )
-
-                    results[bucket_name] = {
-                        "status": "success",
-                        "objects_copied": result.objects_copied,
-                        "bytes_transferred": result.bytes_transferred,
-                        "objects_skipped": result.objects_skipped,
-                        "duration_seconds": result.duration_seconds,
-                        "dry_run": result.dry_run,
-                    }
+                    if source_config.use_s3_batch:
+                        batch_result = batch_backup_source(
+                            session=session,
+                            source_bucket=bucket_name,
+                            backup_bucket=backup_bucket_name,
+                            batch_role_arn=config.general.s3_batch_role_arn,
+                            account_id=account_id,
+                            dry_run=task.dry_run,
+                            full_sync=task.full_sync,
+                        )
+                        logger.info(
+                            f"Batch job {batch_result.status}: "
+                            f"{batch_result.job_id} ({batch_result.objects_in_manifest} objects)"
+                        )
+                        results[bucket_name] = {
+                            "status": "success",
+                            "batch_job_id": batch_result.job_id,
+                            "batch_status": batch_result.status,
+                            "objects_in_manifest": batch_result.objects_in_manifest,
+                            "manifest_key": batch_result.manifest_key,
+                            "dry_run": batch_result.dry_run,
+                        }
+                    else:
+                        result = backup_source(
+                            session=session,
+                            source_bucket=bucket_arn,
+                            backup_bucket_name=backup_bucket_name,
+                            dry_run=task.dry_run,
+                            full_sync=task.full_sync,
+                        )
+                        results[bucket_name] = {
+                            "status": "success",
+                            "objects_copied": result.objects_copied,
+                            "bytes_transferred": result.bytes_transferred,
+                            "objects_skipped": result.objects_skipped,
+                            "duration_seconds": result.duration_seconds,
+                            "dry_run": result.dry_run,
+                        }
 
                 except Exception as e:
                     logger.error(f"Backup failed for {bucket_name}: {e}")
