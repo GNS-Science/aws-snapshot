@@ -333,11 +333,20 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Test suite: 35 tests, 71% coverage
 - [x] All lint checks passing (ruff + black)
 
-### Phase 2: DynamoDB + Scheduling (Week 3)
-- [ ] DynamoDB export integration (PIT export to S3)
-- [ ] EventBridge scheduling rules
-- [ ] Lambda function deployment
-- [ ] IAM roles and policies
+### Phase 2: DynamoDB + Scheduling (Week 3) ✅ Complete
+
+- [x] DynamoDB export integration (PITR export to S3)
+- [x] EventBridge scheduling rules (`schedule add/remove`, `hourly`/`minutely` frequencies)
+- [x] Lambda function deployed and verified in sandbox (Serverless Framework v4)
+- [x] IAM roles and policies (s3control, iam:PassRole for S3 Batch)
+- [x] S3 Batch Operations for large buckets (`use_s3_batch` config flag, `s3_batch.py`)
+- [x] Manual vs scheduled backup conflict resolved (ManagedBy tag ownership check)
+- [x] Sandbox demo tooling (`scripts/sandbox_setup.sh`, `docs/sandbox-demo.md`)
+- [x] 69 tests passing
+
+**Remaining before first production run (toshi):**
+- [ ] Create S3 Batch IAM role in production account (`python scripts/create-batch-role.py`)
+- [ ] Set `s3_batch_role_arn` + `use_s3_batch: true` for toshi in production config
 
 ### Phase 3: Notifications + Reporting (Week 4)
 - [ ] SES email integration
@@ -362,8 +371,19 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [ ] Test result notifications
 
 ### Phase 6: Parallel Run + Cutover (Week 8-10)
-- [ ] Parallel run with AWS Backup (2-3 months)
-- [ ] Restore drill validation
+
+> **Strategy change:** Rather than first exercising the full restore lifecycle against
+> the critical Toshi/THS production data, we will run a complete backup→restore→validate
+> cycle on a **lower-criticality production project** first. This de-risks the restore
+> workflow (Phases 4–5) before touching NSHM production data.
+>
+> The target project for the restore demo has not yet been identified. Once confirmed,
+> update `backup-config.yaml` with its sources and run through Phases 4–5 against it.
+
+- [ ] Identify lower-criticality production project for restore lifecycle demo
+- [ ] Run full backup→restore→validate cycle on demo project (Phases 4–5)
+- [ ] Parallel run with AWS Backup (2-3 months) — toshi + ths
+- [ ] Restore drill validation against NSHM production data
 - [ ] Cost verification
 - [ ] Documentation
 - [ ] Cutover planning
@@ -551,6 +571,15 @@ testing:
 5. ✅ Serverless Framework configuration (serverless.yml)
 6. ✅ Lambda handler with BackupTask schema
 7. ✅ Test suite: 35 tests, 71% coverage
+
+**Phase 2 (Week 3):**
+1. ✅ DynamoDB PITR export to S3
+2. ✅ EventBridge scheduling (add/remove/enable/disable, weekly/daily/hourly/minutely)
+3. ✅ Lambda deployed and verified in sandbox (Serverless Framework v4, Docker pip, SSO credentials)
+4. ✅ S3 Batch Operations for large buckets (s3_batch.py, create-batch-role.py, 13 tests)
+5. ✅ Manual vs scheduled backup conflict resolved (ManagedBy tag)
+6. ✅ Sandbox demo tooling and guide
+7. ✅ Test suite: 69 tests passing
 
 ---
 
