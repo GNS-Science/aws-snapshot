@@ -71,6 +71,18 @@ def bucket_exists(s3_client, bucket: str) -> bool:
         raise
 
 
+def bucket_is_ours(s3_client, bucket: str) -> bool:
+    """Check if a bucket was created by this tool (has ManagedBy: nzshm-backup tag)."""
+    try:
+        tags = s3_client.get_bucket_tagging(Bucket=bucket)
+        tag_dict = {t["Key"]: t["Value"] for t in tags["TagSet"]}
+        return tag_dict.get("ManagedBy") == "nzshm-backup"
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchTagSet":
+            return False
+        raise
+
+
 def create_backup_bucket(
     s3_client,
     bucket_name: str,
@@ -310,9 +322,11 @@ def ensure_backup_bucket_ready(
         create_backup_bucket(s3_client, backup_bucket_name, region, account_id)
         apply_lifecycle_policy(s3_client, backup_bucket_name, lifecycle_config)
         apply_no_delete_policy(s3_client, backup_bucket_name)
+    elif bucket_is_ours(s3_client, backup_bucket_name):
+        logger.info(f"Backup bucket {backup_bucket_name} already exists (managed by nzshm-backup), proceeding")
     else:
-        logger.warning(f"Backup bucket {backup_bucket_name} already exists - ABEND")
-        raise ValueError(f"Backup bucket {backup_bucket_name} already exists - ABEND")
+        logger.warning(f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND")
+        raise ValueError(f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND")
 
 
 def backup_source(
