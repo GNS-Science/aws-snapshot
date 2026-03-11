@@ -1,7 +1,5 @@
 """Manual backup execution command."""
 
-from typing import Literal
-
 import boto3
 import typer
 
@@ -17,7 +15,7 @@ app = typer.Typer()
 
 @app.callback(invoke_without_command=True)
 def run(
-    source: Literal["toshi", "ths", "all"] = typer.Option("all", help="Data source to backup"),
+    source: str = typer.Option("all", help="Data source to backup, or 'all'"),
     full_sync: bool = typer.Option(
         False, "--full-sync", help="Force full copy instead of incremental"
     ),
@@ -38,6 +36,10 @@ def run(
     if source == "all":
         sources_to_backup = list(config.sources.keys())
     else:
+        if source not in config.sources:
+            valid = ", ".join(sorted(config.sources.keys()))
+            typer.echo(f"Error: unknown source '{source}'. Valid sources: {valid}", err=True)
+            raise typer.Exit(1)
         sources_to_backup = [source]
 
     region = config.general.region
