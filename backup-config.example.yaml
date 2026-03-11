@@ -39,8 +39,17 @@ sources:
     # Backup Lambda (345678901234) assumes prod_account_role_arn to read source data.
     # See docs/design/ACCOUNT_ISOLATION.md for IAM setup required.
     prod_account_role_arn: null  # arn:aws:iam::456789012345:role/nzshm-backup-reader
-    s3_buckets: []       # TODO: confirm bucket names in account 456789012345
-    dynamodb_tables: []  # TODO: confirm table ARNs in account 456789012345
+    s3_buckets:
+      # NOTE: this is a Serverless Framework deployment bucket (Lambda zips,
+      # CloudFormation templates) — confirm whether application data buckets
+      # also exist before treating this as the primary backup target.
+      - arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh
+    dynamodb_tables:
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-events
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-feedback
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-invite-codes
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-mission-events
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-mission-runs
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: false  # small scale — direct copy_object is fine
 
