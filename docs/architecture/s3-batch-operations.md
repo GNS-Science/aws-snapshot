@@ -180,6 +180,50 @@ and interactive CLI usage where immediate results are valuable.
 
 ---
 
+## Cost Impact
+
+S3 Batch Operations changes the API request cost profile compared to per-object `copy_object`.
+
+### API request costs
+
+| Scenario | `copy_object` | S3 Batch | Notes |
+|----------|--------------|----------|-------|
+| First run (8M objects) | ~$40 USD | ~$8.25 USD | $0.25/job + $1.00/M objects |
+| Weekly incremental (~8K objects) | ~$0.04 USD | ~$0.26 USD | $0.25 flat fee dominates |
+
+S3 Batch is ~5× cheaper on first run / full sync. Small incremental runs carry a
+$0.25/job overhead — ~$13 USD/year for weekly toshi runs, immaterial in the overall
+cost model.
+
+### Lambda execution cost
+
+At 1 GB memory:
+
+| Approach | Runtime | Approx cost/run |
+|----------|---------|----------------|
+| `copy_object` (first run) | times out at 900s (incomplete) | ~$0.013 wasted |
+| S3 Batch | ~160s (list only, then exits) | ~$0.002 |
+
+The timeout failure — wasted spend plus an incomplete backup — is the primary driver
+for adopting S3 Batch, not the per-run cost saving.
+
+### Manifest storage
+
+The manifest CSV is stored in `_manifests/` in the backup bucket and expires with
+the same lifecycle policy as other backup data.
+
+- Full-sync manifest: ~720 MB (8M rows × ~90 bytes)
+- Incremental manifest: much smaller (only changed/new objects)
+- Cost: ~$0.015 USD/month in Standard for 30 days, then Glacier IR — negligible
+
+### No change to
+
+- **Data storage costs** — same objects, same lifecycle tiers
+- **Data transfer** — S3-to-S3 copy within the same region is free regardless of mechanism
+- **DynamoDB costs** — unaffected
+
+---
+
 ## Risks
 
 **Memory — manifest CSV at 8M objects**
