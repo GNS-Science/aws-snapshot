@@ -96,14 +96,29 @@ is unchanged.
 
 The change is low-cost and low-risk to implement — the code surface is small
 and well-isolated. The main investment is the one-time IAM/bucket-policy setup
-in the prod account, which requires prod account access.
+in the source account, which requires source account access.
 
 Given the savings goal is replacing a $1,700/month service, doing this properly
-with account isolation is worth the engineering time. Suggested timing:
-**Phase 2.5 / early Phase 3** — after the demo validates core backup mechanics,
-before any production cutover.
+with account isolation is worth the engineering time.
+
+---
+
+## Implementation plan
+
+Cross-account backup will be implemented and validated against **Arkivalist**
+(account `456789012345`) before being applied to NSHM production (`210987654321`).
+
+| Account | Role | Status |
+|---------|------|--------|
+| `345678901234` (spike/backup) | Runs Lambda, holds backup buckets | Active |
+| `456789012345` (Arkivalist) | Cross-account source — restore lifecycle demo | **Next target** |
+| `210987654321` (NSHM production) | Cross-account source — toshi + ths | After Arkivalist validated |
+
+This sequencing means the cross-account IAM pattern is proven on a lower-risk
+target before any NSHM production data is involved.
 
 ---
 
 **Status:** Not yet implemented
 **Created:** 2026-03-10
+**Updated:** 2026-03-12

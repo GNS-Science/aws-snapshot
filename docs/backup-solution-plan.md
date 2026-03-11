@@ -374,14 +374,21 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 
 > **Strategy change:** Rather than first exercising the full restore lifecycle against
 > the critical Toshi/THS production data, we will run a complete backup→restore→validate
-> cycle on a **lower-criticality production project** first. This de-risks the restore
-> workflow (Phases 4–5) before touching NSHM production data.
+> cycle on **Arkivalist** first. Arkivalist (account `456789012345`) is a separate AWS
+> account from the spike/backup account (`345678901234`), has similar backup targets
+> (S3 + DynamoDB) but at much smaller scale, and is lower-criticality.
 >
-> The target project for the restore demo has not yet been identified. Once confirmed,
-> update `backup-config.yaml` with its sources and run through Phases 4–5 against it.
+> Crucially, Arkivalist is **cross-account** — backing it up exercises the account
+> isolation pattern (see `docs/design/ACCOUNT_ISOLATION.md`) that will also be required
+> for NSHM production (`210987654321`). This makes it the ideal first real-world target:
+> it validates both the restore lifecycle and cross-account IAM before we touch NSHM data.
 
-- [ ] Identify lower-criticality production project for restore lifecycle demo
-- [ ] Run full backup→restore→validate cycle on demo project (Phases 4–5)
+- [ ] Confirm Arkivalist S3 bucket names and DynamoDB table ARNs (account `456789012345`)
+- [ ] Add `arkivalist` source to `backup-config.yaml`
+- [ ] Implement cross-account session support (`get_cross_account_session`, see `ACCOUNT_ISOLATION.md`)
+- [ ] Create IAM role in Arkivalist account trusted by backup Lambda role
+- [ ] Run full backup→restore→validate cycle on Arkivalist (Phases 4–5)
+- [ ] Apply same cross-account pattern to NSHM production (`210987654321`) before cutover
 - [ ] Parallel run with AWS Backup (2-3 months) — toshi + ths
 - [ ] Restore drill validation against NSHM production data
 - [ ] Cost verification
