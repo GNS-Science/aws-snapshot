@@ -117,6 +117,11 @@ class SourceConfig(BaseModel):
     dynamodb_tables: list[str] = Field(default_factory=list, description="DynamoDB table ARNs")
     s3_backup_bucket_suffix: str = "-backup"
     dynamodb_export_format: Literal["DYNAMODB_JSON", "ION"] = "DYNAMODB_JSON"
+    prod_account_role_arn: str | None = Field(
+        None,
+        description="IAM role ARN in the source account to assume for cross-account access. "
+        "If None, the Lambda's own credentials are used (same-account backup).",
+    )
     use_s3_batch: bool = Field(
         False,
         description="Use S3 Batch Operations instead of per-object copy_object. "

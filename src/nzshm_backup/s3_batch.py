@@ -154,6 +154,7 @@ def batch_backup_source(
     account_id: str,
     dry_run: bool = False,
     full_sync: bool = False,
+    source_session: boto3.Session | None = None,
 ) -> BatchJobResult:
     """Submit an S3 Batch Operations job to copy new/changed objects.
 
@@ -171,13 +172,14 @@ def batch_backup_source(
         full_sync:       if True, include all objects regardless of ETag
     """
     s3_client = session.client("s3")
+    src_s3_client = source_session.client("s3") if source_session is not None else s3_client
     manifest_key = f"_manifests/{source_bucket}-{uuid.uuid4()}.csv"
 
     if not dry_run:
         ensure_backup_bucket_ready(session, backup_bucket)
 
     logger.info(f"Listing source objects in {source_bucket}")
-    source_objects = _list_bucket(s3_client, source_bucket)
+    source_objects = _list_bucket(src_s3_client, source_bucket)
     logger.info(f"Found {len(source_objects)} source objects")
 
     dest_objects: dict = {}
