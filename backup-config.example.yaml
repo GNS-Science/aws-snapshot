@@ -40,9 +40,9 @@ sources:
     # See docs/design/ACCOUNT_ISOLATION.md for IAM setup required.
     prod_account_role_arn: null  # arn:aws:iam::456789012345:role/nzshm-backup-reader
     s3_buckets:
-      # NOTE: this is a Serverless Framework deployment bucket (Lambda zips,
-      # CloudFormation templates) — confirm whether application data buckets
-      # also exist before treating this as the primary backup target.
+      # Serverless Framework deployment bucket (Lambda zips, CloudFormation templates).
+      # Intentional choice: frequent deployments generate real ETag changes, making
+      # this a good functional test of the incremental sync mechanism.
       - arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh
     dynamodb_tables:
       - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-events
