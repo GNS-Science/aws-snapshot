@@ -50,9 +50,9 @@ that call the same underlying functions — `backup_source()` and
 |-----------|-----------------|
 | Manual backup on demand | `backup run` from your terminal |
 | Scheduled weekly/daily backup | EventBridge rule → Lambda (requires `serverless deploy`) |
-| Creating/managing schedules | `backup schedule set/enable/disable` from your terminal |
+| Creating/managing schedules | `backup schedule add/remove/enable/disable` from your terminal |
 
-`backup schedule set` creates EventBridge rules. Those rules need a Lambda
+`backup schedule add` creates EventBridge rules. Those rules need a Lambda
 target to fire automatically. Until `lambda_arn` is set in `backup-config.yaml`
 and a Lambda is deployed, the rules exist but have no target — running
 `backup run` manually is the only way to trigger a backup.
