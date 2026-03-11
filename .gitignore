@@ -13,3 +13,10 @@ site/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Serverless
+.serverless/
+node_modules/
+
+# Local config (contains account IDs and ARNs)
+backup-config.sandbox.yaml
