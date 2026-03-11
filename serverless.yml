@@ -1,3 +1,5 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: dailyscience
 service: nzshm-backup
 
 frameworkVersion: "4"
@@ -9,7 +11,8 @@ provider:
   memorySize: 1024
   timeout: 900
   environment:
-    BACKUP_CONFIG: ${file(backup-config.yaml):}
+    BACKUP_CONFIG: ${env:BACKUP_CONFIG, ""}
+    PYTHONPATH: /var/task/src
   iam:
     role:
       statements:
@@ -70,13 +73,9 @@ functions:
             trigger_type: "scheduled"
             full_sync: false
 
-plugins:
-  - serverless-python-requirements
-
 custom:
   pythonRequirements:
-    dockerizePip: false
-    usePoetry: true
+    dockerizePip: true
     slim: true
 
 package:

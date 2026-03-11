@@ -78,12 +78,13 @@ backup --dry-run run --source toshi     # Preview without executing
 backup schedule show                    # List EventBridge rules (nzshm-backup-* prefix)
 
 # Times are UTC. NZST = UTC+12, NZDT = UTC+13.
-backup schedule set --source toshi --frequency weekly --time 14:00   # Sun 02:00 NZST
-backup schedule set --source toshi --frequency daily  --time 13:00   # 01:00 NZST
+backup schedule add --source toshi --frequency weekly --time 14:00   # Sun 02:00 NZST
+backup schedule add --source toshi --frequency daily  --time 13:00   # 01:00 NZST
 
-backup schedule enable toshi            # Enable both daily + weekly rules
-backup schedule enable toshi --frequency weekly   # Enable weekly only
-backup schedule disable toshi           # Disable both rules
+backup schedule enable --source toshi                      # Enable all rules for toshi
+backup schedule enable --source toshi --frequency weekly   # Enable weekly only
+backup schedule disable --source toshi                     # Disable all rules for toshi
+backup schedule remove --source toshi --frequency daily    # Delete rule entirely
 ```
 
 ### Status & reporting (stubs — Phase 3)
@@ -155,11 +156,11 @@ serverless deploy --stage prod     # Production stage
 # to wire up EventBridge targets.
 ```
 
-### Set schedules after deploy
+### Add schedules after deploy
 
 ```bash
-backup schedule set --source toshi --frequency weekly --time 14:00
-backup schedule set --source ths   --frequency weekly --time 14:00
+backup schedule add --source toshi --frequency weekly --time 14:00
+backup schedule add --source ths   --frequency weekly --time 14:00
 backup schedule show
 ```
 

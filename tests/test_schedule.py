@@ -48,10 +48,10 @@ def test_show_lists_rules(events_client):
     assert "nzshm-backup-toshi-weekly" in result.output
 
 
-def test_set_creates_weekly_rule(events_client):
-    """set --frequency weekly should create a rule with a weekly cron expression."""
+def test_add_creates_weekly_rule(events_client):
+    """add --frequency weekly should create a rule with a weekly cron expression."""
     result = runner.invoke(
-        app, ["set", "--source", "toshi", "--frequency", "weekly", "--time", "14:00"]
+        app, ["add", "--source", "toshi", "--frequency", "weekly", "--time", "14:00"]
     )
     assert result.exit_code == 0
 
@@ -62,10 +62,10 @@ def test_set_creates_weekly_rule(events_client):
     assert "14" in rules[0]["ScheduleExpression"]
 
 
-def test_set_creates_daily_rule(events_client):
-    """set --frequency daily should create a rule with a daily cron expression."""
+def test_add_creates_daily_rule(events_client):
+    """add --frequency daily should create a rule with a daily cron expression."""
     result = runner.invoke(
-        app, ["set", "--source", "ths", "--frequency", "daily", "--time", "03:30"]
+        app, ["add", "--source", "ths", "--frequency", "daily", "--time", "03:30"]
     )
     assert result.exit_code == 0
 
@@ -76,11 +76,65 @@ def test_set_creates_daily_rule(events_client):
     assert "30" in rules[0]["ScheduleExpression"]
 
 
+def test_add_creates_hourly_rule(events_client):
+    """add --frequency hourly should create a rule with '*' for the hour field."""
+    result = runner.invoke(
+        app, ["add", "--source", "toshi", "--frequency", "hourly", "--time", "00:05"]
+    )
+    assert result.exit_code == 0
+
+    rules = events_client.list_rules(NamePrefix="nzshm-backup-toshi-hourly")["Rules"]
+    assert len(rules) == 1
+    expr = rules[0]["ScheduleExpression"]
+    assert expr.startswith("cron(5 *")
+    assert "SUN" not in expr
+
+
+def test_add_creates_minutely_rule(events_client):
+    """add --frequency minutely should create a rate(1 minute) rule."""
+    result = runner.invoke(
+        app, ["add", "--source", "toshi", "--frequency", "minutely"]
+    )
+    assert result.exit_code == 0
+
+    rules = events_client.list_rules(NamePrefix="nzshm-backup-toshi-minutely")["Rules"]
+    assert len(rules) == 1
+    assert rules[0]["ScheduleExpression"] == "rate(1 minute)"
+
+
+def test_add_without_lambda_arn(events_client):
+    """add should create the rule but warn if lambda_arn is not configured."""
+    result = runner.invoke(
+        app, ["add", "--source", "toshi", "--frequency", "daily", "--time", "02:00"]
+    )
+    rules = events_client.list_rules(NamePrefix="nzshm-backup-toshi-daily")["Rules"]
+    assert len(rules) == 1
+    assert "lambda_arn" in result.output or "Warning" in result.output
+
+
+def test_remove_deletes_rule(events_client):
+    """remove should delete the EventBridge rule."""
+    _make_rule(events_client, "toshi", "daily")
+
+    result = runner.invoke(app, ["remove", "--source", "toshi", "--frequency", "daily"])
+    assert result.exit_code == 0
+    assert "deleted" in result.output.lower()
+
+    rules = events_client.list_rules(NamePrefix="nzshm-backup-toshi-daily")["Rules"]
+    assert len(rules) == 0
+
+
+def test_remove_nonexistent_rule():
+    """remove on a nonexistent rule should not raise."""
+    result = runner.invoke(app, ["remove", "--source", "toshi", "--frequency", "daily"])
+    assert result.exit_code == 0
+
+
 def test_enable_rule(events_client):
     """enable should set rule State to ENABLED."""
     _make_rule(events_client, "toshi", "daily", state="DISABLED")
 
-    result = runner.invoke(app, ["enable", "toshi", "--frequency", "daily"])
+    result = runner.invoke(app, ["enable", "--source", "toshi", "--frequency", "daily"])
     assert result.exit_code == 0
     assert "Enabled" in result.output
 
@@ -92,7 +146,7 @@ def test_disable_rule(events_client):
     """disable should set rule State to DISABLED."""
     _make_rule(events_client, "ths", "weekly", state="ENABLED")
 
-    result = runner.invoke(app, ["disable", "ths", "--frequency", "weekly"])
+    result = runner.invoke(app, ["disable", "--source", "ths", "--frequency", "weekly"])
     assert result.exit_code == 0
     assert "Disabled" in result.output
 
@@ -102,18 +156,6 @@ def test_disable_rule(events_client):
 
 def test_enable_nonexistent_rule():
     """enable on a nonexistent rule should skip gracefully, not raise."""
-    result = runner.invoke(app, ["enable", "toshi", "--frequency", "daily"])
+    result = runner.invoke(app, ["enable", "--source", "toshi", "--frequency", "daily"])
     assert result.exit_code == 0
     assert "not found" in result.output.lower() or "skipping" in result.output.lower()
-
-
-def test_set_without_lambda_arn(events_client):
-    """set should create the rule but warn if lambda_arn is not configured."""
-    result = runner.invoke(
-        app, ["set", "--source", "toshi", "--frequency", "daily", "--time", "02:00"]
-    )
-    # Rule should still be created
-    rules = events_client.list_rules(NamePrefix="nzshm-backup-toshi-daily")["Rules"]
-    assert len(rules) == 1
-    # Warning about missing lambda_arn
-    assert "lambda_arn" in result.output or "Warning" in result.output

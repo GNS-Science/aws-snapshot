@@ -46,30 +46,42 @@ def show():
         )
 
 
-@app.command("set")
-def set_schedule(
+@app.command("add")
+def add_schedule(
     source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
-    frequency: Literal["daily", "weekly"] = typer.Option(..., help="Backup frequency"),
+    frequency: Literal["daily", "weekly", "hourly", "minutely"] = typer.Option(
+        ..., help="Backup frequency"
+    ),
     time: str = typer.Option(
         "02:00",
-        help="Time in HH:MM format (UTC). Convert from NZST/NZDT manually.",
+        help=(
+            "Time in HH:MM format (UTC). "
+            "daily/weekly: both HH and MM are used. "
+            "hourly: only MM is used (HH ignored). "
+            "minutely: --time is ignored entirely."
+        ),
     ),
 ):
-    """Set (create or update) an EventBridge schedule rule for a backup source.
+    """Add (create or update) an EventBridge schedule rule for a backup source.
 
     Times must be specified in UTC. NZST is UTC+12, NZDT is UTC+13.
     """
-    try:
-        hh, mm = time.split(":")
-        hh_int, mm_int = int(hh), int(mm)
-    except ValueError:
-        typer.echo(f"Error: Invalid time format '{time}'. Use HH:MM (UTC).", err=True)
-        raise typer.Exit(1) from None
+    if frequency == "minutely":
+        cron_expr = "rate(1 minute)"
+    else:
+        try:
+            hh, mm = time.split(":")
+            hh_int, mm_int = int(hh), int(mm)
+        except ValueError:
+            typer.echo(f"Error: Invalid time format '{time}'. Use HH:MM (UTC).", err=True)
+            raise typer.Exit(1) from None
 
-    if frequency == "daily":
-        cron_expr = f"cron({mm_int} {hh_int} * * ? *)"
-    else:  # weekly (Sunday)
-        cron_expr = f"cron({mm_int} {hh_int} ? * SUN *)"
+        if frequency == "daily":
+            cron_expr = f"cron({mm_int} {hh_int} * * ? *)"
+        elif frequency == "weekly":
+            cron_expr = f"cron({mm_int} {hh_int} ? * SUN *)"
+        else:  # hourly
+            cron_expr = f"cron({mm_int} * * * ? *)"
 
     rule_name = _rule_name(source, frequency)
     session = boto3.Session()
@@ -107,6 +119,8 @@ def set_schedule(
         ],
     )
 
+    account_id = lambda_arn.split(":")[4]
+    region = session.region_name or "ap-southeast-2"
     lambda_client = session.client("lambda")
     try:
         lambda_client.add_permission(
@@ -114,8 +128,7 @@ def set_schedule(
             StatementId=f"AllowEventBridge-{rule_name}",
             Action="lambda:InvokeFunction",
             Principal="events.amazonaws.com",
-            SourceArn=f"arn:aws:events:{session.region_name or 'ap-southeast-2'}:"
-            f"*:rule/{rule_name}",
+            SourceArn=f"arn:aws:events:{region}:{account_id}:rule/{rule_name}",
         )
     except ClientError as e:
         if e.response["Error"]["Code"] == "ResourceConflictException":
@@ -126,15 +139,69 @@ def set_schedule(
     typer.echo(f"Target registered: {lambda_arn}")
 
 
+@app.command("remove")
+def remove_schedule(
+    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
+    frequency: Literal["daily", "weekly", "hourly", "minutely"] = typer.Option(
+        ..., help="Backup frequency"
+    ),
+):
+    """Remove an EventBridge schedule rule and deregister its Lambda target."""
+    rule_name = _rule_name(source, frequency)
+    session = boto3.Session()
+    events = session.client("events")
+
+    # Remove Lambda target first (rule cannot be deleted while targets exist)
+    try:
+        events.remove_targets(Rule=rule_name, Ids=["backup-lambda"])
+        typer.echo(f"Target removed: {rule_name}")
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("ResourceNotFoundException", "ValidationException"):
+            pass  # no targets or rule doesn't exist yet
+        else:
+            raise
+
+    # Remove Lambda invoke permission
+    try:
+        config = load_config()
+        lambda_arn = config.general.lambda_arn
+    except FileNotFoundError:
+        lambda_arn = None
+
+    if lambda_arn:
+        lambda_client = session.client("lambda")
+        try:
+            lambda_client.remove_permission(
+                FunctionName=lambda_arn,
+                StatementId=f"AllowEventBridge-{rule_name}",
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("ResourceNotFoundException", "NoSuchResourceException"):
+                pass  # permission was never added
+            else:
+                raise
+
+    # Delete the rule
+    try:
+        events.delete_rule(Name=rule_name)
+        typer.echo(f"Rule deleted: {rule_name}")
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("ResourceNotFoundException", "ValidationException"):
+            typer.echo(f"Rule not found (skipping): {rule_name}")
+        else:
+            raise
+
+
 @app.command("enable")
 def enable(
-    source: str = typer.Argument(..., help="Source to enable (e.g. toshi, ths, all)"),
+    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
     frequency: str | None = typer.Option(
-        None, help="Frequency to enable (daily or weekly). Defaults to both."
+        None,
+        help="Frequency to enable (daily, weekly, hourly, minutely). Defaults to all.",
     ),
 ):
     """Enable backup EventBridge schedule rule(s) for a source."""
-    frequencies = [frequency] if frequency else ["daily", "weekly"]
+    frequencies = [frequency] if frequency else ["daily", "weekly", "hourly", "minutely"]
     session = boto3.Session()
     events = session.client("events")
 
@@ -152,13 +219,14 @@ def enable(
 
 @app.command("disable")
 def disable(
-    source: str = typer.Argument(..., help="Source to disable (e.g. toshi, ths, all)"),
+    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
     frequency: str | None = typer.Option(
-        None, help="Frequency to disable (daily or weekly). Defaults to both."
+        None,
+        help="Frequency to disable (daily, weekly, hourly, minutely). Defaults to all.",
     ),
 ):
     """Disable backup EventBridge schedule rule(s) for a source."""
-    frequencies = [frequency] if frequency else ["daily", "weekly"]
+    frequencies = [frequency] if frequency else ["daily", "weekly", "hourly", "minutely"]
     session = boto3.Session()
     events = session.client("events")
 

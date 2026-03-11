@@ -1,0 +1,12 @@
+{
+  "devDependencies": {
+    "serverless": "^4.0.0"
+  },
+  "scripts": {
+    "deploy": "sls deploy",
+    "deploy:force": "sls deploy --force",
+    "remove": "sls remove",
+    "logs": "sls logs --function backup --tail",
+    "clean-cache": "sls requirements cleanCache && rm -rf ~/Library/Caches/serverless-python-requirements/"
+  }
+}

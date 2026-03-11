@@ -5,6 +5,15 @@ account (345678901234). No production resources are touched.
 
 ## Prerequisites
 
+> **AWS SSO users:** Serverless Framework does not read SSO profiles directly.
+> Export credentials before running `sls deploy`:
+> ```bash
+> aws sso login --profile your-sso-profile
+> eval "$(aws configure export-credentials --profile your-sso-profile --format env)"
+> ```
+> See [Lambda Deployment](../development/lambda-deployment.md) for full setup
+> instructions including Serverless Framework installation.
+
 ```bash
 # AWS CLI configured for sandbox account
 aws sts get-caller-identity   # should show 345678901234
@@ -97,26 +106,55 @@ buckets (object count), and any EventBridge rules.
 backup schedule show
 
 # Create weekly rule for toshi — 14:00 UTC = 02:00 NZST (Sun)
-backup schedule set --source toshi --frequency weekly --time 14:00
+backup schedule add --source toshi --frequency weekly --time 14:00
 
 # Create daily rule
-backup schedule set --source toshi --frequency daily --time 13:00
+backup schedule add --source toshi --frequency daily --time 13:00
 
 # Create weekly rule for ths
-backup schedule set --source ths --frequency weekly --time 14:30
+backup schedule add --source ths --frequency weekly --time 14:30
 
 # List all rules
 backup schedule show
 
 # Disable / re-enable
-backup schedule disable toshi
+backup schedule disable --source toshi
 backup schedule show
-backup schedule enable toshi --frequency weekly
+backup schedule enable --source toshi --frequency weekly
 backup schedule show
 ```
 
 Note: Rules are created in ENABLED state. No Lambda target is registered until
-`lambda_arn` is set in the config (Phase 2 / deployment step).
+`lambda_arn` is set in the config — see Step 6a below.
+
+## Step 6a — Deploy Lambda (optional, needed for scheduled triggers)
+
+To test EventBridge actually invoking a backup, deploy the Lambda and register
+it as the rule target. See [Lambda Deployment](../development/lambda-deployment.md)
+for full instructions. Summary:
+
+```bash
+# Export SSO credentials first
+eval "$(aws configure export-credentials --profile your-sso-profile --format env)"
+
+# Export config as JSON (required — sls reads it from the shell environment)
+export BACKUP_CONFIG=$(.venv/bin/python3 -c \
+  "import yaml, json; print(json.dumps(yaml.safe_load(open('backup-config.sandbox.yaml'))))")
+
+# Deploy
+sls deploy --stage sandbox
+
+# Copy the printed ARN into backup-config.sandbox.yaml:
+#   general:
+#     lambda_arn: "arn:aws:lambda:ap-southeast-2:345678901234:function:nzshm-backup-sandbox-backup"
+
+# Re-run schedule add to register the target
+backup schedule add --source toshi --frequency hourly --time 00:05
+backup schedule add --source toshi --frequency minutely   # fires every minute — demo use only
+
+# Watch it fire, then clean up
+backup schedule remove --source toshi --frequency minutely
+```
 
 ## Step 7 — Teardown
 
