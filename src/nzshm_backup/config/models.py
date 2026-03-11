@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RetentionConfig(BaseModel):
@@ -117,6 +117,11 @@ class SourceConfig(BaseModel):
     dynamodb_tables: list[str] = Field(default_factory=list, description="DynamoDB table ARNs")
     s3_backup_bucket_suffix: str = "-backup"
     dynamodb_export_format: Literal["DYNAMODB_JSON", "ION"] = "DYNAMODB_JSON"
+    use_s3_batch: bool = Field(
+        False,
+        description="Use S3 Batch Operations instead of per-object copy_object. "
+        "Required for large buckets (millions of objects). Requires general.s3_batch_role_arn.",
+    )
 
     def get_backup_bucket_name(self, bucket_arn: str, region: str, account_id: str) -> str:
         """Generate globally unique backup bucket name from source bucket ARN."""
@@ -139,6 +144,11 @@ class GeneralConfig(BaseModel):
         default_factory=lambda: {"Project": "NSHM", "ManagedBy": "backup-cli"}
     )
     lambda_arn: str | None = Field(None, description="ARN of the backup Lambda function")
+    s3_batch_role_arn: str | None = Field(
+        None,
+        description="ARN of the IAM role S3 Batch Operations assumes. "
+        "Required when any source has use_s3_batch: true.",
+    )
 
 
 class ConfigModel(BaseModel):
@@ -151,3 +161,12 @@ class ConfigModel(BaseModel):
     notifications: NotificationConfig = Field(default_factory=lambda: NotificationConfig())
     cost_tracking: CostTrackingConfig = Field(default_factory=lambda: CostTrackingConfig())
     testing: TestingConfig = Field(default_factory=lambda: TestingConfig())
+
+    @model_validator(mode="after")
+    def validate_batch_config(self) -> "ConfigModel":
+        if any(s.use_s3_batch for s in self.sources.values()):
+            if not self.general.s3_batch_role_arn:
+                raise ValueError(
+                    "general.s3_batch_role_arn is required when any source has use_s3_batch: true"
+                )
+        return self
