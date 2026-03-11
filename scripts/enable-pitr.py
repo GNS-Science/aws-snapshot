@@ -5,17 +5,15 @@ PITR is required before DynamoDB export-to-S3 can be initiated.
 Run this while authenticated to the account that owns the tables.
 
 Usage:
-    # Enable PITR on Arkivalist tables (run as account 816711409078)
+    # Enable PITR on tables in the source account (run authenticated to that account)
     python scripts/enable-pitr.py \
         --tables \
-            arkivalist-api-dev-events \
-            arkivalist-api-dev-feedback \
-            arkivalist-api-dev-invite-codes \
-            arkivalist-api-dev-mission-events \
-            arkivalist-api-dev-mission-runs
+            my-table-one \
+            my-table-two \
+            my-table-three
 
     # Check current PITR status without changing anything
-    python scripts/enable-pitr.py --tables arkivalist-api-dev-events --status-only
+    python scripts/enable-pitr.py --tables my-table-one --status-only
 """
 
 import argparse
