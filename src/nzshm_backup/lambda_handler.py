@@ -10,7 +10,7 @@ from nzshm_backup.config.models import ConfigModel
 from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
 from nzshm_backup.lambda_schema import BackupTask
 from nzshm_backup.logging_config import setup_logging
-from nzshm_backup.s3_backup import backup_source
+from nzshm_backup.s3_backup import backup_source, get_cross_account_session
 from nzshm_backup.s3_batch import batch_backup_source
 
 logger = setup_logging(json_format=True)
@@ -74,6 +74,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
             account_id = session.client("sts").get_caller_identity()["Account"]
 
+            source_session = (
+                get_cross_account_session(session, source_config.prod_account_role_arn)
+                if source_config.prod_account_role_arn
+                else None
+            )
+
             for bucket_arn in source_config.s3_buckets:
                 bucket_name = bucket_arn.split(":")[-1] if ":" in bucket_arn else bucket_arn
                 backup_bucket_name = source_config.get_backup_bucket_name(
@@ -92,6 +98,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                             account_id=account_id,
                             dry_run=task.dry_run,
                             full_sync=task.full_sync,
+                            source_session=source_session,
                         )
                         logger.info(
                             f"Batch job {batch_result.status}: "
@@ -112,6 +119,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                             backup_bucket_name=backup_bucket_name,
                             dry_run=task.dry_run,
                             full_sync=task.full_sync,
+                            source_session=source_session,
                         )
                         results[bucket_name] = {
                             "status": "success",
@@ -129,7 +137,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         "error": str(e),
                     }
 
-            dynamodb_client = session.client("dynamodb")
+            dynamodb_client = (source_session or session).client("dynamodb")
             for table_arn in source_config.dynamodb_tables:
                 export_bucket = source_config.get_dynamodb_backup_bucket_name(
                     source_alias, region, account_id

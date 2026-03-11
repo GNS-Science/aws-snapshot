@@ -48,6 +48,28 @@ class LifecycleConfig:
     max_age_days: int = 365
 
 
+def get_cross_account_session(session: boto3.Session, role_arn: str) -> boto3.Session:
+    """Return a new session by assuming a role in another account.
+
+    Args:
+        session:  caller's session (must have sts:AssumeRole permission)
+        role_arn: ARN of the IAM role to assume in the source account
+
+    Returns:
+        New boto3.Session authenticated as the assumed role
+    """
+    sts = session.client("sts")
+    creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="nzshm-backup")[
+        "Credentials"
+    ]
+    return boto3.Session(
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+        region_name=session.region_name,
+    )
+
+
 def get_account_id(session: boto3.Session) -> str:
     """Get AWS account ID from session."""
     sts = session.client("sts")
@@ -219,24 +241,28 @@ def sync_bucket(
     dest_bucket: str,
     dry_run: bool = False,
     full_sync: bool = False,
+    source_s3_client=None,
 ) -> SyncResult:
     """Sync source bucket to backup bucket (incremental, no delete propagation).
 
     Args:
-        s3_client: boto3 S3 client
-        source_bucket: Source bucket name
-        dest_bucket: Destination backup bucket name
-        dry_run: If True, only simulate operations
-        full_sync: If True, copy all objects regardless of ETag
+        s3_client:        boto3 S3 client for the backup (destination) account
+        source_bucket:    Source bucket name
+        dest_bucket:      Destination backup bucket name
+        dry_run:          If True, only simulate operations
+        full_sync:        If True, copy all objects regardless of ETag
+        source_s3_client: boto3 S3 client for the source account (cross-account).
+                          If None, s3_client is used for both source and dest.
 
     Returns:
         SyncResult with operation statistics
     """
+    src_client = source_s3_client if source_s3_client is not None else s3_client
     result = SyncResult(dry_run=dry_run)
 
     logger.info(f"Syncing {source_bucket} → {dest_bucket} (dry_run={dry_run})")
 
-    source_paginator = s3_client.get_paginator("list_objects_v2")
+    source_paginator = src_client.get_paginator("list_objects_v2")
     source_objects = {}
 
     for page in source_paginator.paginate(Bucket=source_bucket):
@@ -267,12 +293,22 @@ def sync_bucket(
                 result.bytes_transferred += source_obj["Size"]
             else:
                 try:
-                    s3_client.copy_object(
-                        CopySource={"Bucket": source_bucket, "Key": key},
-                        Bucket=dest_bucket,
-                        Key=key,
-                        MetadataDirective="COPY",
-                    )
+                    if source_s3_client is not None:
+                        # Cross-account: download from source, upload to dest
+                        obj_data = src_client.get_object(Bucket=source_bucket, Key=key)
+                        s3_client.put_object(
+                            Bucket=dest_bucket,
+                            Key=key,
+                            Body=obj_data["Body"].read(),
+                            ContentType=obj_data.get("ContentType", "application/octet-stream"),
+                        )
+                    else:
+                        s3_client.copy_object(
+                            CopySource={"Bucket": source_bucket, "Key": key},
+                            Bucket=dest_bucket,
+                            Key=key,
+                            MetadataDirective="COPY",
+                        )
                     result.objects_copied += 1
                     result.bytes_transferred += source_obj["Size"]
                     logger.debug(f"Copied: {key}")
@@ -335,33 +371,39 @@ def backup_source(
     backup_bucket_name: str,
     dry_run: bool = False,
     full_sync: bool = False,
+    source_session: boto3.Session | None = None,
 ) -> SyncResult:
     """Execute backup for a single S3 bucket.
 
     Args:
-        session: boto3 session
-        source_bucket: Source bucket ARN or name
+        session:            boto3 session for the backup (destination) account
+        source_bucket:      Source bucket ARN or name
         backup_bucket_name: Destination backup bucket name
-        dry_run: Simulate without executing
-        full_sync: Force full copy
+        dry_run:            Simulate without executing
+        full_sync:          Force full copy
+        source_session:     boto3 session for the source account (cross-account).
+                            If None, session is used for both.
 
     Returns:
         SyncResult with operation statistics
     """
-    s3_client = session.client("s3")
+    dest_s3_client = session.client("s3")
+    src_session = source_session if source_session is not None else session
+    src_s3_client = src_session.client("s3")
 
     source_bucket_name = source_bucket.split(":")[-1] if ":" in source_bucket else source_bucket
 
-    if not bucket_exists(s3_client, source_bucket_name):
+    if not bucket_exists(src_s3_client, source_bucket_name):
         raise ValueError(f"Source bucket {source_bucket_name} does not exist")
 
     if not dry_run:
         ensure_backup_bucket_ready(session, backup_bucket_name)
 
     return sync_bucket(
-        s3_client,
+        dest_s3_client,
         source_bucket_name,
         backup_bucket_name,
         dry_run=dry_run,
         full_sync=full_sync,
+        source_s3_client=src_s3_client if source_session is not None else None,
     )

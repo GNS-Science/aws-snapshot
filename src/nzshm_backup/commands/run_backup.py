@@ -8,7 +8,7 @@ import typer
 from nzshm_backup.config import load_config
 from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
 from nzshm_backup.logging_config import setup_logging
-from nzshm_backup.s3_backup import backup_source
+from nzshm_backup.s3_backup import backup_source, get_cross_account_session
 from nzshm_backup.s3_batch import batch_backup_source
 from nzshm_backup.state import get_state
 
@@ -62,6 +62,11 @@ def run(
             continue
 
         source_config = config.sources[source_alias]
+        source_session = (
+            get_cross_account_session(session, source_config.prod_account_role_arn)
+            if source_config.prod_account_role_arn
+            else None
+        )
 
         for bucket_arn in source_config.s3_buckets:
             bucket_name = bucket_arn.split(":")[-1] if ":" in bucket_arn else bucket_arn
@@ -81,6 +86,7 @@ def run(
                         account_id=account_id,
                         dry_run=state.dry_run,
                         full_sync=full_sync,
+                        source_session=source_session,
                     )
                     prefix = "[DRY RUN] " if state.dry_run else ""
                     if batch_result.status == "SKIPPED":
@@ -97,6 +103,7 @@ def run(
                         backup_bucket_name=backup_bucket_name,
                         dry_run=state.dry_run,
                         full_sync=full_sync,
+                        source_session=source_session,
                     )
 
                     total_results["objects_copied"] += result.objects_copied
@@ -119,7 +126,7 @@ def run(
                 logger.error(f"Backup failed for {bucket_name}: {e}")
                 total_results["errors"].append(f"{bucket_name}: {str(e)}")
 
-        dynamodb_client = session.client("dynamodb")
+        dynamodb_client = (source_session or session).client("dynamodb")
         for table_arn in source_config.dynamodb_tables:
             export_bucket = source_config.get_dynamodb_backup_bucket_name(
                 source_alias, region, account_id
