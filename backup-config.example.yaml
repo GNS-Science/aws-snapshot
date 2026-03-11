@@ -33,6 +33,17 @@ sources:
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: false  # ~1TB but incremental runs are within Lambda timeout
 
+  arkivalist:
+    display_name: "Arkivalist"
+    # Cross-account source: Arkivalist account 816711409078
+    # Backup Lambda (595842668254) assumes prod_account_role_arn to read source data.
+    # See docs/design/ACCOUNT_ISOLATION.md for IAM setup required.
+    prod_account_role_arn: null  # arn:aws:iam::816711409078:role/nzshm-backup-reader
+    s3_buckets: []       # TODO: confirm bucket names in account 816711409078
+    dynamodb_tables: []  # TODO: confirm table ARNs in account 816711409078
+    dynamodb_export_format: DYNAMODB_JSON
+    use_s3_batch: false  # small scale — direct copy_object is fine
+
 retention:
   hot_days: 30
   warm_days: 120  # must be >= hot_days + 90 (AWS constraint: GLACIER_IR → DEEP_ARCHIVE gap)
