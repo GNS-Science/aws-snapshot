@@ -82,6 +82,23 @@ This will:
 3. Create `nzshm-dynamo-backup-toshi-ap-southeast-2-595842668254` (DynamoDB export bucket)
 4. Initiate PITR exports for all 4 tables — each returns an `ExportArn`
 
+> **Note — sandbox vs production S3 output:**
+> The sandbox config uses `use_s3_batch: false` (the default), so the S3 sync runs
+> synchronously and reports immediately:
+> ```
+> Copied 5 objects (0.00 MB) in 1.2s
+> ```
+> In **production**, `toshi` will have `use_s3_batch: true` (required for ~8M objects).
+> The output there will be:
+> ```
+> Batch job submitted: abc1234 (N objects)
+> ```
+> The copy then runs asynchronously in AWS. Monitor progress with:
+> ```bash
+> aws s3control describe-job --account-id ACCOUNT_ID --job-id JOB_ID --region ap-southeast-2
+> ```
+> See `docs/architecture/s3-batch-operations.md` for full details.
+
 ```bash
 # Back up ths source too
 backup run --source ths
