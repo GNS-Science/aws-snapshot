@@ -8,6 +8,7 @@ from nzshm_backup.s3_backup import (
     apply_lifecycle_policy,
     backup_source,
     bucket_exists,
+    bucket_is_ours,
     create_backup_bucket,
     sync_bucket,
 )
@@ -79,6 +80,50 @@ def test_create_backup_bucket_already_exists(s3_client):
 
     with pytest.raises(ValueError, match="already exists"):
         create_backup_bucket(s3_client, bucket_name, "ap-southeast-2", "123456789012")
+
+
+def test_bucket_is_ours_true(s3_client):
+    """bucket_is_ours returns True for a bucket tagged ManagedBy: nzshm-backup."""
+    bucket_name = "test-managed-bucket"
+    create_backup_bucket(s3_client, bucket_name, "ap-southeast-2", "123456789012")
+    assert bucket_is_ours(s3_client, bucket_name) is True
+
+
+def test_bucket_is_ours_false_untagged(s3_client):
+    """bucket_is_ours returns False for an untagged bucket."""
+    bucket_name = "test-foreign-bucket"
+    s3_client.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
+    )
+    assert bucket_is_ours(s3_client, bucket_name) is False
+
+
+def test_ensure_backup_bucket_ready_existing_ours(s3_client):
+    """ensure_backup_bucket_ready proceeds without error if bucket is ours."""
+    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+
+    bucket_name = "test-managed-bucket"
+    create_backup_bucket(s3_client, bucket_name, "ap-southeast-2", "123456789012")
+
+    session = boto3.Session(region_name="ap-southeast-2")
+    # Should not raise
+    ensure_backup_bucket_ready(session, bucket_name)
+
+
+def test_ensure_backup_bucket_ready_existing_foreign(s3_client):
+    """ensure_backup_bucket_ready raises if bucket exists but is not ours."""
+    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+
+    bucket_name = "test-foreign-bucket"
+    s3_client.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
+    )
+
+    session = boto3.Session(region_name="ap-southeast-2")
+    with pytest.raises(ValueError, match="not managed by nzshm-backup"):
+        ensure_backup_bucket_ready(session, bucket_name)
 
 
 def test_apply_lifecycle_policy(s3_client):

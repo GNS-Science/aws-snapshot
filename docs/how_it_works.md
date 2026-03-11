@@ -57,6 +57,31 @@ target to fire automatically. Until `lambda_arn` is set in `backup-config.yaml`
 and a Lambda is deployed, the rules exist but have no target — running
 `backup run` manually is the only way to trigger a backup.
 
+## How backup data accumulates
+
+Each backup run is **incremental and additive** — no existing backup data is
+ever overwritten or deleted by the tool:
+
+| Scenario | Behaviour |
+|----------|-----------|
+| Object new in source | Copied to backup bucket |
+| Object changed in source (ETag or size differs) | Copied, overwriting the backup copy |
+| Object unchanged since last backup | Skipped |
+| Object deleted from source | Remains in backup bucket (no delete propagation) |
+
+This means the backup bucket is a **superset** of the source at any point in
+time. Data deleted from the source is retained in the backup until the lifecycle
+policy expires it (365 days by default).
+
+**Manual and scheduled backups share the same bucket.** A bucket created by
+`backup run` from the CLI is recognised (via its `ManagedBy: nzshm-backup` tag)
+and reused by the Lambda on subsequent scheduled runs, and vice versa. There is
+no conflict between the two entry points.
+
+A bucket that exists but was **not** created by this tool (no `ManagedBy:
+nzshm-backup` tag) will cause an ABEND — this is a safety guard against
+accidentally writing into an unrelated bucket.
+
 ## Backup bucket naming conventions
 
 | Data type | Bucket name pattern |

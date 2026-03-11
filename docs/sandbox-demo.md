@@ -210,5 +210,8 @@ aws dynamodb list-exports --region ap-southeast-2
 
 **Backup bucket already exists error (S3):**
 The S3 backup module ABENDs if a backup bucket exists but was not created by
-this tool. This is intentional (guards against clobbering existing data).
-Run `scripts/sandbox_setup.sh teardown` to clean up, then re-run setup.
+this tool (i.e. lacks the `ManagedBy: nzshm-backup` tag). Buckets created by a previous `backup run` are recognised and reused — the sync
+is additive only (new/changed objects copied, nothing deleted), so existing
+backup data is preserved and accumulates until the lifecycle policy expires it. If you see this error
+for an unexpected bucket, run `scripts/sandbox_setup.sh teardown` to clean up,
+then re-run setup.
