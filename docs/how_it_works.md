@@ -57,6 +57,27 @@ target to fire automatically. Until `lambda_arn` is set in `backup-config.yaml`
 and a Lambda is deployed, the rules exist but have no target — running
 `backup run` manually is the only way to trigger a backup.
 
+## Lambda timeout risk with large S3 buckets
+
+> **Production concern:** The current S3 sync uses per-object `copy_object` API
+> calls inside the Lambda. This does not scale to the production toshi bucket
+> (~8 TB, ~8 million objects).
+
+| Step | Cost at 8M objects |
+|------|--------------------|
+| `list_objects_v2` source | ~8,000 API calls, ~80s |
+| `list_objects_v2` backup | ~8,000 API calls, ~80s |
+| `copy_object` (first run / full sync) | ~8M calls, ~22 hours — **impossible** |
+| `copy_object` (incremental, 0.1% changed) | ~8,000 calls, ~80s — feasible |
+
+The Lambda timeout is 15 minutes (AWS maximum). Incremental runs after the
+first sync are likely fine. A first-run or forced full sync will time out.
+
+**Planned fix: S3 Batch Operations** — Lambda generates a diff manifest (CSV),
+submits an `s3control:CreateJob`, and exits immediately. AWS runs the copy
+asynchronously, following the same pattern as DynamoDB PITR exports. See
+`docs/architecture/s3-batch-operations.md` for the implementation plan.
+
 ## How backup data accumulates
 
 Each backup run is **incremental and additive** — no existing backup data is
