@@ -15,7 +15,7 @@ class BackupTask(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source: Literal["toshi", "ths", "all"] = Field(..., description="Source alias to backup")
+    source: str = Field(..., description="Source alias to backup")
     dry_run: bool = Field(False, description="Simulate without executing")
     trigger_type: Literal["scheduled", "manual"] = Field(
         "scheduled", description="What triggered this backup"

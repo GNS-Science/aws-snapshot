@@ -48,7 +48,7 @@ def show():
 
 @app.command("add")
 def add_schedule(
-    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
+    source: str = typer.Option(..., help="Data source"),
     frequency: Literal["daily", "weekly", "hourly", "minutely"] = typer.Option(
         ..., help="Backup frequency"
     ),
@@ -141,7 +141,7 @@ def add_schedule(
 
 @app.command("remove")
 def remove_schedule(
-    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
+    source: str = typer.Option(..., help="Data source"),
     frequency: Literal["daily", "weekly", "hourly", "minutely"] = typer.Option(
         ..., help="Backup frequency"
     ),
@@ -194,7 +194,7 @@ def remove_schedule(
 
 @app.command("enable")
 def enable(
-    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
+    source: str = typer.Option(..., help="Data source"),
     frequency: str | None = typer.Option(
         None,
         help="Frequency to enable (daily, weekly, hourly, minutely). Defaults to all.",
@@ -219,7 +219,7 @@ def enable(
 
 @app.command("disable")
 def disable(
-    source: Literal["toshi", "ths", "all"] = typer.Option(..., help="Data source"),
+    source: str = typer.Option(..., help="Data source"),
     frequency: str | None = typer.Option(
         None,
         help="Frequency to disable (daily, weekly, hourly, minutely). Defaults to all.",
