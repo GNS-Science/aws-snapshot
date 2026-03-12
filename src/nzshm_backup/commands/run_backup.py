@@ -3,11 +3,9 @@
 import boto3
 import typer
 
+from nzshm_backup.backup_engine import run_backup_source
 from nzshm_backup.config import load_config
-from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
 from nzshm_backup.logging_config import setup_logging
-from nzshm_backup.s3_backup import backup_source, get_cross_account_session
-from nzshm_backup.s3_batch import batch_backup_source
 from nzshm_backup.state import get_state
 
 app = typer.Typer()
@@ -42,13 +40,7 @@ def run(
             raise typer.Exit(1)
         sources_to_backup = [source]
 
-    region = config.general.region
     session = boto3.Session()
-
-    if state.dry_run:
-        account_id = "123456789012"
-    else:
-        account_id = session.client("sts").get_caller_identity()["Account"]
 
     total_results = {
         "objects_copied": 0,
@@ -58,100 +50,50 @@ def run(
     }
 
     for source_alias in sources_to_backup:
-        if source_alias not in config.sources:
-            logger.error(f"Unknown source alias: {source_alias}")
-            total_results["errors"].append(f"Unknown source: {source_alias}")
-            continue
-
-        source_config = config.sources[source_alias]
-        source_session = (
-            get_cross_account_session(session, source_config.prod_account_role_arn)
-            if source_config.prod_account_role_arn
-            else None
+        result = run_backup_source(
+            session, config, source_alias, dry_run=state.dry_run, full_sync=full_sync
         )
 
-        for bucket_arn in source_config.s3_buckets:
-            bucket_name = bucket_arn.split(":")[-1] if ":" in bucket_arn else bucket_arn
-            backup_bucket_name = source_config.get_backup_bucket_name(
-                bucket_arn, region, account_id
-            )
-
-            logger.info(f"Backing up {bucket_name} → {backup_bucket_name}")
-
-            try:
-                if source_config.use_s3_batch:
-                    batch_result = batch_backup_source(
-                        session=session,
-                        source_bucket=bucket_name,
-                        backup_bucket=backup_bucket_name,
-                        batch_role_arn=config.general.s3_batch_role_arn,
-                        account_id=account_id,
-                        dry_run=state.dry_run,
-                        full_sync=full_sync,
-                        source_session=source_session,
-                    )
-                    prefix = "[DRY RUN] " if state.dry_run else ""
-                    if batch_result.status == "SKIPPED":
-                        typer.echo(f"{prefix}Batch: nothing to copy for {bucket_name}")
-                    else:
-                        typer.echo(
-                            f"{prefix}Batch job submitted: {batch_result.job_id} "
-                            f"({batch_result.objects_in_manifest} objects)"
-                        )
+        # Accumulate S3 totals and emit per-bucket output
+        for r in result.s3_results:
+            if r["status"] == "error":
+                logger.error(f"Backup failed for {r['bucket_name']}: {r['error']}")
+            elif "batch_job_id" in r:
+                prefix = "[DRY RUN] " if state.dry_run else ""
+                if r["batch_status"] == "SKIPPED":
+                    typer.echo(f"{prefix}Batch: nothing to copy for {r['bucket_name']}")
                 else:
-                    result = backup_source(
-                        session=session,
-                        source_bucket=bucket_arn,
-                        backup_bucket_name=backup_bucket_name,
-                        dry_run=state.dry_run,
-                        full_sync=full_sync,
-                        source_session=source_session,
+                    typer.echo(
+                        f"{prefix}Batch job submitted: {r['batch_job_id']} "
+                        f"({r['objects_in_manifest']} objects)"
+                    )
+            else:
+                total_results["objects_copied"] += r.get("objects_copied", 0)
+                total_results["bytes_transferred"] += r.get("bytes_transferred", 0)
+                total_results["objects_skipped"] += r.get("objects_skipped", 0)
+
+                if state.dry_run:
+                    logger.info(
+                        f"[DRY RUN] Would copy {r['objects_copied']} objects "
+                        f"({r['bytes_transferred']} bytes)"
+                    )
+                else:
+                    logger.info(
+                        f"Copied {r['objects_copied']} objects "
+                        f"({r['bytes_transferred'] / (1024 * 1024):.2f} MB) "
+                        f"in {r['duration_seconds']:.1f}s"
                     )
 
-                    total_results["objects_copied"] += result.objects_copied
-                    total_results["bytes_transferred"] += result.bytes_transferred
-                    total_results["objects_skipped"] += result.objects_skipped
-
-                    if state.dry_run:
-                        logger.info(
-                            f"[DRY RUN] Would copy {result.objects_copied} objects "
-                            f"({result.bytes_transferred} bytes)"
-                        )
-                    else:
-                        logger.info(
-                            f"Copied {result.objects_copied} objects "
-                            f"({result.bytes_transferred / (1024 * 1024):.2f} MB) "
-                            f"in {result.duration_seconds:.1f}s"
-                        )
-
-            except Exception as e:
-                logger.error(f"Backup failed for {bucket_name}: {e}")
-                total_results["errors"].append(f"{bucket_name}: {str(e)}")
-
-        dynamodb_client = (source_session or session).client("dynamodb")
-        for table_arn in source_config.dynamodb_tables:
-            export_bucket = source_config.get_dynamodb_backup_bucket_name(
-                source_alias, region, account_id
-            )
-            if not state.dry_run:
-                ensure_dynamodb_backup_bucket_ready(session, export_bucket)
-            result = export_dynamodb_table(
-                dynamodb_client,
-                table_arn,
-                export_bucket,
-                source_config.dynamodb_export_format,
-                state.dry_run,
-            )
-            if result.success:
+        # Emit per-table output
+        for r in result.dynamodb_results:
+            if r["status"] == "success":
                 prefix = "[DRY RUN] " if state.dry_run else ""
                 typer.echo(
-                    f"{prefix}Export initiated: {result.table_name} → "
-                    f"{result.export_arn or 'skipped'}"
+                    f"{prefix}Export initiated: {r['table_name']} → "
+                    f"{r['export_arn'] or 'skipped'}"
                 )
-            else:
-                total_results["errors"].extend(
-                    [f"{e['table_arn']}: {e['error']}" for e in result.errors]
-                )
+
+        total_results["errors"].extend(result.errors)
 
     if total_results["errors"]:
         typer.echo(f"\nCompleted with {len(total_results['errors'])} error(s)", err=True)
