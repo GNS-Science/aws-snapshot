@@ -80,20 +80,59 @@ aws sts get-caller-identity   # no --profile needed
 python scripts/create-reader-role.py ...
 ```
 
-### Option C — export raw credentials (required for tools that don't read SSO profiles)
+### Option C — export raw credentials (for tools that don't support SSO profiles)
 
-Some tools (Serverless Framework, some older SDKs) don't understand SSO profiles
-and need plain `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`:
+Some older tools and SDKs (e.g. Serverless Framework v3 and below) don't understand SSO profiles and need plain
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`:
 
 ```bash
 eval "$(aws configure export-credentials --profile arkivalist-admin --format env)"
 ```
 
-Credentials are temporary (~1 hour). This is required for `sls deploy`.
+Credentials are temporary (~1 hour).
+
+> **Serverless Framework v4+** uses AWS SDK v3 and supports SSO profiles natively —
+> `AWS_PROFILE` alone is sufficient for `sls deploy`. The `eval` export is no longer
+> needed for Serverless and should be avoided (it causes credential conflicts when
+> switching profiles — see below).
 
 ---
 
 ## Switching accounts / switching back
+
+### Safe switching after using `eval` (important)
+
+If you previously ran `eval "$(aws configure export-credentials ...)"`, the
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` env vars are
+now set. **These take precedence over `AWS_PROFILE`**, so a plain
+`export AWS_PROFILE=other-profile` will silently use the wrong account.
+
+Always clear the explicit credentials first:
+
+```bash
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+export AWS_PROFILE=spike-admin
+aws sts get-caller-identity   # confirm the switch worked
+```
+
+### Shell helper — `aws-switch` (add to `~/.zshrc` or `~/.bashrc`)
+
+```bash
+function aws-switch() {
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    export AWS_PROFILE="$1"
+    aws sts get-caller-identity
+}
+```
+
+Usage:
+
+```bash
+aws-switch spike-admin        # clears exported creds, sets profile, confirms identity
+aws-switch arkivalist-admin
+```
+
+### Manual steps (without the helper)
 
 ```bash
 # Switch
@@ -131,8 +170,29 @@ aws sts get-caller-identity
 
 **`Error: Token has expired`** — SSO session timed out. Re-run `aws sso login --profile <profile>`.
 
-**Serverless Framework ignores SSO profile** — use Option C (export raw credentials) before `sls deploy`.
+**Serverless Framework ignores SSO profile** — fixed in Serverless v4+, which uses AWS SDK v3 with native SSO support. Just set `AWS_PROFILE` and `sls deploy` works directly.
 
-**boto3 / backup CLI ignores `AWS_PROFILE`** — boto3 *does* support SSO profiles natively; Option B works fine for `backup run` and scripts. Only Option C is needed for non-AWS tools.
+**boto3 can't resolve SSO profiles that use the `sso_session` format** — AWS CLI v2 stores
+credentials differently from what botocore expects when profiles reference a separate
+`[sso-session]` block without inline `sso_start_url` / `sso_region`. In this case boto3
+raises `InvalidConfigError: missing required configuration: sso_start_url, sso_region`
+even though the CLI works fine. Workaround: export credentials first, then run:
+
+```bash
+eval $(aws configure export-credentials --profile arkivalist-admin --format env)
+python scripts/create-reader-role.py ...
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+```
+
+This affects one-off admin scripts that need to talk to a non-default account directly
+via boto3. The `backup` CLI itself is unaffected because it always runs as the backup
+account (which has a fully-configured profile) and assumes cross-account roles via
+`sts:AssumeRole` — it never creates a boto3 session from the source account's profile.
 
 **Wrong account after switching** — always run `aws sts get-caller-identity` to confirm before running destructive or cross-account operations.
+
+**`AWS_PROFILE` silently ignored after `eval` export** — if you previously ran
+`eval "$(aws configure export-credentials ...)"`, the `AWS_ACCESS_KEY_ID` env var
+is set and wins over `AWS_PROFILE`. The `backup` CLI will warn you if it detects
+both set at once. Fix: `unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN`
+before switching profile, or use the `aws-switch` helper above.
