@@ -65,6 +65,8 @@ Currently Phase 1 (CLI skeleton). All command handlers return "coming soon" stub
 - Target Python: 3.10+
 - Type annotations expected (mypy configured)
 - Ruff selects: E, F, W, I, N, UP, B, C4
+- DRY
+- Docs need to stay in sync with code / tests
 
 ## Key Design Decisions
 
