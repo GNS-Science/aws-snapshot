@@ -1,5 +1,7 @@
 """Main CLI entry point for NSHM Backup Solution."""
 
+import os
+
 import typer
 
 from nzshm_backup import __version__
@@ -23,6 +25,24 @@ Examples:
 )
 
 
+def _check_aws_credential_conflict() -> None:
+    """Warn if AWS_ACCESS_KEY_ID and AWS_PROFILE are both set.
+
+    boto3 gives explicit credential env vars higher priority than AWS_PROFILE,
+    so setting both (e.g. after eval-exporting creds then switching profile) will
+    silently use the wrong account.
+    """
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_PROFILE"):
+        profile = os.environ["AWS_PROFILE"]
+        typer.echo(
+            f"Warning: AWS_ACCESS_KEY_ID is set and will override AWS_PROFILE={profile!r}.\n"
+            "  The backup CLI will use the exported credentials, not the profile.\n"
+            "  To fix, run:\n"
+            "    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN",
+            err=True,
+        )
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -38,6 +58,7 @@ def main(
         typer.echo(f"backup {__version__}")
         raise typer.Exit()
 
+    _check_aws_credential_conflict()
     _state.verbose = verbose
     _state.dry_run = dry_run
     _state.output = output
@@ -55,11 +76,11 @@ from nzshm_backup.commands.test import app as test_app  # noqa: E402
 
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")
 app.add_typer(run_app, name="run", help="Execute manual backup.")
-app.add_typer(restore_app, name="restore", help="Manage backup restores.")
-app.add_typer(test_app, name="test", help="Run backup tests and validation.")
+app.add_typer(restore_app, name="restore", help="Manage backup restores. (TODO)")
+app.add_typer(test_app, name="test", help="Run backup tests and validation. (TODO)")
 app.add_typer(status_app, name="status", help="Show current backup status.")
-app.add_typer(report_app, name="report", help="Generate backup reports.")
-app.add_typer(costs_app, name="costs", help="Manage and report backup costs.")
+app.add_typer(report_app, name="report", help="Generate backup reports. (TODO)")
+app.add_typer(costs_app, name="costs", help="Manage and report backup costs. (TODO)")
 app.add_typer(config_app, name="config", help="Manage backup configuration.")
 
 
