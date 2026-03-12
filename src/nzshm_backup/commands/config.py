@@ -1,10 +1,13 @@
 """Configuration management commands."""
 
+import json
 from pathlib import Path
 
+import boto3
 import typer
 
 from nzshm_backup.config import ConfigModel, load_config, save_config
+from nzshm_backup.config.loader import load_config_from_ssm
 from nzshm_backup.state import get_state
 
 app = typer.Typer()
@@ -93,3 +96,62 @@ def validate_config():
     except Exception as e:
         typer.echo(f"Error: Invalid configuration: {e}", err=True)
         raise typer.Exit(1) from e
+
+
+@app.command("push")
+def push_config(
+    config_file: Path = typer.Argument(None, help="Path to config file (default: BACKUP_CONFIG_PATH or backup-config.yaml)"),
+    stage: str = typer.Option("dev", help="Deployment stage (e.g. dev, prod)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be pushed without pushing"),
+):
+    """Push local config to SSM Parameter Store."""
+    if config_file is None:
+        config_file = _get_config_path()
+
+    try:
+        config = load_config(config_file)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+    param_name = f"/nzshm-backup/{stage}/config"
+    json_str = json.dumps(config.model_dump(mode="json", by_alias=True))
+
+    typer.echo(f"Source: {config_file.resolve()}")
+    if dry_run:
+        typer.echo(f"[dry-run] Would push config to SSM parameter: {param_name}")
+        typer.echo(f"[dry-run] Config JSON ({len(json_str)} bytes):")
+        typer.echo(json_str)
+        return
+
+    ssm = boto3.client("ssm")
+    ssm.put_parameter(
+        Name=param_name,
+        Value=json_str,
+        Type="String",
+        Overwrite=True,
+    )
+    typer.echo(f"Config pushed to SSM parameter: {param_name}")
+
+
+@app.command("pull")
+def pull_config(
+    stage: str = typer.Option("dev", help="Deployment stage (e.g. dev, prod)"),
+    save: bool = typer.Option(False, "--save", help="Save pulled config to local config file"),
+):
+    """Pull config from SSM Parameter Store and display it."""
+    try:
+        config = load_config_from_ssm(stage)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+    import yaml
+
+    config_dict = config.model_dump(mode="json", by_alias=True)
+    typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
+
+    if save:
+        config_path = _get_config_path()
+        save_config(config, config_path)
+        typer.echo(f"Config saved to: {config_path}")
