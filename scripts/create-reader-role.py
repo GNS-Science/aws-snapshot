@@ -16,7 +16,7 @@ Usage:
 After running, copy the printed ARN into backup-config.yaml under the source:
     sources:
       arkivalist:
-        prod_account_role_arn: "arn:aws:iam::816711409078:role/nzshm-backup-reader"
+        source_account_role_arn: "arn:aws:iam::816711409078:role/nzshm-backup-reader"
 """
 
 import argparse
@@ -45,7 +45,7 @@ def build_trust_policy(backup_account_id: str) -> dict:
     }
 
 
-def build_permission_policy(region: str, account_id: str, s3_buckets: list[str], dynamodb_tables: list[str]) -> dict:
+def build_permission_policy(region: str, account_id: str, s3_buckets: list[str], dynamodb_tables: list[str], backup_account_id: str = "") -> dict:
     statements = []
 
     if s3_buckets:
@@ -54,12 +54,14 @@ def build_permission_policy(region: str, account_id: str, s3_buckets: list[str],
             "Effect": "Allow",
             "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
             "Resource": [f"arn:aws:s3:::{b}" for b in s3_buckets],
+            "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
         })
         statements.append({
             "Sid": "ReadSourceObjects",
             "Effect": "Allow",
             "Action": ["s3:GetObject", "s3:GetObjectTagging"],
             "Resource": [f"arn:aws:s3:::{b}/*" for b in s3_buckets],
+            "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
         })
 
     if dynamodb_tables:
@@ -68,6 +70,7 @@ def build_permission_policy(region: str, account_id: str, s3_buckets: list[str],
             "Effect": "Allow",
             "Action": [
                 "dynamodb:ExportTableToPointInTime",
+                "dynamodb:ListExports",
                 "dynamodb:DescribeExport",
                 "dynamodb:DescribeContinuousBackups",
             ],
@@ -76,6 +79,14 @@ def build_permission_policy(region: str, account_id: str, s3_buckets: list[str],
                 for t in dynamodb_tables
             ],
         })
+        if backup_account_id:
+            statements.append({
+                "Sid": "WriteDynamoDBExportBucket",
+                "Effect": "Allow",
+                "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+                "Resource": [f"arn:aws:s3:::nzshm-dynamo-backup-*-{region}-{account_id}/*"],
+                "Condition": {"StringEquals": {"s3:ResourceAccount": backup_account_id}},
+            })
 
     return {"Version": "2012-10-17", "Statement": statements}
 
@@ -86,10 +97,11 @@ def main():
     parser.add_argument("--s3-buckets", nargs="*", default=[], help="Source S3 bucket names (not ARNs)")
     parser.add_argument("--dynamodb-tables", nargs="*", default=[], help="Source DynamoDB table names (not ARNs)")
     parser.add_argument("--region", default="ap-southeast-2")
+    parser.add_argument("--profile", default=None, help="AWS profile name (overrides AWS_PROFILE env var)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be created without API calls")
     args = parser.parse_args()
 
-    session = boto3.Session(region_name=args.region)
+    session = boto3.Session(profile_name=args.profile, region_name=args.region)
     iam = session.client("iam")
     sts = session.client("sts")
 
@@ -97,7 +109,7 @@ def main():
     print(f"Source account: {account_id}  Backup account: {args.backup_account_id}  Region: {args.region}")
 
     trust_policy = build_trust_policy(args.backup_account_id)
-    permission_policy = build_permission_policy(args.region, account_id, args.s3_buckets, args.dynamodb_tables)
+    permission_policy = build_permission_policy(args.region, account_id, args.s3_buckets, args.dynamodb_tables, args.backup_account_id)
 
     if args.dry_run:
         print(f"\n[DRY RUN] Would create role: {ROLE_NAME}")
@@ -134,7 +146,7 @@ def main():
     print("Attached inline policy: nzshm-backup-reader-permissions")
 
     print(f"\nAdd to backup-config.yaml under the relevant source:")
-    print(f"    prod_account_role_arn: \"{role_arn}\"")
+    print(f"    source_account_role_arn: \"{role_arn}\"")
 
 
 if __name__ == "__main__":
