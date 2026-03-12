@@ -1,9 +1,12 @@
 """Configuration loader for NSHM Backup."""
 
+import json
 import os
 from pathlib import Path
 
+import boto3
 import yaml
+from botocore.exceptions import ClientError
 
 from nzshm_backup.config.models import ConfigModel
 
@@ -76,6 +79,32 @@ def get_config(config_path: Path | None = None) -> ConfigModel:
         Validated ConfigModel instance
     """
     return load_config(config_path)
+
+
+def load_config_from_ssm(stage: str) -> ConfigModel:
+    """Load configuration from SSM Parameter Store (Lambda runtime).
+
+    Args:
+        stage: Deployment stage (e.g. "dev", "prod")
+
+    Returns:
+        Validated ConfigModel instance
+
+    Raises:
+        FileNotFoundError: If the SSM parameter does not exist
+        json.JSONDecodeError: If the parameter value is not valid JSON
+        pydantic.ValidationError: If schema validation fails
+    """
+    param_name = f"/nzshm-backup/{stage}/config"
+    ssm = boto3.client("ssm")
+    try:
+        response = ssm.get_parameter(Name=param_name, WithDecryption=False)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ParameterNotFound":
+            raise FileNotFoundError(f"SSM parameter not found: {param_name}") from e
+        raise
+    config_data = json.loads(response["Parameter"]["Value"])
+    return ConfigModel.model_validate(config_data)
 
 
 def load_config_from_env(env_var: str = "BACKUP_CONFIG") -> ConfigModel:

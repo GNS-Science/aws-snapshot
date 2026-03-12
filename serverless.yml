@@ -11,7 +11,7 @@ provider:
   memorySize: 1024
   timeout: 900
   environment:
-    BACKUP_CONFIG: ${env:BACKUP_CONFIG, ""}
+    NZSHM_STAGE: ${sls:stage}
     PYTHONPATH: /var/task/src
   iam:
     role:
@@ -24,7 +24,7 @@ provider:
             - s3:CopyObject
             - s3:CreateBucket
             - s3:GetBucketTagging
-            - s3:PutBucketLifecycleConfiguration
+            - s3:PutLifecycleConfiguration
             - s3:PutBucketPolicy
             - s3:PutBucketTagging
           Resource:
@@ -62,6 +62,11 @@ provider:
             - events:EnableRule
             - events:DisableRule
           Resource: "*"
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:PutParameter
+          Resource: "arn:aws:ssm:ap-southeast-2:*:parameter/nzshm-backup/*"
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:
