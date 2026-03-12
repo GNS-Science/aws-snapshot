@@ -33,13 +33,13 @@ that call the same underlying functions — `backup_source()` and
 ## What happens when `backup run --source toshi` executes
 
 1. Load `backup-config.yaml` (or `BACKUP_CONFIG_PATH` env var)
-2. Resolve account ID via `sts:GetCallerIdentity` (or use `123456789012` in dry-run)
+2. Resolve backup account ID via `sts:GetCallerIdentity`; resolve source account ID from the source config (same as backup account for same-account sources, or extracted from `prod_account_role_arn` for cross-account sources)
 3. **S3 loop** — for each bucket ARN in `sources.toshi.s3_buckets`:
-   - Derive backup bucket name: `{bucket}-backup-{region}-{account_id}`
+   - Derive backup bucket name: `{bucket}-backup-{region}-{source-account-id}`
    - Create backup bucket if it doesn't exist (with lifecycle policy + delete-protection)
    - Incremental sync: list source objects, compare ETags, copy only changed/new objects
 4. **DynamoDB loop** — for each table ARN in `sources.toshi.dynamodb_tables`:
-   - Derive export bucket name: `nzshm-dynamo-backup-toshi-{region}-{account_id}`
+   - Derive export bucket name: `nzshm-dynamo-backup-{source-alias}-{region}-{source-account-id}`
    - Create export bucket if it doesn't exist (idempotent — no error if already exists)
    - Call `dynamodb:ExportTableToPointInTime` → returns an `ExportArn` immediately
    - Export runs asynchronously in AWS — it is **not** complete when the CLI exits
@@ -94,6 +94,32 @@ This means the backup bucket is a **superset** of the source at any point in
 time. Data deleted from the source is retained in the backup until the lifecycle
 policy expires it (365 days by default).
 
+## Delete protection
+
+Every backup bucket gets a resource-based bucket policy with an explicit
+`s3:DeleteObject` deny applied at creation time. This prevents accidental
+deletion by any principal — including administrator roles — since explicit
+denies in resource policies override identity-based allow policies.
+
+### Manually deleting a backup bucket (e.g. to clean up a wrongly-named bucket)
+
+Because the explicit deny overrides even `AdministratorAccess`, you must remove
+the bucket policy before you can empty and delete the bucket:
+
+```bash
+# 1. Remove the no-delete policy
+aws s3api delete-bucket-policy --bucket <bucket-name>
+
+# 2. Empty the bucket
+aws s3 rm s3://<bucket-name> --recursive
+
+# 3. Delete the bucket
+aws s3api delete-bucket --bucket <bucket-name>
+```
+
+> Only do this for buckets you are certain are safe to delete (e.g. wrongly-named
+> buckets from a misconfigured run). Never remove the policy from a live backup bucket.
+
 **Manual and scheduled backups share the same bucket.** A bucket created by
 `backup run` from the CLI is recognised (via its `ManagedBy: nzshm-backup` tag)
 and reused by the Lambda on subsequent scheduled runs, and vice versa. There is
@@ -107,11 +133,27 @@ accidentally writing into an unrelated bucket.
 
 | Data type | Bucket name pattern |
 |-----------|-------------------|
-| S3 source backup | `{source-bucket-name}-backup-{region}-{account_id}` |
-| DynamoDB export | `nzshm-dynamo-backup-{source-alias}-{region}-{account_id}` |
+| S3 source backup | `{source-bucket-name}-backup-{region}-{source-account-id}` |
+| DynamoDB export | `nzshm-dynamo-backup-{source-alias}-{region}-{source-account-id}` |
 
-Including `{account_id}` in the name ensures global uniqueness across accounts
-and prevents any cross-account confusion.
+`{source-account-id}` is the AWS account that **owns the data being backed up**,
+not the account running the backup Lambda. This means:
+
+- For same-account sources (toshi, ths) the two are identical.
+- For cross-account sources (e.g. Arkivalist, account `816711409078`) the bucket
+  name embeds the source account, making it immediately clear which system the
+  backup belongs to.
+
+This serves two purposes: global S3 name uniqueness, and self-documenting bucket
+names — you can identify the data origin without opening the bucket.
+
+**Examples:**
+
+| Source | Backup bucket |
+|--------|--------------|
+| `arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh` (account `816711409078`) | `arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh-backup-ap-southeast-2-816711409078` |
+| DynamoDB tables for `arkivalist` source | `nzshm-dynamo-backup-arkivalist-ap-southeast-2-816711409078` |
+| DynamoDB tables for `toshi` source (account `595842668254`) | `nzshm-dynamo-backup-toshi-ap-southeast-2-595842668254` |
 
 ## S3 lifecycle tiers
 
