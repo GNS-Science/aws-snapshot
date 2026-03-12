@@ -28,10 +28,10 @@ def test_backup_task_defaults():
     assert task.is_scheduled() is True
 
 
-def test_backup_task_invalid_source():
-    """Test invalid source raises error."""
-    with pytest.raises(ValueError):
-        BackupTask(source="invalid_source")
+def test_backup_task_any_source_accepted():
+    """Source is a free string — validation against config happens at runtime, not schema level."""
+    task = BackupTask(source="arkivalist")
+    assert task.source == "arkivalist"
 
 
 def test_backup_task_extra_fields_forbidden():
