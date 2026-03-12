@@ -36,9 +36,9 @@ sources:
   arkivalist:
     display_name: "Arkivalist"
     # Cross-account source: Arkivalist account 816711409078
-    # Backup Lambda (595842668254) assumes prod_account_role_arn to read source data.
+    # Backup Lambda (595842668254) assumes source_account_role_arn to read source data.
     # See docs/design/ACCOUNT_ISOLATION.md for IAM setup required.
-    prod_account_role_arn: null  # arn:aws:iam::816711409078:role/nzshm-backup-reader
+    source_account_role_arn: null  # arn:aws:iam::816711409078:role/nzshm-backup-reader
     s3_buckets:
       # Serverless Framework deployment bucket (Lambda zips, CloudFormation templates).
       # Intentional choice: frequent deployments generate real ETag changes, making

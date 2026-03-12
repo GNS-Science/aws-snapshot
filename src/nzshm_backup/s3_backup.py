@@ -59,7 +59,7 @@ def get_cross_account_session(session: boto3.Session, role_arn: str) -> boto3.Se
         New boto3.Session authenticated as the assumed role
     """
     sts = session.client("sts")
-    creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="nzshm-backup")[
+    creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="nzshm-backup", ExternalId="nzshm-backup")[
         "Credentials"
     ]
     return boto3.Session(
@@ -110,14 +110,16 @@ def create_backup_bucket(
     bucket_name: str,
     region: str,
     account_id: str,
+    source_bucket: str = "",
 ) -> None:
     """Create backup bucket with error handling.
 
     Args:
-        s3_client: boto3 S3 client
-        bucket_name: Name of backup bucket to create
-        region: AWS region
-        account_id: AWS account ID
+        s3_client:     boto3 S3 client
+        bucket_name:   Name of backup bucket to create
+        region:        AWS region
+        account_id:    AWS account ID of the backup account
+        source_bucket: Original source bucket name (recorded as a tag)
 
     Raises:
         ValueError: If bucket already exists
@@ -142,16 +144,15 @@ def create_backup_bucket(
 
     s3_client.create_bucket(**create_bucket_config)
 
-    s3_client.put_bucket_tagging(
-        Bucket=bucket_name,
-        Tagging={
-            "TagSet": [
-                {"Key": "ManagedBy", "Value": "nzshm-backup"},
-                {"Key": "Type", "Value": "backup"},
-                {"Key": "Account", "Value": account_id},
-            ]
-        },
-    )
+    tag_set = [
+        {"Key": "ManagedBy", "Value": "nzshm-backup"},
+        {"Key": "Type", "Value": "backup"},
+        {"Key": "Account", "Value": account_id},
+    ]
+    if source_bucket:
+        tag_set.append({"Key": "SourceBucket", "Value": source_bucket})
+
+    s3_client.put_bucket_tagging(Bucket=bucket_name, Tagging={"TagSet": tag_set})
 
     logger.info(f"Created backup bucket: {bucket_name}")
 
@@ -339,6 +340,7 @@ def ensure_backup_bucket_ready(
     session: boto3.Session,
     backup_bucket_name: str,
     lifecycle_config: LifecycleConfig | None = None,
+    source_bucket: str = "",
 ) -> None:
     """Ensure backup bucket exists with proper configuration.
 
@@ -355,7 +357,7 @@ def ensure_backup_bucket_ready(
     account_id = get_account_id(session)
 
     if not bucket_exists(s3_client, backup_bucket_name):
-        create_backup_bucket(s3_client, backup_bucket_name, region, account_id)
+        create_backup_bucket(s3_client, backup_bucket_name, region, account_id, source_bucket)
         apply_lifecycle_policy(s3_client, backup_bucket_name, lifecycle_config)
         apply_no_delete_policy(s3_client, backup_bucket_name)
     elif bucket_is_ours(s3_client, backup_bucket_name):
@@ -397,7 +399,7 @@ def backup_source(
         raise ValueError(f"Source bucket {source_bucket_name} does not exist")
 
     if not dry_run:
-        ensure_backup_bucket_ready(session, backup_bucket_name)
+        ensure_backup_bucket_ready(session, backup_bucket_name, source_bucket=source_bucket_name)
 
     return sync_bucket(
         dest_s3_client,

@@ -1,8 +1,23 @@
 """Pydantic models for backup configuration."""
 
+import hashlib
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+
+def _safe_bucket_name(prefix: str, suffix: str) -> str:
+    """Return a valid S3 bucket name (max 63 chars).
+
+    If prefix + suffix exceeds 63 chars, truncate the prefix and append an
+    8-character hash of the original prefix to preserve uniqueness.
+    """
+    full = f"{prefix}{suffix}"
+    if len(full) <= 63:
+        return full
+    hash8 = hashlib.md5(prefix.encode()).hexdigest()[:8]
+    max_prefix = 63 - len(suffix) - 1 - 8  # 1 for the '-' separator
+    return f"{prefix[:max_prefix]}-{hash8}{suffix}"
 
 
 class RetentionConfig(BaseModel):
@@ -117,7 +132,7 @@ class SourceConfig(BaseModel):
     dynamodb_tables: list[str] = Field(default_factory=list, description="DynamoDB table ARNs")
     s3_backup_bucket_suffix: str = "-backup"
     dynamodb_export_format: Literal["DYNAMODB_JSON", "ION"] = "DYNAMODB_JSON"
-    prod_account_role_arn: str | None = Field(
+    source_account_role_arn: str | None = Field(
         None,
         description="IAM role ARN in the source account to assume for cross-account access. "
         "If None, the Lambda's own credentials are used (same-account backup).",
@@ -131,7 +146,7 @@ class SourceConfig(BaseModel):
     def get_backup_bucket_name(self, bucket_arn: str, region: str, account_id: str) -> str:
         """Generate globally unique backup bucket name from source bucket ARN."""
         bucket_name = bucket_arn.split(":")[-1]
-        return f"{bucket_name}-backup-{region}-{account_id}"
+        return _safe_bucket_name(bucket_name, f"-backup-{region}-{account_id}")
 
     def get_dynamodb_backup_bucket_name(
         self, source_alias: str, region: str, account_id: str
