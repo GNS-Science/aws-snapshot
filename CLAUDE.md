@@ -13,18 +13,18 @@ AWS-native backup CLI replacing AWS Backup for NSHM datasets. See `docs/backup-s
 poetry install            # all deps including dev
 
 # Run tests
-pytest
-pytest tests/test_foo.py::test_bar
+poetry run pytest
+poetry run pytest tests/test_foo.py::test_bar
 
 # Lint & format
-ruff check src/ tests/
-black src/ tests/
-mypy src/
+poetry run ruff check src/ tests/
+poetry run black src/ tests/
+poetry run mypy src/
 
 # Run CLI
-backup --help
-backup status --source arkivalist
-backup run --source arkivalist --dry-run
+poetry run backup --help
+poetry run backup status --source arkivalist
+poetry run backup run --source arkivalist --dry-run
 ```
 
 ## Architecture
