@@ -180,26 +180,26 @@ def test_backup_source_no_source_session_unchanged(aws_session, s3_client):
 
 
 # ---------------------------------------------------------------------------
-# Config: prod_account_role_arn field
+# Config: source_account_role_arn field
 # ---------------------------------------------------------------------------
 
 
-def test_config_prod_account_role_arn_optional():
-    """prod_account_role_arn defaults to None (same-account backup)."""
+def test_config_source_account_role_arn_optional():
+    """source_account_role_arn defaults to None (same-account backup)."""
     from nzshm_backup.config.models import SourceConfig
 
     sc = SourceConfig(display_name="test", s3_buckets=[], dynamodb_tables=[])
-    assert sc.prod_account_role_arn is None
+    assert sc.source_account_role_arn is None
 
 
-def test_config_prod_account_role_arn_set():
-    """prod_account_role_arn accepts a valid ARN."""
+def test_config_source_account_role_arn_set():
+    """source_account_role_arn accepts a valid ARN."""
     from nzshm_backup.config.models import SourceConfig
 
     sc = SourceConfig(
         display_name="arkivalist",
         s3_buckets=[],
         dynamodb_tables=[],
-        prod_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
+        source_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
     )
-    assert "456789012345" in sc.prod_account_role_arn
+    assert "456789012345" in sc.source_account_role_arn

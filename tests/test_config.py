@@ -1,11 +1,15 @@
 """Tests for configuration loading and models."""
 
+import json
 from pathlib import Path
 
+import boto3
 import pytest
 import yaml
+from moto import mock_aws
 
 from nzshm_backup.config import ConfigModel, load_config, save_config
+from nzshm_backup.config.loader import load_config_from_ssm
 from nzshm_backup.config.models import RetentionConfig, SourceConfig
 
 
@@ -91,7 +95,7 @@ def test_retention_config_defaults():
 
 
 def test_source_config_backup_bucket_name():
-    """Test backup bucket name generation."""
+    """Test backup bucket name generation — short name fits within 63 chars."""
     source = SourceConfig(
         display_name="Test",
         s3_buckets=["arn:aws:s3:::my-bucket"],
@@ -104,6 +108,31 @@ def test_source_config_backup_bucket_name():
     )
 
     assert bucket_name == "my-bucket-backup-ap-southeast-2-123456789012"
+    assert len(bucket_name) <= 63
+
+
+def test_source_config_backup_bucket_name_truncated():
+    """Long source bucket names are truncated with a hash to stay within 63 chars."""
+    source = SourceConfig(
+        display_name="Test",
+        s3_buckets=["arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh"],
+    )
+
+    bucket_name = source.get_backup_bucket_name(
+        "arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh",
+        "ap-southeast-2",
+        "456789012345",
+    )
+
+    assert len(bucket_name) <= 63
+    assert bucket_name.endswith("-backup-ap-southeast-2-456789012345")
+    # Hash is stable — same input always produces the same name
+    assert bucket_name == source.get_backup_bucket_name(
+        "arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh",
+        "ap-southeast-2",
+        "456789012345",
+    )
+    assert bucket_name == "arkivalist-api-dev--6b21d9ed-backup-ap-southeast-2-456789012345"
 
 
 def test_config_model_validation(sample_config_dict):
@@ -113,3 +142,90 @@ def test_config_model_validation(sample_config_dict):
     assert config.general.region == "ap-southeast-2"
     assert len(config.sources) == 1
     assert config.retention.hot_days == 30
+
+
+# ---------------------------------------------------------------------------
+# SSM loader tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ssm_config_json(sample_config_dict):
+    """Return a JSON string of a valid config."""
+    config = ConfigModel.model_validate(sample_config_dict)
+    return json.dumps(config.model_dump(mode="json", by_alias=True))
+
+
+def test_load_config_from_ssm(aws_credentials, ssm_config_json):
+    """load_config_from_ssm returns a valid ConfigModel when the parameter exists."""
+    with mock_aws():
+        ssm = boto3.client("ssm", region_name="ap-southeast-2")
+        ssm.put_parameter(Name="/nzshm-backup/dev/config", Value=ssm_config_json, Type="String")
+
+        config = load_config_from_ssm("dev")
+
+        assert config.general.region == "ap-southeast-2"
+        assert "toshi" in config.sources
+
+
+def test_load_config_from_ssm_not_found(aws_credentials):
+    """load_config_from_ssm raises FileNotFoundError when the parameter is missing."""
+    with mock_aws():
+        with pytest.raises(FileNotFoundError, match="/nzshm-backup/missing/config"):
+            load_config_from_ssm("missing")
+
+
+# ---------------------------------------------------------------------------
+# CLI push / pull command tests
+# ---------------------------------------------------------------------------
+
+
+def test_config_push_uploads_to_ssm(aws_credentials, cli_runner, temp_config_file):
+    """push command uploads config to SSM as JSON."""
+    from nzshm_backup.commands.config import app
+
+    with mock_aws():
+        result = cli_runner.invoke(
+            app, ["push", str(temp_config_file), "--stage", "dev"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "/nzshm-backup/dev/config" in result.output
+
+        ssm = boto3.client("ssm", region_name="ap-southeast-2")
+        response = ssm.get_parameter(Name="/nzshm-backup/dev/config")
+        stored = json.loads(response["Parameter"]["Value"])
+        assert "sources" in stored
+        assert "toshi" in stored["sources"]
+
+
+def test_config_push_dry_run(aws_credentials, cli_runner, temp_config_file):
+    """push --dry-run prints a preview but does NOT create the SSM parameter."""
+    from nzshm_backup.commands.config import app
+
+    with mock_aws():
+        result = cli_runner.invoke(
+            app,
+            ["push", str(temp_config_file), "--stage", "dev", "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "[dry-run]" in result.output
+
+        # Parameter must NOT have been created
+        ssm = boto3.client("ssm", region_name="ap-southeast-2")
+        with pytest.raises(ssm.exceptions.ParameterNotFound):
+            ssm.get_parameter(Name="/nzshm-backup/dev/config")
+
+
+def test_config_pull_shows_config(aws_credentials, cli_runner, ssm_config_json):
+    """pull command fetches config from SSM and prints it as YAML."""
+    from nzshm_backup.commands.config import app
+
+    with mock_aws():
+        ssm = boto3.client("ssm", region_name="ap-southeast-2")
+        ssm.put_parameter(Name="/nzshm-backup/dev/config", Value=ssm_config_json, Type="String")
+
+        result = cli_runner.invoke(app, ["pull", "--stage", "dev"])
+
+        assert result.exit_code == 0, result.output
+        # YAML output should contain the source name
+        assert "toshi" in result.output
