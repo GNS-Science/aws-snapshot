@@ -52,14 +52,16 @@ def _print_source_status(source_alias: str, source_config, session: boto3.Sessio
                     continue
                 latest = exports[0]
                 status = latest["ExportStatus"]
-                export_time = latest.get("ExportTime", "")
                 status_icon = {"COMPLETED": "✓", "IN_PROGRESS": "⋯", "FAILED": "✗"}.get(status, "?")
-                typer.echo(f"    {status_icon} {table_name}: {status}  {export_time}")
-                # Show failure reason if latest is failed
+
+                detail = dynamodb_client.describe_export(ExportArn=latest["ExportArn"])
+                desc = detail["ExportDescription"]
+                start_time = desc.get("StartTime")
+                ts = f"  [{start_time.strftime('%Y-%m-%d %H:%M UTC')}]" if start_time else ""
+                typer.echo(f"    {status_icon} {table_name}: {status}{ts}")
+
                 if status == "FAILED":
-                    detail = dynamodb_client.describe_export(ExportArn=latest["ExportArn"])
-                    msg = detail["ExportDescription"].get("FailureMessage", "")
-                    # Truncate long S3 error messages to the useful part
+                    msg = desc.get("FailureMessage", "")
                     if "because" in msg:
                         msg = msg.split("because")[-1].strip()
                     typer.echo(f"      reason: {msg[:120]}")
