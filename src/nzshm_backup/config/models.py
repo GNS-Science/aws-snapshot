@@ -1,23 +1,15 @@
 """Pydantic models for backup configuration."""
 
-import hashlib
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 
-def _safe_bucket_name(prefix: str, suffix: str) -> str:
-    """Return a valid S3 bucket name (max 63 chars).
+class S3BucketConfig(BaseModel):
+    """Configuration for a single S3 bucket source."""
 
-    If prefix + suffix exceeds 63 chars, truncate the prefix and append an
-    8-character hash of the original prefix to preserve uniqueness.
-    """
-    full = f"{prefix}{suffix}"
-    if len(full) <= 63:
-        return full
-    hash8 = hashlib.md5(prefix.encode()).hexdigest()[:8]
-    max_prefix = 63 - len(suffix) - 1 - 8  # 1 for the '-' separator
-    return f"{prefix[:max_prefix]}-{hash8}{suffix}"
+    arn: str = Field(..., description="S3 bucket ARN")
+    label: str = Field(..., description="Short human-readable label used in backup bucket name")
 
 
 class RetentionConfig(BaseModel):
@@ -128,14 +120,18 @@ class SourceConfig(BaseModel):
     """Configuration for a single backup source."""
 
     display_name: str = Field(..., description="Human-readable name")
-    s3_buckets: list[str] = Field(default_factory=list, description="S3 bucket ARNs")
+    s3_buckets: list[S3BucketConfig] = Field(default_factory=list, description="S3 bucket configs")
     dynamodb_tables: list[str] = Field(default_factory=list, description="DynamoDB table ARNs")
-    s3_backup_bucket_suffix: str = "-backup"
     dynamodb_export_format: Literal["DYNAMODB_JSON", "ION"] = "DYNAMODB_JSON"
     source_account_role_arn: str | None = Field(
         None,
         description="IAM role ARN in the source account to assume for cross-account access. "
         "If None, the Lambda's own credentials are used (same-account backup).",
+    )
+    source_account_id: str | None = Field(
+        None,
+        description="AWS account ID that owns the source data. "
+        "Required for cross-account sources. Validated against source_account_role_arn.",
     )
     use_s3_batch: bool = Field(
         False,
@@ -143,16 +139,17 @@ class SourceConfig(BaseModel):
         "Required for large buckets (millions of objects). Requires general.s3_batch_role_arn.",
     )
 
-    def get_backup_bucket_name(self, bucket_arn: str, region: str, account_id: str) -> str:
-        """Generate globally unique backup bucket name from source bucket ARN."""
-        bucket_name = bucket_arn.split(":")[-1]
-        return _safe_bucket_name(bucket_name, f"-backup-{region}-{account_id}")
+    def get_backup_bucket_name(
+        self, bucket_label: str, region: str, account_id: str, source_key: str
+    ) -> str:
+        """Generate human-readable backup bucket name from source key and bucket label."""
+        return f"bb-{source_key}-s3-{bucket_label}-{region}-{account_id}"
 
     def get_dynamodb_backup_bucket_name(
-        self, source_alias: str, region: str, account_id: str
+        self, source_key: str, region: str, account_id: str
     ) -> str:
-        """Generate globally unique DynamoDB export bucket name."""
-        return f"nzshm-dynamo-backup-{source_alias}-{region}-{account_id}"
+        """Generate human-readable DynamoDB export bucket name."""
+        return f"bb-{source_key}-dynamo-{region}-{account_id}"
 
 
 class GeneralConfig(BaseModel):
@@ -189,4 +186,31 @@ class ConfigModel(BaseModel):
                 raise ValueError(
                     "general.s3_batch_role_arn is required when any source has use_s3_batch: true"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_source_accounts(self) -> "ConfigModel":
+        for alias, source in self.sources.items():
+            if source.source_account_role_arn and not source.source_account_id:
+                raise ValueError(
+                    f"sources.{alias}: source_account_id is required when source_account_role_arn is set"
+                )
+            if source.source_account_role_arn and source.source_account_id:
+                arn_account = source.source_account_role_arn.split(":")[4]
+                if arn_account != source.source_account_id:
+                    raise ValueError(
+                        f"sources.{alias}: source_account_id {source.source_account_id!r} "
+                        f"does not match account in source_account_role_arn ({arn_account!r})"
+                    )
+            if source.source_account_id:
+                for table_arn in source.dynamodb_tables:
+                    arn_account = table_arn.split(":")[4]
+                    if arn_account != source.source_account_id:
+                        raise ValueError(
+                            f"sources.{alias}: DynamoDB table {table_arn!r} belongs to account "
+                            f"{arn_account!r}, expected {source.source_account_id!r}"
+                        )
+            labels = [b.label for b in source.s3_buckets]
+            if len(labels) != len(set(labels)):
+                raise ValueError(f"sources.{alias}: s3_bucket labels must be unique")
         return self

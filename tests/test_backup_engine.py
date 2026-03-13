@@ -5,7 +5,7 @@ import boto3
 from moto import mock_aws
 
 from nzshm_backup.backup_engine import SourceBackupResult, run_backup_source
-from nzshm_backup.config.models import ConfigModel, GeneralConfig, SourceConfig
+from nzshm_backup.config.models import ConfigModel, GeneralConfig, S3BucketConfig, SourceConfig
 
 
 # ---------------------------------------------------------------------------
@@ -22,9 +22,10 @@ SOURCE_BUCKET_ARN = f"arn:aws:s3:::{SOURCE_BUCKET}"
 
 def _make_config(
     *,
-    s3_buckets: list[str] | None = None,
+    s3_buckets: list[S3BucketConfig] | None = None,
     dynamodb_tables: list[str] | None = None,
     source_account_role_arn: str | None = None,
+    source_account_id: str | None = None,
 ) -> ConfigModel:
     """Build a minimal ConfigModel for testing."""
     return ConfigModel(
@@ -35,6 +36,7 @@ def _make_config(
                 s3_buckets=s3_buckets or [],
                 dynamodb_tables=dynamodb_tables or [],
                 source_account_role_arn=source_account_role_arn,
+                source_account_id=source_account_id,
             )
         },
     )
@@ -93,7 +95,7 @@ def test_backup_engine_dry_run_s3_no_writes():
         s3.put_object(Bucket=SOURCE_BUCKET, Key="a.txt", Body=b"hello")
         s3.put_object(Bucket=SOURCE_BUCKET, Key="b.txt", Body=b"world")
 
-        config = _make_config(s3_buckets=[SOURCE_BUCKET_ARN])
+        config = _make_config(s3_buckets=[S3BucketConfig(arn=SOURCE_BUCKET_ARN, label="engine")])
 
         result = run_backup_source(session, config, "testsrc", dry_run=True)
 
@@ -107,7 +109,7 @@ def test_backup_engine_dry_run_s3_no_writes():
         # Backup bucket must NOT have been created
         all_buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
         backup_bucket = config.sources["testsrc"].get_backup_bucket_name(
-            SOURCE_BUCKET_ARN, REGION, ACCOUNT_ID
+            "engine", REGION, ACCOUNT_ID, "testsrc"
         )
         assert backup_bucket not in all_buckets
 
@@ -145,7 +147,7 @@ def test_backup_engine_dry_run_dynamodb_no_export():
         s3 = session.client("s3", region_name=REGION)
         buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
         export_bucket = config.sources["testsrc"].get_dynamodb_backup_bucket_name(
-            "testsrc", REGION, ACCOUNT_ID
+            "testsrc", REGION, ACCOUNT_ID  # bb-testsrc-dynamo-{region}-{account}
         )
         assert export_bucket not in buckets
 
@@ -155,7 +157,9 @@ def test_backup_engine_s3_error_captured_in_result():
     with mock_aws():
         session = boto3.Session(region_name=REGION)
         # Source bucket does NOT exist — backup_source will raise ValueError
-        config = _make_config(s3_buckets=["arn:aws:s3:::nonexistent-bucket-xyz"])
+        config = _make_config(
+            s3_buckets=[S3BucketConfig(arn="arn:aws:s3:::nonexistent-bucket-xyz", label="x")]
+        )
 
         result = run_backup_source(session, config, "testsrc", dry_run=False)
 
@@ -176,7 +180,7 @@ def test_backup_engine_result_includes_bucket_name_key():
             CreateBucketConfiguration={"LocationConstraint": REGION},
         )
 
-        config = _make_config(s3_buckets=[SOURCE_BUCKET_ARN])
+        config = _make_config(s3_buckets=[S3BucketConfig(arn=SOURCE_BUCKET_ARN, label="engine")])
         result = run_backup_source(session, config, "testsrc", dry_run=True)
 
     assert "bucket_name" in result.s3_results[0]

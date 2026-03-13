@@ -239,7 +239,7 @@ def test_config_requires_batch_role_when_use_s3_batch():
             sources={
                 "toshi": {
                     "display_name": "Toshi",
-                    "s3_buckets": ["arn:aws:s3:::my-bucket"],
+                    "s3_buckets": [{"arn": "arn:aws:s3:::my-bucket", "label": "main"}],
                     "use_s3_batch": True,
                 }
             }
@@ -255,7 +255,7 @@ def test_config_accepts_batch_role_when_use_s3_batch():
         sources={
             "toshi": {
                 "display_name": "Toshi",
-                "s3_buckets": ["arn:aws:s3:::my-bucket"],
+                "s3_buckets": [{"arn": "arn:aws:s3:::my-bucket", "label": "main"}],
                 "use_s3_batch": True,
             }
         },

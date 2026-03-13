@@ -24,11 +24,11 @@ def temp_config(tmp_path):
         "sources": {
             "toshi": {
                 "display_name": "ToshiAPI",
-                "s3_buckets": ["arn:aws:s3:::test-toshi-bucket"],
+                "s3_buckets": [{"arn": "arn:aws:s3:::test-toshi-bucket", "label": "test"}],
             },
             "ths": {
                 "display_name": "THS_dataset_prod",
-                "s3_buckets": ["arn:aws:s3:::test-ths-bucket"],
+                "s3_buckets": [{"arn": "arn:aws:s3:::test-ths-bucket", "label": "test"}],
             },
         },
         "retention": {

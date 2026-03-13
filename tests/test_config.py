@@ -10,7 +10,7 @@ from moto import mock_aws
 
 from nzshm_backup.config import ConfigModel, load_config, save_config
 from nzshm_backup.config.loader import load_config_from_ssm
-from nzshm_backup.config.models import RetentionConfig, SourceConfig
+from nzshm_backup.config.models import RetentionConfig, S3BucketConfig, SourceConfig
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def sample_config_dict():
         "sources": {
             "toshi": {
                 "display_name": "ToshiAPI",
-                "s3_buckets": ["arn:aws:s3:::test-bucket"],
+                "s3_buckets": [{"arn": "arn:aws:s3:::test-bucket", "label": "test"}],
                 "dynamodb_tables": [],
             }
         },
@@ -70,7 +70,7 @@ def test_save_config(tmp_path):
         sources={
             "toshi": SourceConfig(
                 display_name="ToshiAPI",
-                s3_buckets=["arn:aws:s3:::test-bucket"],
+                s3_buckets=[S3BucketConfig(arn="arn:aws:s3:::test-bucket", label="test")],
             )
         }
     )
@@ -95,44 +95,94 @@ def test_retention_config_defaults():
 
 
 def test_source_config_backup_bucket_name():
-    """Test backup bucket name generation — short name fits within 63 chars."""
+    """Backup bucket name uses source_key + label pattern."""
     source = SourceConfig(
         display_name="Test",
-        s3_buckets=["arn:aws:s3:::my-bucket"],
+        s3_buckets=[S3BucketConfig(arn="arn:aws:s3:::my-bucket", label="main")],
     )
 
     bucket_name = source.get_backup_bucket_name(
-        "arn:aws:s3:::my-bucket",
+        "main",
         "ap-southeast-2",
         "123456789012",
+        "toshi",
     )
 
-    assert bucket_name == "my-bucket-backup-ap-southeast-2-123456789012"
+    assert bucket_name == "bb-toshi-s3-main-ap-southeast-2-123456789012"
     assert len(bucket_name) <= 63
 
 
-def test_source_config_backup_bucket_name_truncated():
-    """Long source bucket names are truncated with a hash to stay within 63 chars."""
-    source = SourceConfig(
-        display_name="Test",
-        s3_buckets=["arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh"],
-    )
+def test_source_config_dynamodb_backup_bucket_name():
+    """DynamoDB export bucket name uses source_key pattern."""
+    source = SourceConfig(display_name="Test")
 
-    bucket_name = source.get_backup_bucket_name(
-        "arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh",
+    bucket_name = source.get_dynamodb_backup_bucket_name(
+        "arkivalist",
         "ap-southeast-2",
         "456789012345",
     )
 
+    assert bucket_name == "bb-arkivalist-dynamo-ap-southeast-2-456789012345"
     assert len(bucket_name) <= 63
-    assert bucket_name.endswith("-backup-ap-southeast-2-456789012345")
-    # Hash is stable — same input always produces the same name
-    assert bucket_name == source.get_backup_bucket_name(
-        "arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh",
-        "ap-southeast-2",
-        "456789012345",
-    )
-    assert bucket_name == "arkivalist-api-dev--6b21d9ed-backup-ap-southeast-2-456789012345"
+
+
+def test_validate_source_account_id_required_with_role_arn():
+    """source_account_id is required when source_account_role_arn is set."""
+    with pytest.raises(ValueError, match="source_account_id is required"):
+        ConfigModel(
+            sources={
+                "arkivalist": SourceConfig(
+                    display_name="Arkivalist",
+                    source_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
+                )
+            }
+        )
+
+
+def test_validate_source_account_id_mismatch_raises():
+    """source_account_id must match the account in source_account_role_arn."""
+    with pytest.raises(ValueError, match="does not match account"):
+        ConfigModel(
+            sources={
+                "arkivalist": SourceConfig(
+                    display_name="Arkivalist",
+                    source_account_id="999999999999",
+                    source_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
+                )
+            }
+        )
+
+
+def test_validate_dynamodb_arn_account_mismatch_raises():
+    """DynamoDB table ARNs must belong to the declared source_account_id."""
+    with pytest.raises(ValueError, match="belongs to account"):
+        ConfigModel(
+            sources={
+                "toshi": SourceConfig(
+                    display_name="ToshiAPI",
+                    source_account_id="111111111111",
+                    dynamodb_tables=[
+                        "arn:aws:dynamodb:ap-southeast-2:222222222222:table/Foo"
+                    ],
+                )
+            }
+        )
+
+
+def test_validate_duplicate_bucket_labels_raises():
+    """Duplicate s3_bucket labels within a source must be rejected."""
+    with pytest.raises(ValueError, match="labels must be unique"):
+        ConfigModel(
+            sources={
+                "toshi": SourceConfig(
+                    display_name="ToshiAPI",
+                    s3_buckets=[
+                        S3BucketConfig(arn="arn:aws:s3:::bucket-a", label="same"),
+                        S3BucketConfig(arn="arn:aws:s3:::bucket-b", label="same"),
+                    ],
+                )
+            }
+        )
 
 
 def test_config_model_validation(sample_config_dict):
