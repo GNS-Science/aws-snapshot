@@ -70,12 +70,30 @@ def build_permission_policy(region: str, account_id: str, s3_buckets: list[str],
             "Effect": "Allow",
             "Action": [
                 "dynamodb:ExportTableToPointInTime",
-                "dynamodb:ListExports",
-                "dynamodb:DescribeExport",
                 "dynamodb:DescribeContinuousBackups",
             ],
             "Resource": [
                 f"arn:aws:dynamodb:{region}:{account_id}:table/{t}"
+                for t in dynamodb_tables
+            ],
+        })
+        statements.append({
+            "Sid": "ListExports",
+            "Effect": "Allow",
+            "Action": ["dynamodb:ListExports"],
+            # ListExports is scoped to the table ARN
+            "Resource": [
+                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}"
+                for t in dynamodb_tables
+            ],
+        })
+        statements.append({
+            "Sid": "DescribeExport",
+            "Effect": "Allow",
+            "Action": ["dynamodb:DescribeExport"],
+            # DescribeExport is scoped to the export ARN (table/*/export/*)
+            "Resource": [
+                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}/export/*"
                 for t in dynamodb_tables
             ],
         })
