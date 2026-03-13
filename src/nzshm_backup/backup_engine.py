@@ -63,21 +63,17 @@ def run_backup_source(
         if source_config.source_account_role_arn
         else None
     )
-    source_account_id = (
-        source_config.source_account_role_arn.split(":")[4]
-        if source_config.source_account_role_arn
-        else account_id
-    )
+    source_account_id = source_config.source_account_id or account_id
 
     result = SourceBackupResult(source_alias=source_alias)
 
     # ------------------------------------------------------------------
     # S3 loop
     # ------------------------------------------------------------------
-    for bucket_arn in source_config.s3_buckets:
-        bucket_name = bucket_arn.split(":")[-1] if ":" in bucket_arn else bucket_arn
+    for bucket_cfg in source_config.s3_buckets:
+        bucket_name = bucket_cfg.arn.split(":")[-1] if ":" in bucket_cfg.arn else bucket_cfg.arn
         backup_bucket_name = source_config.get_backup_bucket_name(
-            bucket_arn, region, source_account_id
+            bucket_cfg.label, region, source_account_id, source_alias
         )
 
         logger.info(f"Backing up {bucket_name} → {backup_bucket_name}")
@@ -108,7 +104,7 @@ def run_backup_source(
             else:
                 sync_result = backup_source(
                     session=session,
-                    source_bucket=bucket_arn,
+                    source_bucket=bucket_cfg.arn,
                     backup_bucket_name=backup_bucket_name,
                     dry_run=dry_run,
                     full_sync=full_sync,

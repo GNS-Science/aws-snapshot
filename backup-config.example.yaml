@@ -17,7 +17,8 @@ sources:
   toshi:
     display_name: "ToshiAPI"
     s3_buckets:
-      - arn:aws:s3:::nzshm22-toshi-api-prod
+      - arn: arn:aws:s3:::nzshm22-toshi-api-prod
+        label: api-prod
     dynamodb_tables:
       - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiFileObject-PROD
       - arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/ToshiIdentity-PROD
@@ -29,7 +30,8 @@ sources:
   ths:
     display_name: "THS_dataset_prod"
     s3_buckets:
-      - arn:aws:s3:::ths-dataset-prod
+      - arn: arn:aws:s3:::ths-dataset-prod
+        label: dataset-prod
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: false  # ~1TB but incremental runs are within Lambda timeout
 
@@ -38,12 +40,14 @@ sources:
     # Cross-account source: Arkivalist account 816711409078
     # Backup Lambda (595842668254) assumes source_account_role_arn to read source data.
     # See docs/design/ACCOUNT_ISOLATION.md for IAM setup required.
+    source_account_id: null        # 816711409078
     source_account_role_arn: null  # arn:aws:iam::816711409078:role/nzshm-backup-reader
     s3_buckets:
       # Serverless Framework deployment bucket (Lambda zips, CloudFormation templates).
       # Intentional choice: frequent deployments generate real ETag changes, making
       # this a good functional test of the incremental sync mechanism.
-      - arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh
+      - arn: arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh
+        label: deploy
     dynamodb_tables:
       - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-events
       - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-feedback

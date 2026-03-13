@@ -33,13 +33,13 @@ that call the same underlying functions — `backup_source()` and
 ## What happens when `backup run --source toshi` executes
 
 1. Load `backup-config.yaml` (or `BACKUP_CONFIG_PATH` env var)
-2. Resolve backup account ID via `sts:GetCallerIdentity`; resolve source account ID from the source config (same as backup account for same-account sources, or extracted from `prod_account_role_arn` for cross-account sources)
-3. **S3 loop** — for each bucket ARN in `sources.toshi.s3_buckets`:
-   - Derive backup bucket name: `{bucket}-backup-{region}-{source-account-id}`
+2. Resolve backup account ID via `sts:GetCallerIdentity`; resolve source account ID from `source_account_id` in the source config (same as backup account for same-account sources, or the explicit cross-account ID)
+3. **S3 loop** — for each bucket in `sources.toshi.s3_buckets`:
+   - Derive backup bucket name: `bb-{source-key}-s3-{label}-{region}-{source-account-id}`
    - Create backup bucket if it doesn't exist (with lifecycle policy + delete-protection)
    - Incremental sync: list source objects, compare ETags, copy only changed/new objects
 4. **DynamoDB loop** — for each table ARN in `sources.toshi.dynamodb_tables`:
-   - Derive export bucket name: `nzshm-dynamo-backup-{source-alias}-{region}-{source-account-id}`
+   - Derive export bucket name: `bb-{source-key}-dynamo-{region}-{source-account-id}`
    - Create export bucket if it doesn't exist (idempotent — no error if already exists)
    - Call `dynamodb:ExportTableToPointInTime` → returns an `ExportArn` immediately
    - Export runs asynchronously in AWS — it is **not** complete when the CLI exits
@@ -131,11 +131,13 @@ accidentally writing into an unrelated bucket.
 
 ## Backup bucket naming conventions
 
-| Data type | Bucket name pattern |
-|-----------|-------------------|
-| S3 source backup | `{source-bucket-name}-backup-{region}-{source-account-id}` |
-| DynamoDB export | `nzshm-dynamo-backup-{source-alias}-{region}-{source-account-id}` |
+| Data type | Bucket name pattern | Example |
+|-----------|-------------------|---------|
+| S3 source backup | `bb-{source-key}-s3-{label}-{region}-{source-account-id}` | `bb-arkivalist-s3-deploy-ap-southeast-2-816711409078` |
+| DynamoDB export | `bb-{source-key}-dynamo-{region}-{source-account-id}` | `bb-arkivalist-dynamo-ap-southeast-2-816711409078` |
 
+`{source-key}` is the YAML key for the source (e.g. `arkivalist`, `toshi`).
+`{label}` is a short human-readable string set per-bucket in config — no MD5 truncation.
 `{source-account-id}` is the AWS account that **owns the data being backed up**,
 not the account running the backup Lambda. This means:
 
@@ -144,16 +146,13 @@ not the account running the backup Lambda. This means:
   name embeds the source account, making it immediately clear which system the
   backup belongs to.
 
-This serves two purposes: global S3 name uniqueness, and self-documenting bucket
-names — you can identify the data origin without opening the bucket.
-
 **Examples:**
 
 | Source | Backup bucket |
 |--------|--------------|
-| `arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh` (account `816711409078`) | `arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh-backup-ap-southeast-2-816711409078` |
-| DynamoDB tables for `arkivalist` source | `nzshm-dynamo-backup-arkivalist-ap-southeast-2-816711409078` |
-| DynamoDB tables for `toshi` source (account `595842668254`) | `nzshm-dynamo-backup-toshi-ap-southeast-2-595842668254` |
+| `arkivalist` s3 bucket labelled `deploy` (account `816711409078`) | `bb-arkivalist-s3-deploy-ap-southeast-2-816711409078` |
+| DynamoDB tables for `arkivalist` source | `bb-arkivalist-dynamo-ap-southeast-2-816711409078` |
+| DynamoDB tables for `toshi` source (account `595842668254`) | `bb-toshi-dynamo-ap-southeast-2-595842668254` |
 
 ## S3 lifecycle tiers
 

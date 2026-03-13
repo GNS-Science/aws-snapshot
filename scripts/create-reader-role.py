@@ -84,7 +84,7 @@ def build_permission_policy(region: str, account_id: str, s3_buckets: list[str],
                 "Sid": "WriteDynamoDBExportBucket",
                 "Effect": "Allow",
                 "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
-                "Resource": [f"arn:aws:s3:::nzshm-dynamo-backup-*-{region}-{account_id}/*"],
+                "Resource": [f"arn:aws:s3:::bb-*-{region}-{account_id}/*"],
                 "Condition": {"StringEquals": {"s3:ResourceAccount": backup_account_id}},
             })
 
@@ -97,7 +97,7 @@ def main():
     parser.add_argument("--s3-buckets", nargs="*", default=[], help="Source S3 bucket names (not ARNs)")
     parser.add_argument("--dynamodb-tables", nargs="*", default=[], help="Source DynamoDB table names (not ARNs)")
     parser.add_argument("--region", default="ap-southeast-2")
-    parser.add_argument("--profile", default=None, help="AWS profile name (overrides AWS_PROFILE env var)")
+    parser.add_argument("--profile", default=None, help="AWS profile name. NOTE: SSO profiles require eval first: eval $(aws configure export-credentials --profile <profile> --format env)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be created without API calls")
     args = parser.parse_args()
 
