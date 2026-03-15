@@ -2,10 +2,12 @@
 """Enable Point-in-Time Recovery (PITR) on one or more DynamoDB tables.
 
 PITR is required before DynamoDB export-to-S3 can be initiated.
-Run this while authenticated to the account that owns the tables.
+
+Account context:
+    Run this while authenticated to the SOURCE account that owns the tables.
 
 Usage:
-    # Enable PITR on tables in the source account (run authenticated to that account)
+    # Enable PITR on tables in the source account
     python scripts/enable-pitr.py \
         --tables \
             my-table-one \

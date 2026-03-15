@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""One-time setup: create the IAM reader role in a source account.
+"""One-time setup: create the IAM reader role in a SOURCE account.
 
-This role is assumed by the backup Lambda (running in the backup account)
+This role is assumed by the backup Lambda (running in the BACKUP account)
 to read S3 buckets and initiate DynamoDB exports cross-account.
 
+Account context:
+    Run this while authenticated to the SOURCE account (e.g. Arkivalist 816711409078).
+
 Usage:
-    # Run while authenticated to the SOURCE account (e.g. Arkivalist 816711409078)
     python scripts/create-reader-role.py \
         --backup-account-id 595842668254 \
         --s3-buckets arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh \
@@ -13,10 +15,11 @@ Usage:
             arkivalist-api-dev-invite-codes arkivalist-api-dev-mission-events \
             arkivalist-api-dev-mission-runs
 
-After running, copy the printed ARN into backup-config.yaml under the source:
-    sources:
-      arkivalist:
-        source_account_role_arn: "arn:aws:iam::816711409078:role/nzshm-backup-reader"
+After running:
+    Copy the printed ARN into backup-config.yaml under the source:
+        sources:
+          arkivalist:
+            source_account_role_arn: "arn:aws:iam::816711409078:role/nzshm-backup-reader"
 """
 
 import argparse
