@@ -32,19 +32,18 @@ Prod account (461564345538)        Backup account (new or 595842668254)
 
 ---
 
-## Code changes required
-
-Small surface area — roughly 1 day of work.
+## What was implemented
 
 | File | Change |
 |------|--------|
-| `config/models.py` | Add `prod_account_role_arn: str \| None` to `GeneralConfig` |
-| `s3_backup.py` | `sync_bucket()` needs two clients — one for source (assumed role), one for dest (backup account). Currently uses one client for both. |
-| `dynamodb_backup.py` | `export_dynamodb_table()` must be called via assumed prod-account role. `ensure_dynamodb_backup_bucket_ready()` needs to add a bucket policy allowing `dynamodb.amazonaws.com` as a service principal to write cross-account. |
-| `run_backup.py` + `lambda_handler.py` | Add `assume_role()` call to get prod-account session before the S3 and DynamoDB loops |
-| `serverless.yml` | Deploy Lambda to backup account; add `sts:AssumeRole` IAM permission |
+| `config/models.py` | Added `source_account_role_arn: str \| None` and `source_account_id: str \| None` to `SourceConfig`; added `S3BucketConfig(arn, label)` replacing bare ARN strings; added validators ensuring account ID consistency across ARNs |
+| `s3_backup.py` | `backup_source()` accepts an optional `source_session` — cross-account reads use the assumed role session, dest writes use the backup account session |
+| `dynamodb_backup.py` | `export_dynamodb_table()` called via assumed source-account session. `ensure_dynamodb_backup_bucket_ready()` applies a bucket policy granting the source account IAM root (`arn:aws:iam::{source_account_id}:root`) s3:PutObject. **Note:** DynamoDB cross-account PITR exports write to S3 using the calling IAM role's credentials — not `dynamodb.amazonaws.com`. The reader role's identity policy scopes this to `bb-*` buckets in the backup account. |
+| `backup_engine.py` | Assumes source-account role via `get_cross_account_session()` before S3 and DynamoDB loops; derives `source_account_id` from `SourceConfig` |
+| `serverless.yml` | Lambda deployed to backup account; `sts:AssumeRole` permission in Lambda IAM role |
+| `scripts/create-reader-role.py` | One-time setup script: creates `nzshm-backup-reader` role in source account with least-privilege permissions for S3 read, DynamoDB export, and s3:PutObject on `bb-*` backup buckets |
 
-**New helper needed** (5–10 lines):
+**Cross-account session helper** (`s3_backup.py`):
 
 ```python
 def get_cross_account_session(session: boto3.Session, role_arn: str) -> boto3.Session:
@@ -70,9 +69,10 @@ One-time setup in the prod account — not code changes.
 2. **S3 bucket policies on source buckets** — allow the backup Lambda's assumed
    role to `s3:ListBucket` + `s3:GetObject`
 
-3. **Bucket policy on DynamoDB export bucket** (backup account) — allow
-   `dynamodb.amazonaws.com` service principal to `s3:PutObject` (required for
-   cross-account PITR export destination)
+3. **Bucket policy on DynamoDB export bucket** (backup account) — grants the
+   source account IAM root `s3:PutObject`. DynamoDB cross-account PITR exports
+   write using the calling IAM role's credentials, so the bucket policy must
+   allow the source account IAM principal (not `dynamodb.amazonaws.com`).
 
 ---
 
@@ -111,14 +111,14 @@ Cross-account backup will be implemented and validated against **Arkivalist**
 | Account | Role | Status |
 |---------|------|--------|
 | `595842668254` (spike/backup) | Runs Lambda, holds backup buckets | Active |
-| `816711409078` (Arkivalist) | Cross-account source — restore lifecycle demo | **Next target** |
-| `461564345538` (NSHM production) | Cross-account source — toshi + ths | After Arkivalist validated |
+| `816711409078` (Arkivalist) | Cross-account source — restore lifecycle demo | **Implemented & verified** |
+| `461564345538` (NSHM production) | Cross-account source — toshi + ths | After restore path validated |
 
 This sequencing means the cross-account IAM pattern is proven on a lower-risk
 target before any NSHM production data is involved.
 
 ---
 
-**Status:** Not yet implemented
+**Status:** Implemented (cross-account S3 sync + DynamoDB PITR export verified against Arkivalist)
 **Created:** 2026-03-10
-**Updated:** 2026-03-12
+**Updated:** 2026-03-16
