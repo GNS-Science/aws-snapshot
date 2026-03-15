@@ -112,8 +112,9 @@ def ensure_dynamodb_backup_bucket_ready(
         bucket_name:       Name of DynamoDB export bucket
         source_alias:      Config source alias (e.g. 'arkivalist') recorded as a tag
         source_account_id: Source AWS account ID. If different from the backup account,
-                           a bucket policy is added allowing dynamodb.amazonaws.com from
-                           that account to write exports cross-account.
+                           a bucket policy is added granting the source account IAM root
+                           s3:PutObject (DynamoDB cross-account exports write using the
+                           calling IAM role's credentials, not the service principal).
     """
     s3_client = session.client("s3")
     region = get_region(session)
@@ -145,19 +146,19 @@ def ensure_dynamodb_backup_bucket_ready(
         logger.info(f"DynamoDB export bucket {bucket_name} already exists")
 
     if source_account_id and source_account_id != account_id:
-        # DynamoDB exports write to S3 using the dynamodb.amazonaws.com service principal,
-        # not the IAM role that initiated the export. The bucket policy must allow the
-        # service principal with aws:SourceAccount scoped to the source account.
+        # DynamoDB cross-account exports write to S3 using the CALLING IAM role's credentials
+        # (not the dynamodb.amazonaws.com service principal). The bucket policy must grant
+        # the source account IAM root access; the reader role's identity policy already
+        # scopes this to bb-* buckets in the backup account via s3:ResourceAccount condition.
         policy = {
             "Version": "2012-10-17",
             "Statement": [
                 {
                     "Sid": "AllowCrossAccountDynamoDBExport",
                     "Effect": "Allow",
-                    "Principal": {"Service": "dynamodb.amazonaws.com"},
+                    "Principal": {"AWS": f"arn:aws:iam::{source_account_id}:root"},
                     "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
                     "Resource": f"arn:aws:s3:::{bucket_name}/*",
-                    "Condition": {"StringEquals": {"aws:SourceAccount": source_account_id}},
                 }
             ],
         }

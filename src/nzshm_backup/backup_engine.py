@@ -145,7 +145,8 @@ def run_backup_source(
 
         if not dry_run:
             ensure_dynamodb_backup_bucket_ready(
-                session, export_bucket, source_alias=source_alias, source_account_id=source_account_id
+                session, export_bucket, source_alias=source_alias,
+                source_account_id=source_account_id,
             )
 
         export_result = export_dynamodb_table(
