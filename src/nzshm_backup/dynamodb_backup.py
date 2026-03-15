@@ -145,15 +145,19 @@ def ensure_dynamodb_backup_bucket_ready(
         logger.info(f"DynamoDB export bucket {bucket_name} already exists")
 
     if source_account_id and source_account_id != account_id:
+        # DynamoDB exports write to S3 using the dynamodb.amazonaws.com service principal,
+        # not the IAM role that initiated the export. The bucket policy must allow the
+        # service principal with aws:SourceAccount scoped to the source account.
         policy = {
             "Version": "2012-10-17",
             "Statement": [
                 {
-                    "Sid": "AllowCrossAccountReaderRoleExport",
+                    "Sid": "AllowCrossAccountDynamoDBExport",
                     "Effect": "Allow",
-                    "Principal": {"AWS": f"arn:aws:iam::{source_account_id}:root"},
+                    "Principal": {"Service": "dynamodb.amazonaws.com"},
                     "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
                     "Resource": f"arn:aws:s3:::{bucket_name}/*",
+                    "Condition": {"StringEquals": {"aws:SourceAccount": source_account_id}},
                 }
             ],
         }
