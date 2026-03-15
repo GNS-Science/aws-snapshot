@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """One-time setup: create the IAM role S3 Batch Operations assumes.
 
+Account context:
+    Run this while authenticated to the BACKUP account. The role allows S3 Batch
+    Operations to copy objects from source buckets to backup buckets.
+
 Usage:
     python scripts/create-batch-role.py [--backup-bucket-pattern 'nzshm22-toshi-api-*']
 
-After running, copy the printed ARN into backup-config.yaml:
-    general:
-      s3_batch_role_arn: "arn:aws:iam::ACCOUNT_ID:role/nzshm-backup-batch-role"
+After running:
+    Copy the printed ARN into backup-config.yaml:
+        general:
+          s3_batch_role_arn: "arn:aws:iam::ACCOUNT_ID:role/nzshm-backup-batch-role"
 """
 
 import argparse

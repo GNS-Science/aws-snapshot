@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Delete all nzshm-backup-managed S3 buckets in the current account.
+"""Delete all nzshm-backup-managed S3 buckets in the BACKUP account.
 
 Finds every bucket tagged ManagedBy=nzshm-backup, removes the no-delete
 bucket policy (which blocks s3:DeleteObject even for admins), empties the
 bucket, then deletes it.
 
-Run this when migrating from the old naming scheme to the new bb-* scheme,
-or when tearing down a sandbox.
+Account context:
+    Run this while authenticated to the BACKUP account. Use --profile to specify
+    an explicit AWS profile if needed.
 
 Usage:
     # Dry-run — list buckets that would be deleted (no changes made)
     python scripts/cleanup-backup-buckets.py --dry-run
 
-    # With explicit AWS profile (spike/backup account)
+    # With explicit AWS profile (BACKUP account)
     python scripts/cleanup-backup-buckets.py --profile spike-admin --dry-run
     python scripts/cleanup-backup-buckets.py --profile spike-admin
 
