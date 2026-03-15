@@ -41,11 +41,6 @@ provider:
           Resource: "*"
         - Effect: Allow
           Action:
-            - s3:PutObject
-          Resource:
-            - "arn:aws:s3:::nzshm-dynamo-backup-*/*"
-        - Effect: Allow
-          Action:
             - s3control:CreateJob
             - s3control:DescribeJob
             - s3control:ListJobs
