@@ -185,6 +185,42 @@ versioning would never create a second version of any object, providing no
 recovery benefit and no additional cost. The current design (one backup copy per
 object) is sufficient.
 
+### Source bucket versioning (THS)
+
+For the THS source bucket (`ths-dataset-prod`), enabling S3 versioning provides
+deletion protection that backups alone cannot replicate:
+
+**How deletion works with versioning enabled:**
+
+When an object is deleted from a versioned bucket, S3 inserts a **delete marker**
+rather than removing the data. The object is invisible to normal `ListObjects`
+calls but all previous versions remain. Recovery is instant — delete the marker
+and the object reappears with no data transfer or restore wait.
+
+| Scenario | Without versioning | With versioning |
+|----------|--------------------|-----------------|
+| Accidental delete (single object) | Gone — recover from backup bucket (12–48h if in Deep Archive) | Instant — delete the marker |
+| Bulk accidental delete | Gone — full restore from backup | Instant — bulk-delete the markers |
+| Malicious delete (attacker with S3 access) | Gone — recover from backup | Gone — attacker can delete markers too (unless MFA Delete enabled) |
+
+**Cost implications for write-once BLOBs:**
+
+Since THS objects are never overwritten, versioning creates at most one version per
+object plus a delete marker if deleted. Delete markers are negligible in size
+(< 1 KB each). For a 1 TB corpus of write-once BLOBs, enabling versioning adds
+effectively **zero storage cost**.
+
+**Recommendation:** Enable S3 versioning on `ths-dataset-prod`. The backup bucket
+(`bb-ths-s3-dataset-ap-southeast-2-345678901234`) does not need versioning — it
+already retains deleted objects for 365 days via the no-delete Lambda policy.
+
+**MFA Delete caveat:** Versioning alone does not protect against a malicious actor
+with full S3 permissions — they can delete object versions and markers. MFA Delete
+requires a second factor to permanently delete versions, but adds operational
+complexity (every delete must be authenticated with MFA). Consider enabling MFA
+Delete if the source account threat model includes insider threat or full credential
+compromise.
+
 ### Churn rate matters
 
 | Churn (new/changed data per week) | Monthly backup cost (steady state) |
