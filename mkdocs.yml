@@ -60,6 +60,10 @@ nav:
     - Release Process: development/release.md
   - Design Docs:
     - Backup Solution Plan: design/backup-solution-plan.md
+    - Account Isolation: design/ACCOUNT_ISOLATION.md
+    - Retention Strategy and Costs: design/retention-strategy-and-costs.md
+    - Disaster Recovery Scenario: design/disaster-recovery-scenario.md
+    - Backup Forensics: design/backup-forensics.md
     - CLI-First Rationale: design/CLI_FIRST_RATIONALE.md
     - Typer Rationale: design/TYPER_RATIONALE.md
 
