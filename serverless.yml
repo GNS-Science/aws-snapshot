@@ -38,6 +38,14 @@ provider:
           Action:
             - dynamodb:ExportTableToPointInTime
             - dynamodb:DescribeExport
+            - dynamodb:DescribeTable
+            - dynamodb:UpdateContinuousBackups
+            - dynamodb:UntagResource
+            - dynamodb:TagResource
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - tag:GetResources
           Resource: "*"
         - Effect: Allow
           Action:
@@ -65,6 +73,20 @@ provider:
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:
+  pitr-watcher:
+    handler: nzshm_backup.lambda_pitr_watcher.handler
+    description: Re-enable PITR on DynamoDB tables after restore completes
+    memorySize: 256
+    timeout: 60
+    environment:
+      PITR_WATCHER_RULE_NAME: nzshm-backup-pitr-watcher
+    events:
+      - eventBridge:
+          enabled: false
+          name: nzshm-backup-pitr-watcher
+          schedule: rate(5 minutes)
+          description: Poll for PITRPending=true DynamoDB tables after restore
+
   backup:
     handler: nzshm_backup.lambda_handler.handler
     description: Backup orchestration for NSHM datasets

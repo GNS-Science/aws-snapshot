@@ -7,6 +7,7 @@ import typer
 
 from nzshm_backup.config import load_config
 from nzshm_backup.dynamodb_restore import (
+    PITR_WATCHER_RULE_NAME,
     describe_restore_status,
     make_restore_table_name,
     restore_dynamodb_table,
@@ -53,6 +54,11 @@ def run_restore(
         help="ISO datetime for DynamoDB PITR, e.g. 2026-03-15T09:00:00Z (required when restoring tables)",
     ),
     prefix: str | None = typer.Option(None, help="Restore only objects under this S3 key prefix"),
+    no_pitr: bool = typer.Option(
+        False, "--no-pitr",
+        help="Skip automatic PITR re-enable after DynamoDB restore. "
+             "Use only for short-lived test restores that will be deleted immediately.",
+    ),
 ):
     """Execute a restore from backup.
 
@@ -177,11 +183,14 @@ def run_restore(
                 continue
 
             result = restore_dynamodb_table(
-                dynamodb_client, table_arn, dest_table, restore_point
+                dynamodb_client, table_arn, dest_table, restore_point,
+                enable_pitr=not no_pitr,
             )
 
             if result.success:
                 typer.echo(f"  ✓ Restore submitted: {dest_table} ({result.restore_arn})")
+                if not no_pitr:
+                    typer.echo("    PITR will be re-enabled automatically once ACTIVE")
                 typer.echo(
                     f"    Check progress: backup restore status "
                     f"--source {source} --tables {table_name}"
@@ -190,6 +199,15 @@ def run_restore(
                 for err in result.errors:
                     typer.echo(f"  ✗ {err['error']}", err=True)
                 errors.append(f"{dest_table}: restore failed")
+
+    # Activate the pitr-watcher rule if any DynamoDB restores were submitted with PITR enabled
+    dynamo_submitted = effective_table_arns and not state.dry_run and not no_pitr
+    if dynamo_submitted and not errors:
+        try:
+            session.client("events").enable_rule(Name=PITR_WATCHER_RULE_NAME)
+            typer.echo(f"  pitr-watcher rule enabled ({PITR_WATCHER_RULE_NAME})")
+        except Exception as e:
+            typer.echo(f"  Warning: could not enable pitr-watcher rule: {e}", err=True)
 
     typer.echo("")
     if errors:

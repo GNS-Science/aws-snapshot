@@ -74,12 +74,15 @@ def test_restore_initiated_on_success():
     assert result.status == "INITIATED"
     assert result.success is True
     assert result.restore_arn is not None
-    client.restore_table_to_point_in_time.assert_called_once_with(
-        SourceTableArn=TABLE_ARN,
-        TargetTableName="MyTable-restored",
-        RestoreDateTime=RESTORE_POINT,
-        BillingModeOverride="PAY_PER_REQUEST",
-    )
+    call_kwargs = client.restore_table_to_point_in_time.call_args[1]
+    assert call_kwargs["SourceTableArn"] == TABLE_ARN
+    assert call_kwargs["TargetTableName"] == "MyTable-restored"
+    assert call_kwargs["RestoreDateTime"] == RESTORE_POINT
+    assert call_kwargs["BillingModeOverride"] == "PAY_PER_REQUEST"
+    # Tags include PITRPending by default
+    tags = {t["Key"]: t["Value"] for t in call_kwargs["Tags"]}
+    assert tags["PITRPending"] == "true"
+    assert tags["RestoredBy"] == "nzshm-backup"
 
 
 def test_restore_failed_on_client_error():

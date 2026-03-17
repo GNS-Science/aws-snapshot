@@ -1,6 +1,7 @@
 """DynamoDB restore operations — PITR restore_table_to_point_in_time."""
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -9,6 +10,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
+
+PITR_WATCHER_RULE_NAME = os.environ.get("PITR_WATCHER_RULE_NAME", "nzshm-backup-pitr-watcher")
+PITR_PENDING_TAG = "PITRPending"
 
 _MAX_TABLE_NAME_LEN = 255
 _RESTORE_SUFFIX = "-restored"
@@ -72,6 +76,7 @@ def restore_dynamodb_table(
     target_table_name: str,
     restore_point: datetime,
     dry_run: bool = False,
+    enable_pitr: bool = True,
 ) -> DynamoDBRestoreResult:
     """Submit a DynamoDB PITR restore request.
 
@@ -86,6 +91,10 @@ def restore_dynamodb_table(
         target_table_name: Name for the new restored table.
         restore_point:     Point in time to restore to (must be timezone-aware UTC).
         dry_run:           If True, log intent but make no API calls.
+        enable_pitr:       If True (default), tag the restored table with PITRPending=true
+                           so the pitr-watcher Lambda re-enables PITR automatically once
+                           the table reaches ACTIVE. Pass False only for short-lived test
+                           restores that will be deleted immediately.
 
     Returns:
         DynamoDBRestoreResult with status INITIATED (or SKIPPED for dry run).
@@ -105,13 +114,27 @@ def restore_dynamodb_table(
         result.status = "SKIPPED"
         return result
 
+    pitr_tags = (
+        [
+            {"Key": "RestoredBy",   "Value": "nzshm-backup"},
+            {"Key": PITR_PENDING_TAG, "Value": "true"},
+            {"Key": "RestoredFrom", "Value": source_table_arn.split("/")[-1]},
+            {"Key": "RestoredAt",   "Value": restore_point.isoformat()},
+        ]
+        if enable_pitr
+        else []
+    )
+
     try:
-        response = dynamodb_client.restore_table_to_point_in_time(
+        kwargs: dict[str, Any] = dict(
             SourceTableArn=source_table_arn,
             TargetTableName=target_table_name,
             RestoreDateTime=restore_point,
             BillingModeOverride="PAY_PER_REQUEST",
         )
+        if pitr_tags:
+            kwargs["Tags"] = pitr_tags
+        response = dynamodb_client.restore_table_to_point_in_time(**kwargs)
         result.restore_arn = response["TableDescription"]["TableArn"]
         result.status = "INITIATED"
         logger.info(
