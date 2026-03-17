@@ -12,86 +12,73 @@ the operator is already under pressure.
 
 ## Design
 
-An event-driven Lambda (`pitr-watcher`) polls pending restores and re-enables
-PITR as soon as each restored table reaches `ACTIVE` status.
+An event-driven Lambda (`pitr-watcher`) polls for restored tables and re-enables
+PITR as soon as each reaches `ACTIVE` status.
+
+### State mechanism: DynamoDB tags (not SSM)
+
+The tag `PITRPending=true` is set on the restored table **at submission time**
+via the `Tags` parameter of `RestoreTableToPointInTime`. The tag is the source
+of truth — no external state store is needed.
+
+This avoids the read-modify-write race condition that would affect an SSM-based
+design (SSM has no compare-and-swap operation). The tag is set atomically as
+part of the restore API call itself.
 
 ### Components
 
 ```
 backup restore run
   │
-  ├── submit RestoreTableToPointInTime
-  ├── append to SSM /nzshm-backup/pending-restores
+  ├── RestoreTableToPointInTime(Tags=[PITRPending=true, RestoredBy=nzshm-backup, ...])
   └── events:EnableRule → nzshm-backup-pitr-watcher (rate: 5 min)
 
         every 5 min ↓
 
 pitr-watcher Lambda
-  ├── read SSM /nzshm-backup/pending-restores
-  ├── for each pending entry:
-  │     dynamodb:DescribeTable → if ACTIVE + PITR disabled:
+  ├── tag:GetResources(TagFilters=[PITRPending=true], ResourceTypeFilters=[dynamodb:table])
+  ├── for each table found:
+  │     dynamodb:DescribeTable → if ACTIVE:
   │       dynamodb:UpdateContinuousBackups (enable PITR)  ✓
-  │       mark pitr_enabled = true in state
-  ├── write updated state back to SSM
-  └── if pending list is empty:
+  │       dynamodb:UntagResource → remove PITRPending tag
+  └── if no PITRPending=true tables remain:
         events:DisableRule → nzshm-backup-pitr-watcher
         (rule stays deployed, silent until next restore)
 ```
 
-### State: SSM Parameter Store
+### Tags set at restore submission
 
-**Parameter name:** `/nzshm-backup/pending-restores`
-**Type:** `String` (JSON)
-
-```json
-{
-  "pending": [
-    {
-      "source": "arkivalist",
-      "target_table": "arkivalist-api-dev-events-restored",
-      "submitted_at": "2026-03-17T23:00:00Z",
-      "restore_point": "2026-03-17T22:59:00Z",
-      "pitr_enabled": false
-    }
-  ]
-}
+```python
+Tags=[
+    {"Key": "RestoredBy",   "Value": "nzshm-backup"},
+    {"Key": "PITRPending",  "Value": "true"},
+    {"Key": "RestoredFrom", "Value": source_table_name},
+    {"Key": "RestoredAt",   "Value": restore_point.isoformat()},
+]
 ```
 
-SSM is used (rather than S3) because this is process state, not backup data.
-It has no source-account dependency and is a single well-known location for
-the watcher regardless of how many sources are configured.
+`RestoredBy` and `RestoredAt` are informational and persist after PITR is
+re-enabled. `PITRPending` is removed once PITR is enabled — its absence
+is the completion signal.
 
 ---
 
-## Concurrent restore limit
+## Why tags, not SSM
 
-### SSM constraint
+An earlier design used SSM Parameter Store (`/nzshm-backup/pending-restores`)
+for pending restore state. This was replaced because:
 
-SSM Standard parameters have a **4 096-byte limit**. Each pending-restore
-entry is approximately 173 bytes; at 15 concurrent restores the payload is
-~2 600 bytes, leaving comfortable headroom for wrapper overhead and future
-field additions. Beyond 15 entries the parameter approaches the limit and
-a write may be rejected by SSM.
+| Concern | SSM design | Tag design |
+|---------|-----------|------------|
+| Race condition (CLI write vs Lambda write) | Yes — no CAS on SSM | No — tag set atomically at API call |
+| Concurrent restore limit | 15 entries (4 096-byte parameter limit) | No limit |
+| External state to manage | Yes — SSM parameter lifecycle | No — tag lives on the table |
+| Discovery if state is lost | Silent failure | Tag scan always finds unprotected tables |
+| Self-documenting | No | Yes — tag visible in console/CLI |
 
-**Hard limit enforced by `restore run`:** **15 concurrent pending restores**
-
-### Guard in `restore run`
-
-Before submitting a DynamoDB restore and writing to SSM, `restore run` must:
-
-1. Read `/nzshm-backup/pending-restores` (or treat a missing parameter as empty)
-2. Count entries where `pitr_enabled = false`
-3. Check that `current_pending + tables_being_restored <= 15`
-4. If exceeded, abort with a clear error:
-
-```
-Error: too many concurrent pending restores (current: 15, limit: 15).
-Wait for existing restores to complete (PITR will be re-enabled automatically),
-then retry. Check progress with: backup restore status --source <source>
-```
-
-This prevents a silent SSM write failure mid-restore, which would leave a
-table permanently unprotected.
+The tag-based design is stateless from the watcher's perspective: it scans
+for `PITRPending=true` tables, acts on them, and removes the tag. No external
+state can get out of sync.
 
 ---
 
@@ -105,7 +92,7 @@ enabled and disabled:
 |--------|-----|------|
 | Deploy (disabled) | IaC / `serverless.yml` | Once, at deploy time |
 | Enable | `restore run` CLI | After submitting ≥1 DynamoDB restore |
-| Disable | `pitr-watcher` Lambda | When pending list drains to empty |
+| Disable | `pitr-watcher` Lambda | When no `PITRPending=true` tables remain |
 
 Using a pre-deployed rule avoids needing `events:PutRule` /
 `events:DeleteRule` in the CLI IAM policy, and ensures the rule ARN is
@@ -117,24 +104,24 @@ stable and known at deploy time.
 
 ### `restore run` CLI role / operator
 
-- `ssm:GetParameter` — read current pending list
-- `ssm:PutParameter` — append new entry
-- `events:EnableRule` — activate the watcher rule
+- `events:EnableRule` on `nzshm-backup-pitr-watcher`
+- No new DynamoDB permissions needed — tags are passed into `RestoreTableToPointInTime`
 
 ### `pitr-watcher` Lambda execution role
 
-- `ssm:GetParameter` + `ssm:PutParameter` on `/nzshm-backup/pending-restores`
-- `dynamodb:DescribeTable` — check restore status
+- `tag:GetResources` — scan for `PITRPending=true` tables
+- `dynamodb:DescribeTable` — check table status
 - `dynamodb:UpdateContinuousBackups` — re-enable PITR
+- `dynamodb:UntagResource` — remove `PITRPending` tag on completion
 - `events:DisableRule` on `nzshm-backup-pitr-watcher` (self)
 
 ---
 
 ## `--no-pitr` override
 
-`restore run` accepts `--no-pitr` to skip writing to SSM and enabling the
-watcher. Use this only for short-lived test restores that will be deleted
-immediately. Default is PITR-on.
+`restore run` accepts `--no-pitr` to omit the `PITRPending` tag and skip
+enabling the watcher rule. Use this only for short-lived test restores that
+will be deleted immediately. Default is PITR-on.
 
 ---
 
@@ -145,9 +132,9 @@ immediately. Default is PITR-on.
 Pending work:
 - [ ] `pitr-watcher` Lambda (`src/nzshm_backup/lambda_pitr_watcher.py`)
 - [ ] EventBridge rule + IAM role in `serverless.yml`
-- [ ] SSM state helpers (`src/nzshm_backup/restore_state.py`)
-- [ ] `restore run` guard (read SSM, enforce 15-entry limit, write on submit)
-- [ ] `restore run` `--no-pitr` flag
-- [ ] `restore status` output: show `pitr_enabled` column for pending restores
+- [ ] `restore run`: pass `PITRPending=true` tag in `RestoreTableToPointInTime`
+- [ ] `restore run`: `--no-pitr` flag
+- [ ] `restore run`: `events:EnableRule` call after successful restore submission
+- [ ] `restore status`: show `PITRPending` tag state alongside table restore status
 
 **Created:** 2026-03-18
