@@ -7,11 +7,41 @@ import boto3
 import typer
 
 from nzshm_backup.config import load_config
-from nzshm_backup.s3_backup import get_cross_account_session
+from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 
 app = typer.Typer()
 
 EXPORT_LIMIT = 5  # most recent exports to show per table
+BATCH_JOB_LIMIT = 3  # most recent batch jobs to show per bucket
+
+BATCH_STATUS_ICON = {
+    "Complete": "✓",
+    "Failed": "✗",
+    "Cancelled": "✗",
+    "Active": "⋯",
+    "Preparing": "⋯",
+    "New": "⋯",
+    "Paused": "⏸",
+    "Suspended": "⏸",
+}
+
+
+def _get_recent_batch_jobs(s3control_client, account_id: str, source_bucket: str) -> list[dict]:
+    """Return recent batch jobs whose description references source_bucket, newest first."""
+    jobs = []
+    kwargs: dict = {"AccountId": account_id, "MaxResults": 25}
+    while True:
+        response = s3control_client.list_jobs(**kwargs)
+        for job in response.get("Jobs", []):
+            desc = job.get("Description", "")
+            if source_bucket in desc:
+                jobs.append(job)
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+        kwargs["NextToken"] = next_token
+    jobs.sort(key=lambda j: j.get("CreationTime") or "", reverse=True)
+    return jobs[:BATCH_JOB_LIMIT]
 
 
 def _get_recent_exports(dynamodb_client, table_arn: str, limit: int = EXPORT_LIMIT) -> list[dict]:
@@ -29,7 +59,9 @@ def _get_recent_exports(dynamodb_client, table_arn: str, limit: int = EXPORT_LIM
     return exports[:limit]
 
 
-def _print_source_status(source_alias: str, source_config, session: boto3.Session) -> None:
+def _print_source_status(
+    source_alias: str, source_config, session: boto3.Session, config
+) -> None:
     source_session = (
         get_cross_account_session(session, source_config.source_account_role_arn)
         if source_config.source_account_role_arn
@@ -70,8 +102,34 @@ def _print_source_status(source_alias: str, source_config, session: boto3.Sessio
 
     if not source_config.s3_buckets:
         typer.echo("  S3: no buckets configured")
+    elif source_config.use_s3_batch:
+        typer.echo("  S3 buckets (batch mode):")
+        account_id = get_account_id(session)
+        s3control = session.client("s3control", region_name=config.general.region)
+        for bucket_config in source_config.s3_buckets:
+            source_bucket = bucket_config.arn.split(":::")[-1]
+            try:
+                jobs = _get_recent_batch_jobs(s3control, account_id, source_bucket)
+                if not jobs:
+                    typer.echo(f"    {source_bucket}: no batch jobs found")
+                    continue
+                for job in jobs:
+                    status = job.get("Status", "Unknown")
+                    icon = BATCH_STATUS_ICON.get(status, "?")
+                    job_id = job.get("JobId", "")[:8]
+                    created = job.get("CreationTime")
+                    ts = f"  [{created.strftime('%Y-%m-%d %H:%M UTC')}]" if created else ""
+                    progress = job.get("ProgressSummary", {})
+                    total = progress.get("TotalNumberOfTasks", "?")
+                    succeeded = progress.get("NumberOfTasksSucceeded", "?")
+                    typer.echo(
+                        f"    {icon} {source_bucket}: {status}  job/{job_id}…{ts}"
+                        f"  ({succeeded}/{total} objects)"
+                    )
+            except Exception as e:
+                typer.echo(f"    {source_bucket}: error fetching batch status ({e})")
     else:
-        typer.echo(f"  S3 buckets: {len(source_config.s3_buckets)} configured")
+        typer.echo(f"  S3 buckets (incremental): {len(source_config.s3_buckets)} configured")
 
 
 @app.callback(invoke_without_command=True)
@@ -105,7 +163,7 @@ def status(
 
     session = boto3.Session()
     for alias in sources_to_check:
-        _print_source_status(alias, config.sources[alias], session)
+        _print_source_status(alias, config.sources[alias], session, config)
     typer.echo("")
 
 
