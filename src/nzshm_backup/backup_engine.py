@@ -7,6 +7,7 @@ import boto3
 
 from nzshm_backup.config.models import ConfigModel
 from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
+from nzshm_backup.run_state import write_run_state
 from nzshm_backup.s3_backup import backup_source, get_cross_account_session
 from nzshm_backup.s3_batch import batch_backup_source
 
@@ -101,6 +102,13 @@ def run_backup_source(
                         "dry_run": batch_result.dry_run,
                     }
                 )
+                if not dry_run:
+                    write_run_state(
+                        session, backup_bucket_name, bucket_name,
+                        status=batch_result.status.lower(),
+                        batch_job_id=batch_result.job_id,
+                        objects_in_manifest=batch_result.objects_in_manifest,
+                    )
             else:
                 sync_result = backup_source(
                     session=session,
@@ -121,6 +129,13 @@ def run_backup_source(
                         "dry_run": sync_result.dry_run,
                     }
                 )
+                if not dry_run:
+                    write_run_state(
+                        session, backup_bucket_name, bucket_name,
+                        status="completed" if sync_result.objects_copied > 0 else "skipped",
+                        objects_copied=sync_result.objects_copied,
+                        bytes_transferred=sync_result.bytes_transferred,
+                    )
 
         except Exception as e:
             logger.error(f"Backup failed for {bucket_name}: {e}")
