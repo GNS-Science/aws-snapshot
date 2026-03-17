@@ -8,6 +8,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
+from nzshm_backup.integrity import OPERATIONAL_PREFIXES
 from nzshm_backup.s3_backup import bucket_exists, get_account_id, get_region
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,10 @@ def restore_s3_bucket(
             key = obj["Key"]
             size = obj["Size"]
             source_etag = obj["ETag"]
+
+            if any(key.startswith(p) for p in OPERATIONAL_PREFIXES):
+                logger.debug(f"Skipped (operational metadata): {key}")
+                continue
 
             if target_objects.get(key) == source_etag:
                 result.objects_skipped += 1
