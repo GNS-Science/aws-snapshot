@@ -74,15 +74,19 @@ def test_restore_initiated_on_success():
     assert result.status == "INITIATED"
     assert result.success is True
     assert result.restore_arn is not None
+    # Restore call has no Tags param (API doesn't support it)
     call_kwargs = client.restore_table_to_point_in_time.call_args[1]
     assert call_kwargs["SourceTableArn"] == TABLE_ARN
     assert call_kwargs["TargetTableName"] == "MyTable-restored"
     assert call_kwargs["RestoreDateTime"] == RESTORE_POINT
     assert call_kwargs["BillingModeOverride"] == "PAY_PER_REQUEST"
-    # Tags include PITRPending by default
-    tags = {t["Key"]: t["Value"] for t in call_kwargs["Tags"]}
+    assert "Tags" not in call_kwargs
+    # Tags applied separately via tag_resource (enable_pitr=True by default)
+    tag_call = client.tag_resource.call_args[1]
+    tags = {t["Key"]: t["Value"] for t in tag_call["Tags"]}
     assert tags["PITRPending"] == "true"
     assert tags["RestoredBy"] == "nzshm-backup"
+    assert tag_call["ResourceArn"] == result.restore_arn
 
 
 def test_restore_failed_on_client_error():
