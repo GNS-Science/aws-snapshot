@@ -135,6 +135,25 @@ def build_permission_policy(
                 "Resource": [f"arn:aws:s3:::bb-*-{region}-{account_id}/*"],
                 "Condition": {"StringEquals": {"s3:ResourceAccount": backup_account_id}},
             })
+        # pitr-watcher: re-enable PITR on restored tables and remove PITRPending tag.
+        # Scoped to all tables in the account because restored table names (e.g.
+        # <original>-restored) are not in the configured table list.
+        statements.append({
+            "Sid": "PITRWatcherReEnableOnRestoredTables",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:UpdateContinuousBackups",
+                "dynamodb:UntagResource",
+                "dynamodb:DescribeTable",
+            ],
+            "Resource": [f"arn:aws:dynamodb:{region}:{account_id}:table/*"],
+        })
+        statements.append({
+            "Sid": "PITRWatcherTagScan",
+            "Effect": "Allow",
+            "Action": ["tag:GetResources"],
+            "Resource": ["*"],
+        })
 
     return {"Version": "2012-10-17", "Statement": statements}
 
