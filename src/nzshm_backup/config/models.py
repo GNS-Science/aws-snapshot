@@ -19,6 +19,7 @@ class RetentionConfig(BaseModel):
     warm_days: int = 120  # must be >= hot_days + 90 (AWS constraint for GLACIER_IR → DEEP_ARCHIVE)
     cold_days: int = 365
     max_age_days: int = 365
+    version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 
 
 class RestoreConfig(BaseModel):

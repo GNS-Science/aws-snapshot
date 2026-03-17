@@ -230,16 +230,21 @@ an extra version; all unmodified objects have exactly one version as before.
 | 100 GB corrupted | ~$1.70 NZD |
 | 1 TB corrupted | ~$17 NZD |
 
-**Not currently implemented** — enabling versioning on backup buckets is a
-one-line infrastructure change plus a lifecycle rule. Listed as a future
-improvement in the implementation gaps.
+**Implemented** — versioning is enabled on every backup bucket at creation time.
+The lifecycle policy includes a `NoncurrentVersionExpiration` rule controlled by
+`retention.version_retention_days` (default 90 days; 0 = forever).
 
 ### Versioning
 
-S3 versioning is **not enabled** on backup buckets (current state). For
-write-once BLOBs under normal operation this is sufficient — no object is ever
-overwritten so no extra versions would be created. Versioning should be enabled
-as a future improvement to protect against backup poisoning (see above).
+S3 versioning is **enabled** on all backup buckets. When a backup run overwrites
+an existing object (because the source was mutated), the previous copy becomes a
+non-current version and is retained for `retention.version_retention_days` days
+(default 365). Setting `version_retention_days: 0` retains superseded versions
+forever.
+
+For write-once BLOBs under normal operation this adds zero cost — no object is
+ever overwritten so no extra versions are created. The only versions generated are
+from mutations (the exact scenario we're protecting against).
 
 ### Source bucket versioning (THS)
 

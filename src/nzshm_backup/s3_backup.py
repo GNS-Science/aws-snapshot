@@ -46,6 +46,7 @@ class LifecycleConfig:
     warm_days: int = 120
     cold_days: int = 365
     max_age_days: int = 365
+    version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 
 
 def get_cross_account_session(session: boto3.Session, role_arn: str) -> boto3.Session:
@@ -175,34 +176,34 @@ def apply_lifecycle_policy(
     # AWS requires DEEP_ARCHIVE to be at least 90 days after GLACIER_IR
     deep_archive_days = max(config.warm_days, config.hot_days + 90)
 
-    lifecycle_config = {
-        "Bucket": bucket_name,
-        "LifecycleConfiguration": {
-            "Rules": [
-                {
-                    "ID": "BackupTierTransition",
-                    "Status": "Enabled",
-                    "Filter": {"Prefix": ""},
-                    "Transitions": [
-                        {
-                            "Days": config.hot_days,
-                            "StorageClass": "GLACIER_IR",
-                        },
-                        {
-                            "Days": deep_archive_days,
-                            "StorageClass": "DEEP_ARCHIVE",
-                        },
-                    ],
-                    "Expiration": {
-                        "Days": config.max_age_days,
-                    },
-                }
-            ]
+    rule: dict = {
+        "ID": "BackupTierTransition",
+        "Status": "Enabled",
+        "Filter": {"Prefix": ""},
+        "Transitions": [
+            {
+                "Days": config.hot_days,
+                "StorageClass": "GLACIER_IR",
+            },
+            {
+                "Days": deep_archive_days,
+                "StorageClass": "DEEP_ARCHIVE",
+            },
+        ],
+        "Expiration": {
+            "Days": config.max_age_days,
         },
     }
 
+    # version_retention_days=0 means retain superseded versions forever (no expiry rule)
+    if config.version_retention_days > 0:
+        rule["NoncurrentVersionExpiration"] = {"NoncurrentDays": config.version_retention_days}
+
     logger.info(f"Applying lifecycle policy to {bucket_name}")
-    s3_client.put_bucket_lifecycle_configuration(**lifecycle_config)
+    s3_client.put_bucket_lifecycle_configuration(
+        Bucket=bucket_name,
+        LifecycleConfiguration={"Rules": [rule]},
+    )
 
 
 def apply_no_delete_policy(s3_client, bucket_name: str) -> None:
@@ -234,6 +235,26 @@ def apply_no_delete_policy(s3_client, bucket_name: str) -> None:
         Bucket=bucket_name,
         Policy=json.dumps(policy),
     )
+
+
+def enable_versioning(s3_client, bucket_name: str) -> None:
+    """Enable versioning on a backup bucket.
+
+    Versioning protects against backup poisoning: if a source object is mutated
+    and the next sync overwrites the backup copy, the previous (good) version is
+    retained as a non-current version and can be restored. Non-current versions
+    are expired by the lifecycle policy after ``version_retention_days`` days
+    (or kept forever if that value is 0).
+
+    Args:
+        s3_client:   boto3 S3 client
+        bucket_name: Name of bucket to enable versioning on
+    """
+    s3_client.put_bucket_versioning(
+        Bucket=bucket_name,
+        VersioningConfiguration={"Status": "Enabled"},
+    )
+    logger.info(f"Enabled versioning on {bucket_name}")
 
 
 def sync_bucket(
@@ -358,6 +379,7 @@ def ensure_backup_bucket_ready(
 
     if not bucket_exists(s3_client, backup_bucket_name):
         create_backup_bucket(s3_client, backup_bucket_name, region, account_id, source_bucket)
+        enable_versioning(s3_client, backup_bucket_name)
         apply_lifecycle_policy(s3_client, backup_bucket_name, lifecycle_config)
         apply_no_delete_policy(s3_client, backup_bucket_name)
     elif bucket_is_ours(s3_client, backup_bucket_name):
