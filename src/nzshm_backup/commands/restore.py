@@ -82,15 +82,19 @@ def run_restore(
     account_id = get_account_id(session)
     source_account_id = source_config.source_account_id or account_id
 
-    # Resolve which buckets / tables to act on
-    effective_buckets = [
-        b for b in source_config.s3_buckets
-        if not buckets or b.label in buckets
-    ]
-    effective_table_arns = [
-        arn for arn in source_config.dynamodb_tables
-        if not tables or arn.split("/")[-1] in tables
-    ]
+    # Resolve which buckets / tables to act on.
+    # If neither --buckets nor --tables is given, restore everything.
+    # If either is given, it selects only that type — specifying --buckets
+    # does not implicitly also restore all tables, and vice versa.
+    if buckets or tables:
+        effective_buckets = [b for b in source_config.s3_buckets if b.label in buckets] if buckets else []
+        effective_table_arns = (
+            [arn for arn in source_config.dynamodb_tables if arn.split("/")[-1] in tables]
+            if tables else []
+        )
+    else:
+        effective_buckets = list(source_config.s3_buckets)
+        effective_table_arns = list(source_config.dynamodb_tables)
 
     if not effective_buckets and not effective_table_arns:
         typer.echo("Nothing to restore — no matching buckets or tables configured.", err=True)
