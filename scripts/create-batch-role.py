@@ -36,6 +36,10 @@ TRUST_POLICY = {
 
 
 def build_permission_policy(account_id: str, region: str, source_bucket_pattern: str) -> dict:
+    # Backup buckets follow the bb-* naming convention:
+    #   bb-{source}-s3-{label}-{region}-{source-account-id}
+    # The source-account-id in the bucket name is the SOURCE account, not the backup account,
+    # so we cannot use account_id in the backup bucket ARNs — use bb-* wildcard instead.
     return {
         "Version": "2012-10-17",
         "Statement": [
@@ -54,8 +58,8 @@ def build_permission_policy(account_id: str, region: str, source_bucket_pattern:
                     "s3:GetBucketLocation",
                 ],
                 "Resource": [
-                    f"arn:aws:s3:::{source_bucket_pattern}-backup-{region}-{account_id}",
-                    f"arn:aws:s3:::{source_bucket_pattern}-backup-{region}-{account_id}/*",
+                    f"arn:aws:s3:::bb-*-{region}-*",
+                    f"arn:aws:s3:::bb-*-{region}-*/*",
                 ],
             },
             {
@@ -63,7 +67,7 @@ def build_permission_policy(account_id: str, region: str, source_bucket_pattern:
                 "Effect": "Allow",
                 "Action": ["s3:GetObject"],
                 "Resource": [
-                    f"arn:aws:s3:::*-backup-{region}-{account_id}/_manifests/*",
+                    f"arn:aws:s3:::bb-*-{region}-*/_manifests/*",
                 ],
             },
             {
@@ -71,7 +75,7 @@ def build_permission_policy(account_id: str, region: str, source_bucket_pattern:
                 "Effect": "Allow",
                 "Action": ["s3:PutObject"],
                 "Resource": [
-                    f"arn:aws:s3:::*-backup-{region}-{account_id}/_batch-reports/*",
+                    f"arn:aws:s3:::bb-*-{region}-*/_batch-reports/*",
                 ],
             },
         ],
