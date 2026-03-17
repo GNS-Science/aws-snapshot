@@ -294,13 +294,21 @@ to weekly cadence once experiments complete to let data age into Deep Archive.
 
 ## Combined Cost Summary
 
-| Source | Method | Annual cost (NZD) |
-|--------|--------|-------------------|
-| ToshiAPI DynamoDB (18.3 GB) | PITR + monthly export | ~$39 |
-| ToshiAPI S3 (8 TB) | Incremental sync + lifecycle | *(TBD)* |
-| THS S3 (1 TB) | Incremental sync + lifecycle | *(TBD)* |
-| Lambda + infrastructure | — | ~$120 |
-| **Total** | | **~$618/month (see backup-solution-plan.md)** |
+See [Cost Model](../architecture/cost-model.md) for the full combined summary,
+AWS Backup comparison, and S3 Batch Operations cost impact.
+
+Steady-state (9 TB corpus fully aged into Deep Archive):
+
+| Component | NZD/year |
+|-----------|---------|
+| ToshiAPI DynamoDB — PITR + monthly export | ~$39 |
+| ToshiAPI S3 (8 TB, aged) | ~$165 |
+| THS S3 (1 TB, aged) | ~$20 |
+| Lambda + infrastructure | ~$120 |
+| **Total steady-state** | **~$344** |
+
+> During initial sync (first 3 months) costs are higher (~$588/month) while the
+> corpus ages through Standard and Glacier Instant tiers.
 
 ---
 
@@ -312,7 +320,8 @@ to weekly cadence once experiments complete to let data age into Deep Archive.
 | S3 Glacier Instant | GB-month | $0.007 |
 | S3 Glacier Deep Archive | GB-month | $0.0017 |
 | DynamoDB Export | GB | $0.16 |
-| Glacier Retrieval (Instant) | GB | $0.05 |
-| Glacier Retrieval (Deep Archive) | GB | $0.08 |
+| Glacier Retrieval (Instant) | GB | $0.079 |
+| Glacier Retrieval (Deep Archive) | GB | $0.126 |
 
 **Created:** 2026-03-16
+**Updated:** 2026-03-17
