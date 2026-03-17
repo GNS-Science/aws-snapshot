@@ -54,6 +54,7 @@ nav:
     - Overview: architecture/overview.md
     - Cost Model: architecture/cost-model.md
     - Storage Tiers: architecture/storage-tiers.md
+    - S3 Batch Operations: architecture/s3-batch-operations.md
   - Development:
     - Contributing: development/contributing.md
     - Testing: development/testing.md
