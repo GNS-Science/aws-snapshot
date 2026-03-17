@@ -159,7 +159,7 @@ def run_restore(
     if effective_table_arns:
         source_session = (
             get_cross_account_session(session, source_config.source_account_role_arn)
-            if source_config.source_account_role_arn
+            if source_config.source_account_role_arn and account_id != source_account_id
             else session
         )
         dynamodb_client = source_session.client("dynamodb")
@@ -232,9 +232,10 @@ def restore_status(
         return
 
     session = boto3.Session()
+    current_account = get_account_id(session)
     source_session = (
         get_cross_account_session(session, source_config.source_account_role_arn)
-        if source_config.source_account_role_arn
+        if source_config.source_account_role_arn and current_account != (source_config.source_account_id or current_account)
         else session
     )
     dynamodb_client = source_session.client("dynamodb")
