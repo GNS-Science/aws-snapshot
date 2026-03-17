@@ -44,7 +44,7 @@ Regardless of which restore path is chosen, do this first:
    for any suspicious access; confirm backup buckets are intact with
    `backup status --source toshi --source ths`
 3. **Assess backup currency** — note the timestamp of the last successful
-   backup run from `.llm/log.jsonl` or CloudWatch logs
+   backup run from CloudWatch logs (`/aws/lambda/nzshm-backup-dev`) or S3 Inventory reports
 4. **Decide restore destination** — PROD account (Option A) or new account
    (Option B). See trade-offs below.
 5. **Notify stakeholders** — set expectations on RTO (24–72 hours, S3 is
