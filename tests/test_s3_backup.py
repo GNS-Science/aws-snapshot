@@ -10,6 +10,7 @@ from nzshm_backup.s3_backup import (
     bucket_exists,
     bucket_is_ours,
     create_backup_bucket,
+    enable_versioning,
     sync_bucket,
 )
 
@@ -215,3 +216,64 @@ def test_backup_source(s3_client, source_bucket):
 
     assert result.objects_copied == 3
     assert bucket_exists(s3_client, backup_bucket) is True
+
+
+def test_enable_versioning(s3_client):
+    """enable_versioning turns on versioning for a bucket."""
+    bucket_name = "test-versioned-bucket"
+    s3_client.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
+    )
+
+    enable_versioning(s3_client, bucket_name)
+
+    resp = s3_client.get_bucket_versioning(Bucket=bucket_name)
+    assert resp.get("Status") == "Enabled"
+
+
+def test_apply_lifecycle_policy_includes_noncurrent_expiration(s3_client):
+    """Lifecycle rule includes NoncurrentVersionExpiration when version_retention_days > 0."""
+    from nzshm_backup.s3_backup import LifecycleConfig
+
+    bucket_name = "test-versioned-lifecycle-bucket"
+    s3_client.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
+    )
+
+    apply_lifecycle_policy(s3_client, bucket_name, LifecycleConfig(version_retention_days=365))
+
+    lifecycle = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+    rule = lifecycle["Rules"][0]
+    assert "NoncurrentVersionExpiration" in rule
+    assert rule["NoncurrentVersionExpiration"]["NoncurrentDays"] == 365
+
+
+def test_apply_lifecycle_policy_no_noncurrent_expiration_when_zero(s3_client):
+    """NoncurrentVersionExpiration is omitted when version_retention_days=0 (retain forever)."""
+    from nzshm_backup.s3_backup import LifecycleConfig
+
+    bucket_name = "test-no-expiry-bucket"
+    s3_client.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"},
+    )
+
+    apply_lifecycle_policy(s3_client, bucket_name, LifecycleConfig(version_retention_days=0))
+
+    lifecycle = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+    rule = lifecycle["Rules"][0]
+    assert "NoncurrentVersionExpiration" not in rule
+
+
+def test_ensure_backup_bucket_ready_enables_versioning(s3_client):
+    """Newly created backup bucket has versioning enabled."""
+    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+
+    bucket_name = "test-new-backup-bucket"
+    session = boto3.Session(region_name="ap-southeast-2")
+    ensure_backup_bucket_ready(session, bucket_name)
+
+    resp = s3_client.get_bucket_versioning(Bucket=bucket_name)
+    assert resp.get("Status") == "Enabled"
