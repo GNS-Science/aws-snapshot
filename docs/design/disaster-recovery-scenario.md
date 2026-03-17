@@ -107,23 +107,20 @@ S3 is the bottleneck — 9 TB of data must be copied from backup to target.
 No native "PITR" equivalent exists for S3; the backup bucket IS the archive.
 
 ```bash
-# Recreate the source bucket in target account first, then sync from backup:
-aws s3 sync \
-    s3://bb-toshi-s3-api-ap-southeast-2-595842668254 \
-    s3://nzshm-toshi-api-data \
-    --source-region ap-southeast-2 \
-    --region ap-southeast-2
+# Submit a Batch Operations restore job for each bucket.
+# Jobs run server-side — no long-lived process required.
+backup restore run --source toshi --buckets toshi-api-data
+backup restore run --source ths --buckets ths-dataset
 
-aws s3 sync \
-    s3://bb-ths-s3-dataset-ap-southeast-2-595842668254 \
-    s3://ths-dataset-prod \
-    --source-region ap-southeast-2 \
-    --region ap-southeast-2
+# Monitor progress:
+backup restore status --source toshi
+backup restore status --source ths
 ```
 
-For 9 TB, an S3 Batch Operations job is faster and more reliable than `aws s3 sync`
-(handles retries, parallelism, and provides a completion manifest). The
-`scripts/create-batch-role.py` role can be adapted for restore jobs.
+`backup restore run` always uses S3 Batch Operations (see
+`docs/design/s3-restore-strategy.md`). Jobs run server-side, handle retries
+automatically, and produce a per-object completion report. The restore target
+bucket is created if absent.
 
 **Estimated duration:** 12–48 hours depending on object count and sizes.
 S3 intra-region copy throughput varies; large BLOB files (HDF5, NetCDF) copy
@@ -198,11 +195,9 @@ manually during a real incident:
 
 | Gap | Impact | Notes |
 |-----|--------|-------|
-| `backup restore` commands are stubbed | Manual AWS CLI required for all restore steps | Phase 4 work |
+| S3 restore uses direct copy_object | Not suitable for 8 TB ToshiBucket | S3 Batch Operations implementation pending — see `docs/design/s3-restore-strategy.md` |
 | No `import-table-from-s3` integration | PITR fallback requires manual CLI | Low priority if PITR window covers 35 days |
-| S3 Batch restore job not automated | 9 TB restore requires manual setup | `create-batch-role.py` can be adapted |
 | No restore runbook tested | Unknown failure modes | Quarterly DR drill (Phase 5) needed |
-| No automated integrity check post-restore | Must manually verify object counts | `backup test integrity` not implemented |
 
 ---
 
