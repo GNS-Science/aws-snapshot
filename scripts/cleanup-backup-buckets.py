@@ -139,6 +139,11 @@ def main() -> None:
     parser.add_argument("--region", default="ap-southeast-2")
     parser.add_argument("--dry-run", action="store_true", help="List buckets without deleting")
     parser.add_argument(
+        "--bucket",
+        default=None,
+        help="Target a single bucket by name (must still be tagged ManagedBy=nzshm-backup)",
+    )
+    parser.add_argument(
         "--old-names-only",
         action="store_true",
         help="Only delete buckets matching old naming scheme (nzshm-dynamo-backup-* / *-backup-ap-*)",
@@ -158,6 +163,11 @@ def main() -> None:
         print(f"Profile: {args.profile}")
 
     buckets = get_managed_buckets(s3, old_names_only=args.old_names_only)
+    if args.bucket:
+        buckets = [b for b in buckets if b == args.bucket]
+        if not buckets:
+            print(f"\nBucket '{args.bucket}' not found or not tagged ManagedBy=nzshm-backup.")
+            sys.exit(1)
 
     if not buckets:
         scope = "old-scheme " if args.old_names_only else ""
