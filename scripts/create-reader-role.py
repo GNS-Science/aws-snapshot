@@ -15,6 +15,14 @@ Usage:
             arkivalist-api-dev-invite-codes arkivalist-api-dev-mission-events \
             arkivalist-api-dev-mission-runs
 
+    # If using S3 Batch Operations for large buckets, also pass the batch role ARN
+    # so this script adds a bucket policy allowing the batch role to read source objects:
+    python scripts/create-reader-role.py \
+        --backup-account-id 595842668254 \
+        --batch-role-arn arn:aws:iam::595842668254:role/nzshm-backup-batch-role \
+        --s3-buckets nzshm-toshi-api-data \
+        --dynamodb-tables ToshiFileObject-PROD ...
+
 After running:
     Copy the printed ARN into backup-config.yaml under the source:
         sources:
@@ -112,9 +120,48 @@ def build_permission_policy(region: str, account_id: str, s3_buckets: list[str],
     return {"Version": "2012-10-17", "Statement": statements}
 
 
+def apply_batch_role_bucket_policy(s3_client, bucket: str, batch_role_arn: str, dry_run: bool) -> None:
+    """Add a bucket policy statement allowing the batch role to read source objects.
+
+    S3 Batch Operations copies using the batch role's credentials. For cross-account
+    source buckets the batch role (in the backup account) needs both an identity policy
+    (already in create-batch-role.py) AND a resource policy on the source bucket.
+    """
+    sid = "AllowNzshmBatchRoleRead"
+    try:
+        existing = s3_client.get_bucket_policy(Bucket=bucket)
+        policy = json.loads(existing["Policy"])
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchBucketPolicy":
+            policy = {"Version": "2012-10-17", "Statement": []}
+        else:
+            raise
+
+    # Remove any existing statement with the same Sid before re-adding
+    policy["Statement"] = [s for s in policy["Statement"] if s.get("Sid") != sid]
+    policy["Statement"].append({
+        "Sid": sid,
+        "Effect": "Allow",
+        "Principal": {"AWS": batch_role_arn},
+        "Action": ["s3:GetObject", "s3:GetObjectTagging"],
+        "Resource": f"arn:aws:s3:::{bucket}/*",
+    })
+
+    if dry_run:
+        print(f"  [dry-run] Would add bucket policy to {bucket} for batch role {batch_role_arn}")
+        return
+
+    s3_client.put_bucket_policy(Bucket=bucket, Policy=json.dumps(policy))
+    print(f"  Added batch role read policy to bucket: {bucket}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--backup-account-id", required=True, help="Account ID that runs the backup Lambda")
+    parser.add_argument("--batch-role-arn", default=None,
+                        help="ARN of the S3 Batch Operations role (backup account). When provided, "
+                             "adds a bucket policy to each source S3 bucket granting the batch role "
+                             "cross-account read access (required for use_s3_batch: true).")
     parser.add_argument("--s3-buckets", nargs="*", default=[], help="Source S3 bucket names (not ARNs)")
     parser.add_argument("--dynamodb-tables", nargs="*", default=[], help="Source DynamoDB table names (not ARNs)")
     parser.add_argument("--region", default="ap-southeast-2")
@@ -124,6 +171,7 @@ def main():
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
     iam = session.client("iam")
+    s3 = session.client("s3")
     sts = session.client("sts")
 
     account_id = sts.get_caller_identity()["Account"]
@@ -138,6 +186,10 @@ def main():
         print(json.dumps(trust_policy, indent=2))
         print("\nPermission policy:")
         print(json.dumps(permission_policy, indent=2))
+        if args.batch_role_arn and args.s3_buckets:
+            print(f"\nBatch role bucket policies ({args.batch_role_arn}):")
+            for bucket in args.s3_buckets:
+                apply_batch_role_bucket_policy(s3, bucket, args.batch_role_arn, dry_run=True)
         return
 
     try:
@@ -165,6 +217,11 @@ def main():
         PolicyDocument=json.dumps(permission_policy),
     )
     print("Attached inline policy: nzshm-backup-reader-permissions")
+
+    if args.batch_role_arn and args.s3_buckets:
+        print(f"\nApplying batch role bucket policies (batch role: {args.batch_role_arn}):")
+        for bucket in args.s3_buckets:
+            apply_batch_role_bucket_policy(s3, bucket, args.batch_role_arn, dry_run=False)
 
     print(f"\nAdd to backup-config.yaml under the relevant source:")
     print(f"    source_account_role_arn: \"{role_arn}\"")
