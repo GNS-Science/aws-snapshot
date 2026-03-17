@@ -7,6 +7,7 @@ import boto3
 import typer
 
 from nzshm_backup.config import load_config
+from nzshm_backup.run_state import read_run_state
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 
 app = typer.Typer()
@@ -109,7 +110,18 @@ def _print_source_status(
         s3control = session.client("s3control", region_name=config.general.region)
         for bucket_config in source_config.s3_buckets:
             source_bucket = bucket_config.arn.split(":::")[-1]
+            backup_bucket = source_config.get_backup_bucket_name(
+                bucket_config.label, config.general.region,
+                source_config.source_account_id or get_account_id(session),
+                source_alias,
+            )
             try:
+                state = read_run_state(session, backup_bucket)
+                if state:
+                    checked = state.get("checked_at", "")[:16].replace("T", " ")
+                    st = state.get("status", "unknown")
+                    typer.echo(f"    last run: {checked} UTC — {st}")
+
                 jobs = _get_recent_batch_jobs(s3control, account_id, source_bucket)
                 if not jobs:
                     typer.echo(f"    {source_bucket}: no batch jobs found")
@@ -140,6 +152,22 @@ def _print_source_status(
                 typer.echo(f"    {source_bucket}: error fetching batch status ({e})")
     else:
         typer.echo(f"  S3 buckets (incremental): {len(source_config.s3_buckets)} configured")
+        for bucket_config in source_config.s3_buckets:
+            backup_bucket = source_config.get_backup_bucket_name(
+                bucket_config.label, config.general.region,
+                source_config.source_account_id or get_account_id(session),
+                source_alias,
+            )
+            state = read_run_state(session, backup_bucket)
+            if state:
+                checked = state.get("checked_at", "")[:16].replace("T", " ")
+                st = state.get("status", "unknown")
+                detail = ""
+                if st == "completed":
+                    detail = f"  {state.get('objects_copied', 0)} objects copied"
+                elif st == "submitted":
+                    detail = f"  job/{state.get('batch_job_id', '')[:8]}…  {state.get('objects_in_manifest', 0)} objects"
+                typer.echo(f"    last run: {checked} UTC — {st}{detail}")
 
 
 @app.callback(invoke_without_command=True)
