@@ -176,14 +176,70 @@ real steady-state cost is lower — the majority of 9 TB drops to Deep Archive
 quickly after the initial sync, making the actual monthly cost closer to
 **$14–$20 NZD/month** once the corpus has aged through.
 
+### Backup poisoning (mutation propagation)
+
+The incremental sync uses ETag comparison to detect changed objects. This means
+a mutated source object (data corruption, human error, or attacker) is actively
+copied to the backup on the next run, **overwriting the good backup copy**:
+
+```
+Source object mutated → ETag changes → backup detects difference
+→ copies mutated version → overwrites good backup copy → good copy gone
+```
+
+For write-once BLOBs this is unlikely in normal operation, but it is the exact
+scenario a malicious actor would exploit — corrupt the source, wait for the next
+backup run, then delete both.
+
+**DynamoDB — already protected by PITR.** AWS maintains a continuous change stream
+independently of backup runs. Restore to any second before the corruption, as long
+as it is detected within 35 days. Monthly exports add a secondary safety net but
+can themselves capture corrupt state if run after the mutation.
+
+**S3 — currently unprotected.** Fix: enable versioning on the backup bucket with a
+lifecycle rule to expire non-current (superseded) versions after a chosen retention
+period.
+
+```
+Week 1 sync:  models/run-001.h5  v1  ← good copy
+Week 3 sync:  models/run-001.h5  v2  ← corrupted copy propagated from source
+              models/run-001.h5  v1  ← still here, recoverable
+```
+
+Recovery: list object versions, restore the last known-good version.
+
+**Choosing the non-current version retention period:**
+
+| Retention | Protection window | Guidance |
+|-----------|-------------------|----------|
+| 30 days | Detect within a month | Tight — only safe if active monitoring |
+| 90 days | Detect within a quarter | Aligns with quarterly DR drill |
+| 365 days | Matches overall backup max age | Maximum safety, minimal extra cost |
+| Indefinite | Full history | Unbounded cost growth |
+
+For NSHM, 90 days aligns with "caught by the quarterly DR drill at worst." 365 days
+is also defensible — for write-once data the only extra versions created are the
+corrupted ones, so the cost difference is negligible.
+
+**Cost for write-once BLOBs:** near zero in practice. Only mutated objects generate
+an extra version; all unmodified objects have exactly one version as before.
+
+| Corruption extent | Extra storage (90-day retention) |
+|-------------------|----------------------------------|
+| 10 GB corrupted | ~$0.17 NZD |
+| 100 GB corrupted | ~$1.70 NZD |
+| 1 TB corrupted | ~$17 NZD |
+
+**Not currently implemented** — enabling versioning on backup buckets is a
+one-line infrastructure change plus a lifecycle rule. Listed as a future
+improvement in the implementation gaps.
+
 ### Versioning
 
-S3 versioning is **not enabled** on backup buckets. The source buckets contain
-only large BLOBs (HDF5, NetCDF, Zarr stores) which are write-once — they are
-never overwritten or mutated after creation. Since no object is ever overwritten,
-versioning would never create a second version of any object, providing no
-recovery benefit and no additional cost. The current design (one backup copy per
-object) is sufficient.
+S3 versioning is **not enabled** on backup buckets (current state). For
+write-once BLOBs under normal operation this is sufficient — no object is ever
+overwritten so no extra versions would be created. Versioning should be enabled
+as a future improvement to protect against backup poisoning (see above).
 
 ### Source bucket versioning (THS)
 
