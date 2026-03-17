@@ -19,12 +19,15 @@ _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
 def test_integrity(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
 ):
-    """Validate backup integrity by comparing source ↔ backup object counts and ETags.
+    """Validate backup integrity: S3 source ↔ backup comparison, DynamoDB PITR + export check.
 
-    Reports missing objects (in source but not in backup) and ETag mismatches
+    S3: reports missing objects (in source but not in backup) and ETag mismatches
     (possible backup poisoning — source mutation propagated to backup).
 
-    Exits with code 1 if any discrepancies are found.
+    DynamoDB: checks PITR is still enabled on each table and that at least one
+    recent completed export exists.
+
+    Exits with code 1 if any discrepancies or missing protection are found.
     """
     try:
         config = load_config()
@@ -55,13 +58,16 @@ def test_integrity(
     any_failure = False
     typer.echo(f"\n[{source}] Integrity check\n")
 
+    # ------------------------------------------------------------------
+    # S3 buckets
+    # ------------------------------------------------------------------
     for bucket_cfg in source_config.s3_buckets:
         source_bucket = bucket_cfg.arn.split(":::")[-1]
         backup_bucket = source_config.get_backup_bucket_name(
             bucket_cfg.label, region, source_account_id, source
         )
 
-        typer.echo(f"  {source_bucket}  ↔  {backup_bucket}")
+        typer.echo(f"  S3: {source_bucket}  ↔  {backup_bucket}")
         result = check_bucket_integrity(backup_s3, source_bucket, backup_bucket, source_s3)
 
         typer.echo(
@@ -94,6 +100,52 @@ def test_integrity(
 
         typer.echo("")
 
+    # ------------------------------------------------------------------
+    # DynamoDB tables
+    # ------------------------------------------------------------------
+    if source_config.dynamodb_tables:
+        dynamo_session = source_session or session
+        dynamodb_client = dynamo_session.client("dynamodb")
+
+        for table_arn in source_config.dynamodb_tables:
+            table_name = table_arn.split("/")[-1]
+            typer.echo(f"  DynamoDB: {table_name}")
+
+            # Check PITR status
+            try:
+                resp = dynamodb_client.describe_continuous_backups(TableName=table_name)
+                pitr = resp["ContinuousBackupsDescription"]["PointInTimeRecoveryDescription"]
+                pitr_status = pitr.get("PointInTimeRecoveryStatus", "DISABLED")
+                latest = pitr.get("LatestRestorableDateTime")
+                ts = f"  [latest: {latest.strftime('%Y-%m-%d %H:%M UTC')}]" if latest else ""
+                if pitr_status == "ENABLED":
+                    typer.echo(f"    ✓ PITR enabled{ts}")
+                else:
+                    typer.echo(f"    ✗ PITR DISABLED — table cannot be restored to point-in-time")
+                    any_failure = True
+            except Exception as e:
+                typer.echo(f"    ✗ Could not check PITR: {e}", err=True)
+                any_failure = True
+
+            # Check recent exports
+            try:
+                exports_resp = dynamodb_client.list_exports(TableArn=table_arn, MaxResults=5)
+                exports = exports_resp.get("ExportSummaries", [])
+                completed = [e for e in exports if e.get("ExportStatus") == "COMPLETED"]
+                if completed:
+                    latest_export = max(completed, key=lambda e: e.get("ExportTime") or "")
+                    export_ts = latest_export.get("ExportTime")
+                    ts = f"  [{export_ts.strftime('%Y-%m-%d %H:%M UTC')}]" if export_ts else ""
+                    typer.echo(f"    ✓ {len(completed)} completed export(s) found{ts}")
+                else:
+                    typer.echo("    ✗ no completed exports found — export backup is missing")
+                    any_failure = True
+            except Exception as e:
+                typer.echo(f"    ✗ Could not check exports: {e}", err=True)
+                any_failure = True
+
+            typer.echo("")
+
     if any_failure:
         raise typer.Exit(1)
 
@@ -105,15 +157,19 @@ def test_restore(
         10, "--sample-size", help="Number of objects to sample from the backup bucket"
     ),
 ):
-    """Verify backup restorability by copying a sample of objects to a temp bucket.
+    """Verify backup restorability without triggering a full restore.
 
-    Picks up to --sample-size objects from the backup bucket, copies them to a
-    temporary bucket, verifies ETags match, then deletes the temp bucket.
+    S3: copies a sample of objects from the backup bucket to a temporary bucket,
+    verifies ETags match, then deletes the temp bucket. Proves the restore path
+    works end-to-end and data is readable from backup.
+
+    DynamoDB: confirms PITR is enabled on each table (a prerequisite for
+    point-in-time restore) and checks the export bucket has accessible data.
 
     Objects in archived storage tiers (Glacier, Deep Archive) are skipped —
     they require a separate restore request before they can be copied.
 
-    Exits with code 1 if any copy fails or ETag mismatches are found.
+    Exits with code 1 if any check fails.
     """
     try:
         config = load_config()
@@ -229,6 +285,55 @@ def test_restore(
             typer.echo(f"    ✓ {len(sample)} objects copied and verified")
 
         typer.echo("")
+
+    # ------------------------------------------------------------------
+    # DynamoDB tables — check PITR enabled + export bucket accessible
+    # ------------------------------------------------------------------
+    if source_config.dynamodb_tables:
+        source_session = (
+            get_cross_account_session(session, source_config.source_account_role_arn)
+            if source_config.source_account_role_arn
+            else None
+        )
+        dynamo_session = source_session or session
+        dynamodb_client = dynamo_session.client("dynamodb")
+
+        for table_arn in source_config.dynamodb_tables:
+            table_name = table_arn.split("/")[-1]
+            typer.echo(f"  DynamoDB restorability: {table_name}")
+
+            # PITR check — confirms point-in-time restore is available
+            try:
+                resp = dynamodb_client.describe_continuous_backups(TableName=table_name)
+                pitr = resp["ContinuousBackupsDescription"]["PointInTimeRecoveryDescription"]
+                if pitr.get("PointInTimeRecoveryStatus") == "ENABLED":
+                    latest = pitr.get("LatestRestorableDateTime")
+                    ts = f"  [latest: {latest.strftime('%Y-%m-%d %H:%M UTC')}]" if latest else ""
+                    typer.echo(f"    ✓ PITR enabled{ts}")
+                else:
+                    typer.echo("    ✗ PITR DISABLED — point-in-time restore unavailable")
+                    any_failure = True
+            except Exception as e:
+                typer.echo(f"    ✗ Could not check PITR: {e}", err=True)
+                any_failure = True
+
+            # Export bucket spot-check — confirms export data is accessible
+            export_bucket = source_config.get_dynamodb_backup_bucket_name(
+                source, config.general.region, source_account_id
+            )
+            try:
+                resp = s3.list_objects_v2(Bucket=export_bucket, MaxKeys=1)
+                count = resp.get("KeyCount", 0)
+                if count > 0:
+                    typer.echo(f"    ✓ export bucket accessible: {export_bucket}")
+                else:
+                    typer.echo(f"    ✗ export bucket {export_bucket} is empty — no export data")
+                    any_failure = True
+            except Exception as e:
+                typer.echo(f"    ✗ export bucket {export_bucket} not accessible: {e}", err=True)
+                any_failure = True
+
+            typer.echo("")
 
     if any_failure:
         raise typer.Exit(1)
