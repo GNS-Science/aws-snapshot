@@ -196,6 +196,7 @@ manually during a real incident:
 | Gap | Impact | Notes |
 |-----|--------|-------|
 | S3 restore uses direct copy_object | Not suitable for 8 TB ToshiBucket | S3 Batch Operations implementation pending — see `docs/design/s3-restore-strategy.md` |
+| PITR not re-enabled post-restore | Restored table has no point-in-time protection until manual action | `pitr-watcher` Lambda pending — see `docs/design/dynamodb-pitr-watcher.md` |
 | No `import-table-from-s3` integration | PITR fallback requires manual CLI | Low priority if PITR window covers 35 days |
 | No restore runbook tested | Unknown failure modes | Quarterly DR drill (Phase 5) needed |
 
