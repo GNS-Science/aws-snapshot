@@ -5,20 +5,29 @@ Account context:
     Run this while authenticated to the BACKUP account. The role allows S3 Batch
     Operations to copy objects from source buckets to backup buckets.
 
-Usage:
-    python scripts/create-batch-role.py [--backup-bucket-pattern 'nzshm22-toshi-api-*']
+Usage (config-driven — recommended):
+    # Derives source bucket list from config; covers all sources with use_s3_batch: true.
+    python scripts/create-batch-role.py --config backup-config.sandbox.yaml
+
+Usage (explicit):
+    python scripts/create-batch-role.py \
+        --source-buckets nzshm-toshi-api-data nzshm22-toshi-api-sandbox
 
 After running:
     Copy the printed ARN into backup-config.yaml:
         general:
           s3_batch_role_arn: "arn:aws:iam::ACCOUNT_ID:role/nzshm-backup-batch-role"
+
+    Config-driven mode writes this back automatically.
 """
 
 import argparse
 import json
 import sys
+from pathlib import Path
 
 import boto3
+import yaml
 from botocore.exceptions import ClientError
 
 ROLE_NAME = "nzshm-backup-batch-role"
@@ -35,11 +44,16 @@ TRUST_POLICY = {
 }
 
 
-def build_permission_policy(account_id: str, region: str, source_bucket_pattern: str) -> dict:
+def build_permission_policy(account_id: str, region: str, source_buckets: list[str]) -> dict:
     # Backup buckets follow the bb-* naming convention:
     #   bb-{source}-s3-{label}-{region}-{source-account-id}
     # The source-account-id in the bucket name is the SOURCE account, not the backup account,
     # so we cannot use account_id in the backup bucket ARNs — use bb-* wildcard instead.
+    read_source_resources = (
+        [f"arn:aws:s3:::{b}/*" for b in source_buckets]
+        if source_buckets
+        else ["arn:aws:s3:::*/*"]  # fallback — all buckets; source bucket policy gates access
+    )
     return {
         "Version": "2012-10-17",
         "Statement": [
@@ -47,7 +61,7 @@ def build_permission_policy(account_id: str, region: str, source_bucket_pattern:
                 "Sid": "ReadSource",
                 "Effect": "Allow",
                 "Action": ["s3:GetObject", "s3:GetObjectTagging"],
-                "Resource": f"arn:aws:s3:::{source_bucket_pattern}/*",
+                "Resource": read_source_resources,
             },
             {
                 "Sid": "WriteBackup",
@@ -66,57 +80,89 @@ def build_permission_policy(account_id: str, region: str, source_bucket_pattern:
                 "Sid": "ReadManifest",
                 "Effect": "Allow",
                 "Action": ["s3:GetObject"],
-                "Resource": [
-                    f"arn:aws:s3:::bb-*-{region}-*/_manifests/*",
-                ],
+                "Resource": [f"arn:aws:s3:::bb-*-{region}-*/_manifests/*"],
             },
             {
                 "Sid": "WriteReport",
                 "Effect": "Allow",
                 "Action": ["s3:PutObject"],
-                "Resource": [
-                    f"arn:aws:s3:::bb-*-{region}-*/_batch-reports/*",
-                ],
+                "Resource": [f"arn:aws:s3:::bb-*-{region}-*/_batch-reports/*"],
             },
         ],
     }
 
 
+def resolve_from_config(config_path: str) -> tuple[str, list[str]]:
+    """Return (region, source_buckets) for all sources with use_s3_batch: true."""
+    with open(config_path) as f:
+        data = yaml.safe_load(f)
+
+    region = data.get("general", {}).get("region", "ap-southeast-2")
+    source_buckets = []
+    for alias, source in data.get("sources", {}).items():
+        if source.get("use_s3_batch"):
+            for b in source.get("s3_buckets", []):
+                bucket_name = b["arn"].split(":::")[-1]
+                source_buckets.append(bucket_name)
+    return region, source_buckets
+
+
+def write_back_role_arn(config_path: str, role_arn: str) -> None:
+    """Update general.s3_batch_role_arn in the config YAML file."""
+    with open(config_path) as f:
+        data = yaml.safe_load(f)
+    data.setdefault("general", {})["s3_batch_role_arn"] = role_arn
+    with open(config_path, "w") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+    print(f"  Updated {config_path}: general.s3_batch_role_arn = {role_arn}")
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--source-bucket-pattern",
-        default="nzshm22-toshi-api-*",
-        help="Glob pattern for source buckets (used in IAM resource ARNs)",
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--region", default="ap-southeast-2")
+    parser.add_argument("--config", default=None, help="Path to backup config YAML (config-driven mode)")
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print what would be created without making API calls",
+        "--source-buckets", nargs="*", default=[],
+        help="Explicit source bucket names (not ARNs). Ignored when --config is used.",
     )
+    parser.add_argument("--region", default="ap-southeast-2", help="AWS region (explicit mode only)")
+    parser.add_argument("--dry-run", action="store_true", help="Print what would be created without API calls")
     args = parser.parse_args()
 
-    session = boto3.Session(region_name=args.region)
+    config_mode = args.config is not None
+
+    if config_mode:
+        region, source_buckets = resolve_from_config(args.config)
+        if not source_buckets:
+            print(
+                "WARNING: no sources have use_s3_batch: true in config. "
+                "ReadSource will allow all buckets (source bucket policies gate access)."
+            )
+    else:
+        region = args.region
+        source_buckets = args.source_buckets
+
+    session = boto3.Session(region_name=region)
     iam = session.client("iam")
     sts = session.client("sts")
 
     account_id = sts.get_caller_identity()["Account"]
-    print(f"Account: {account_id}  Region: {args.region}")
+    print(f"Account: {account_id}  Region: {region}")
+    if config_mode:
+        print(f"Config: {args.config}")
+    print(f"Source buckets: {source_buckets or '(all — wildcard fallback)'}")
 
-    permission_policy = build_permission_policy(
-        account_id, args.region, args.source_bucket_pattern
-    )
+    permission_policy = build_permission_policy(account_id, region, source_buckets)
 
     if args.dry_run:
-        print(f"\n[DRY RUN] Would create role: {ROLE_NAME}")
+        print(f"\n[DRY RUN] Would create/update role: {ROLE_NAME}")
         print("\nTrust policy:")
         print(json.dumps(TRUST_POLICY, indent=2))
         print("\nPermission policy:")
         print(json.dumps(permission_policy, indent=2))
         return
 
-    # Create role
     try:
         resp = iam.create_role(
             RoleName=ROLE_NAME,
@@ -128,16 +174,15 @@ def main():
             ],
         )
         role_arn = resp["Role"]["Arn"]
-        print(f"Created role: {role_arn}")
+        print(f"\nCreated role: {role_arn}")
     except ClientError as e:
         if e.response["Error"]["Code"] == "EntityAlreadyExists":
             role_arn = f"arn:aws:iam::{account_id}:role/{ROLE_NAME}"
-            print(f"Role already exists: {role_arn}")
+            print(f"\nRole already exists: {role_arn}")
         else:
             print(f"ERROR creating role: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Put inline permission policy
     policy_name = "nzshm-backup-batch-permissions"
     iam.put_role_policy(
         RoleName=ROLE_NAME,
@@ -146,9 +191,13 @@ def main():
     )
     print(f"Attached inline policy: {policy_name}")
 
-    print(f"\nAdd to backup-config.yaml:")
-    print(f"  general:")
-    print(f"    s3_batch_role_arn: \"{role_arn}\"")
+    if config_mode:
+        print(f"\nWriting role ARN back to config:")
+        write_back_role_arn(args.config, role_arn)
+    else:
+        print(f"\nAdd to backup-config.yaml:")
+        print(f"  general:")
+        print(f"    s3_batch_role_arn: \"{role_arn}\"")
 
 
 if __name__ == "__main__":
