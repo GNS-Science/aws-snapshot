@@ -19,6 +19,7 @@ BATCH_STATUS_ICON = {
     "Failed": "✗",
     "Cancelled": "✗",
     "Active": "⋯",
+    "Completing": "⋯",
     "Preparing": "⋯",
     "New": "⋯",
     "Paused": "⏸",
@@ -120,11 +121,20 @@ def _print_source_status(
                     created = job.get("CreationTime")
                     ts = f"  [{created.strftime('%Y-%m-%d %H:%M UTC')}]" if created else ""
                     progress = job.get("ProgressSummary", {})
-                    total = progress.get("TotalNumberOfTasks", "?")
-                    succeeded = progress.get("NumberOfTasksSucceeded", "?")
+                    total = progress.get("TotalNumberOfTasks", 0)
+                    failed = progress.get("NumberOfTasksFailed", 0)
+                    # FailedTasksOnly report: succeeded count is not tracked by AWS.
+                    # Derive it: if Complete and no failures, all tasks succeeded.
+                    if status == "Complete" and failed == 0:
+                        progress_str = f"{total}/{total} objects"
+                    elif failed:
+                        progress_str = f"{failed} failed / {total} objects"
+                    else:
+                        succeeded = progress.get("NumberOfTasksSucceeded", 0)
+                        progress_str = f"{succeeded}/{total} objects"
                     typer.echo(
                         f"    {icon} {source_bucket}: {status}  job/{job_id}…{ts}"
-                        f"  ({succeeded}/{total} objects)"
+                        f"  ({progress_str})"
                     )
             except Exception as e:
                 typer.echo(f"    {source_bucket}: error fetching batch status ({e})")
