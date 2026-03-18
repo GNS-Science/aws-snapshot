@@ -143,7 +143,7 @@ Permission policy:
 - `s3:GetObject` on `_manifests/` prefix in backup bucket (to read the manifest)
 - `s3:PutObject` on `_batch-reports/` prefix in backup bucket (job completion reports)
 
-A helper script `scripts/create-batch-role.py` should create this role.
+A helper script `scripts/create-backup-roles.py` should create this role.
 Add `s3_batch_role_arn` to config after creating it.
 
 ---
@@ -175,7 +175,7 @@ and interactive CLI usage where immediate results are valuable.
 | `src/nzshm_backup/commands/run_backup.py` | Branch on `use_s3_batch` |
 | `serverless.yml` | Add `s3control` + `iam:PassRole` to Lambda role |
 | `backup-config.example.yaml` | Add new fields |
-| `scripts/create-batch-role.py` | **New** — one-time IAM role creation |
+| `scripts/create-backup-roles.py` | **New** — one-time IAM role creation |
 | `tests/test_s3_batch.py` | **New** — unit tests for manifest generation and job submission |
 
 ---
@@ -259,7 +259,7 @@ Same behaviour as current incremental sync — acceptable for backup-not-replica
 ## Migration Steps
 
 1. Deploy `s3_batch.py` + config changes with `use_s3_batch: false` everywhere (no behaviour change)
-2. Create the batch IAM role via `scripts/create-batch-role.py`; set `s3_batch_role_arn` in config
+2. Create the batch IAM role via `scripts/create-backup-roles.py`; set `s3_batch_role_arn` in config
 3. Set `use_s3_batch: true` for `toshi` in config
 4. Test: `backup --dry-run run --source toshi` (generates manifest, skips `create_job`)
 5. First run: `backup run --source toshi` — submits batch job; monitor with:

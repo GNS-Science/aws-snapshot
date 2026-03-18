@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""One-time setup: create the IAM role S3 Batch Operations assumes.
+"""One-time setup: create IAM roles in the BACKUP account.
 
 Account context:
-    Run this while authenticated to the BACKUP account. The role allows S3 Batch
-    Operations to copy objects from source buckets to backup buckets (backup direction)
-    and from backup buckets back to source buckets (restore direction).
+    Run this while authenticated to the BACKUP account. Creates the role that S3 Batch
+    Operations assumes for both backup (source → backup bucket) and restore
+    (backup bucket → source) directions.
 
 Usage (config-driven — recommended):
     # Derives source bucket list from config; covers all sources with use_s3_batch: true.
-    python scripts/create-batch-role.py --config backup-config.sandbox.yaml
+    python scripts/create-backup-roles.py --config backup-config.sandbox.yaml
 
 Usage (explicit):
-    python scripts/create-batch-role.py \
+    python scripts/create-backup-roles.py \
         --source-buckets nzshm-toshi-api-data nzshm22-toshi-api-sandbox
 
 After running:

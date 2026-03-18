@@ -68,7 +68,7 @@ Post-restore consistency can be confirmed with `backup test integrity`.
 3. Submit `create_job` with:
    - Operation: `S3PutObjectCopy`
    - Manifest: the CSV written above
-   - Role ARN: `nzshm-backup-batch` (created by `scripts/create-batch-role.py`)
+   - Role ARN: `nzshm-backup-batch` (created by `scripts/create-backup-roles.py`)
    - Report: written to `s3://<backup-bucket>/_batch-reports/`
 4. Return the Job ID; print: `Batch job submitted: <id>. Check progress with restore status`
 
@@ -94,7 +94,7 @@ code path without a full restore.
 
 ## IAM requirements
 
-The `nzshm-backup-batch` role (see `scripts/create-batch-role.py`) must have:
+The `nzshm-backup-batch` role (see `scripts/create-backup-roles.py`) must have:
 
 - `s3:GetObject` on the backup bucket
 - `s3:PutObject` on the restore target bucket
@@ -109,7 +109,7 @@ bucket policy must allow `s3:PutObject` from the batch role ARN.
 
 - `backup restore run` — S3 Batch Operations (default when `s3_batch_role_arn` configured); direct `copy_object` fallback for unconfigured environments
 - `backup test restore` — direct `copy_object` by default; `--use-batch` flag exercises the S3 Batch path for sampled objects
-- S3 Batch path — **implemented** (`batch_restore_bucket` in `s3_batch.py`); `create-batch-role.py` updated with `ReadBackup` permission
+- S3 Batch path — **implemented** (`batch_restore_bucket` in `s3_batch.py`); `create-backup-roles.py` updated with `ReadBackup` permission
 
 **Created:** 2026-03-18
 **Updated:** 2026-03-18

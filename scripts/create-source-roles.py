@@ -259,7 +259,7 @@ def apply_batch_role_write_policy(
     Required for cross-account S3 Batch restore: the batch role (backup account) writes
     objects into the original source bucket (source account). The batch role's IAM identity
     policy already grants PutObject on the source bucket ARNs (WriteRestore statement in
-    create-batch-role.py); this resource policy satisfies the cross-account requirement.
+    create-backup-roles.py); this resource policy satisfies the cross-account requirement.
     """
     if dry_run:
         print(f"  [dry-run] Would add batch role write policy to {bucket}")

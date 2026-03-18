@@ -347,7 +347,7 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] 69 tests passing
 
 **Remaining before first production run (toshi):**
-- [ ] Create S3 Batch IAM role in production account (`python scripts/create-batch-role.py`)
+- [ ] Create S3 Batch IAM role in production account (`python scripts/create-backup-roles.py`)
 - [ ] Set `s3_batch_role_arn` + `use_s3_batch: true` for toshi in production config
 
 ### Phase 3: Notifications + Reporting
@@ -583,7 +583,7 @@ testing:
 1. ✅ DynamoDB PITR export to S3
 2. ✅ EventBridge scheduling (add/remove/enable/disable, weekly/daily/hourly/minutely)
 3. ✅ Lambda deployed and verified in sandbox (Serverless Framework v4, Docker pip, SSO credentials)
-4. ✅ S3 Batch Operations for large buckets (s3_batch.py, create-batch-role.py, 13 tests)
+4. ✅ S3 Batch Operations for large buckets (s3_batch.py, create-backup-roles.py, 13 tests)
 5. ✅ Manual vs scheduled backup conflict resolved (ManagedBy tag)
 6. ✅ Sandbox demo tooling and guide
 7. ✅ Test suite: 69 tests passing
