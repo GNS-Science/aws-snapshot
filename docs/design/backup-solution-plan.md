@@ -108,30 +108,14 @@
 
 ## Cost Analysis
 
-### Current State (AWS Backup)
-- Monthly: $1,700 NZD
-- Annual: $20,400 NZD
+For current storage tier pricing, monthly cost modelling, and AWS Backup comparison see
+[Cost Model](../architecture/cost-model.md).
 
-### Proposed Solution (30-Day Hot Policy)
+### Summary
 
-```
-Steady State Monthly Costs:
-├─ S3 Standard (0-30 days):     9 TB × 1 × $0.036 = $324 NZD
-├─ S3 Glacier Instant (31-90):  9 TB × 2 × $0.007 = $126 NZD
-├─ S3 Deep Archive (91-365):    9 TB × 9 × $0.0017 = $138 NZD
-├─ DynamoDB Exports:            18.3 GB × 4 × $0.16 = $12 NZD
-├─ Lambda + SES:                ~$10 NZD
-├─ Testing overhead:            ~$8 NZD
-└─ TOTAL:                       ~$618 NZD/month = $7,420 NZD/year
-```
-
-### Comparison Summary
-
-| Solution | Monthly (NZD) | Annual (NZD) | Savings/Year | Savings % |
-|----------|---------------|--------------|--------------|-----------|
-| Current (AWS Backup) | $1,700 | $20,400 | - | - |
-| Proposed (30-day hot) | $618 | $7,420 | $12,980 | 64% |
-| Proposed (15-day hot) | $488 | $5,860 | $14,540 | 71% |
+- **Current (AWS Backup):** $1,700 NZD/month ($20,400/year)
+- **Custom solution (steady-state, aged):** ~$29 NZD/month (~$344/year)
+- **Savings:** ~98% reduction once the 9 TB corpus has aged into Deep Archive
 
 ---
 
@@ -604,25 +588,7 @@ testing:
 
 ---
 
-## Appendix A: AWS Pricing Reference (ap-southeast-2)
-
-| Service | Unit | USD | NZD (approx) |
-|---------|------|-----|--------------|
-| S3 Standard | GB-month | $0.023 | $0.036 |
-| S3 Glacier Instant | GB-month | $0.004 | $0.007 |
-| S3 Glacier Deep Archive | GB-month | $0.00099 | $0.0017 |
-| DynamoDB Export | GB | $0.10 | $0.16 |
-| Glacier Retrieval (Instant) | GB | $0.03 | $0.05 |
-| Glacier Retrieval (Deep Archive) | GB | $0.05 | $0.08 |
-| AWS Lambda | 1M requests | $0.20 | $0.32 |
-| AWS Lambda | GB-second | $0.0000166667 | $0.000027 |
-| SES | 1000 emails | $0.10 | $0.16 |
-
-*Exchange rate: 1 USD = 1.57 NZD (approximate, Feb 2026)*
-
----
-
-## Appendix B: Glossary
+## Appendix A: Glossary
 
 | Term | Definition |
 |------|------------|
