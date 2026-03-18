@@ -3,7 +3,8 @@
 
 Account context:
     Run this while authenticated to the BACKUP account. The role allows S3 Batch
-    Operations to copy objects from source buckets to backup buckets.
+    Operations to copy objects from source buckets to backup buckets (backup direction)
+    and from backup buckets back to source buckets (restore direction).
 
 Usage (config-driven — recommended):
     # Derives source bucket list from config; covers all sources with use_s3_batch: true.
@@ -19,6 +20,13 @@ After running:
           s3_batch_role_arn: "arn:aws:iam::ACCOUNT_ID:role/nzshm-backup-batch-role"
 
     Config-driven mode writes this back automatically.
+
+Cross-account restore setup:
+    For cross-account restores the source bucket (restore target) needs a resource policy
+    allowing this role to PutObject. Run create-source-roles.py in the SOURCE account to
+    apply both the read policy (backup direction) and write policy (restore direction):
+
+        python scripts/create-source-roles.py --config backup-config.sandbox.yaml --source arkivalist
 """
 
 import argparse
@@ -81,6 +89,19 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
                 "Effect": "Allow",
                 "Action": ["s3:GetObject", "s3:GetObjectTagging"],
                 "Resource": [f"arn:aws:s3:::bb-*-{region}-*/*"],
+            },
+            {
+                "Sid": "WriteRestore",
+                "Effect": "Allow",
+                "Action": [
+                    "s3:PutObject",
+                    "s3:PutObjectTagging",
+                    "s3:GetBucketLocation",
+                ],
+                # Same resources as ReadSource: the original source buckets are the restore targets.
+                # For cross-account targets, the target bucket policy must also allow this role
+                # (applied by create-source-roles.py --config <cfg> --source <alias>).
+                "Resource": read_source_resources,
             },
             {
                 "Sid": "WriteReport",
