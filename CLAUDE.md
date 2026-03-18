@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AWS-native backup CLI replacing AWS Backup for NSHM datasets. See `docs/backup-solution-plan.md` for full architecture, phase status, cost analysis, and design decisions.
+AWS-native backup CLI replacing AWS Backup for NSHM datasets. See `docs/design/backup-solution-plan.md` for full architecture, phase status, cost analysis, and design decisions.
 
 ## Commands
 
