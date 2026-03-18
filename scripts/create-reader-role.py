@@ -156,7 +156,7 @@ def apply_batch_role_bucket_policy(
 
     S3 Batch Operations copies using the batch role's credentials. For cross-account
     source buckets the batch role (in the backup account) needs both an identity policy
-    (already in create-batch-role.py) AND a resource policy on the source bucket.
+    (already in create-backup-roles.py) AND a resource policy on the source bucket.
     """
     if dry_run:
         print(f"  [dry-run] Would add batch role read policy to {bucket}")

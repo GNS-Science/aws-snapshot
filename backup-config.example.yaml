@@ -7,7 +7,7 @@ general:
   lambda_arn: null        # Set after first 'serverless deploy'
   s3_batch_role_arn: null # arn:aws:iam::ACCOUNT_ID:role/nzshm-backup-batch-role
                           # Required when any source has use_s3_batch: true
-                          # Create with: python scripts/create-batch-role.py
+                          # Create with: python scripts/create-backup-roles.py
   tags:
     Project: NSHM
     ManagedBy: backup-cli
