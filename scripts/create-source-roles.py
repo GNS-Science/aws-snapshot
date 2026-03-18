@@ -149,20 +149,18 @@ def build_restore_policy(
                 for t in dynamodb_tables
             ],
         })
-        # Restored table names (e.g. <original>-restored) are not in the configured
-        # table list, so these permissions must be scoped to all tables in the account.
-        # Note: AWS requires dynamodb:Scan on the target table as an internal check
-        # during RestoreTableToPointInTime (undocumented but enforced).
+        # Full DynamoDB access on all tables in this account.
+        # Scope is intentionally broad for two reasons:
+        #   1. RestoreTableToPointInTime performs undocumented internal checks
+        #      (Scan, Query, ...) on the restore TARGET table — narrowing by action
+        #      leads to whack-a-mole with AccessDeniedException errors.
+        #   2. Restored table names (<original>-restored) are not in the configured
+        #      table list so resource-level scoping to known ARNs is not possible.
+        # This role is only assumed during explicit restore operations, not continuously.
         statements.append({
             "Sid": "ManageRestoredTables",
             "Effect": "Allow",
-            "Action": [
-                "dynamodb:Scan",
-                "dynamodb:TagResource",
-                "dynamodb:UntagResource",
-                "dynamodb:DescribeTable",
-                "dynamodb:UpdateContinuousBackups",
-            ],
+            "Action": ["dynamodb:*"],
             "Resource": [f"arn:aws:dynamodb:{region}:{account_id}:table/*"],
         })
         statements.append({
