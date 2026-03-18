@@ -98,10 +98,13 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
                     "s3:PutObjectTagging",
                     "s3:GetBucketLocation",
                 ],
-                # Same resources as ReadSource: the original source buckets are the restore targets.
-                # For cross-account targets, the target bucket policy must also allow this role
-                # (applied by create-source-roles.py --config <cfg> --source <alias>).
-                "Resource": read_source_resources,
+                # Covers both the original bucket (real DR) and the {bucket}-restore default
+                # target (safe testing). For cross-account targets the bucket policy must also
+                # allow this role (applied by create-source-roles.py --config <cfg> --source <alias>).
+                "Resource": (
+                    [f"arn:aws:s3:::{b}/*" for b in source_buckets] +
+                    [f"arn:aws:s3:::{b}-restore/*" for b in source_buckets]
+                ) if source_buckets else ["arn:aws:s3:::*/*"],
             },
             {
                 "Sid": "WriteReport",
