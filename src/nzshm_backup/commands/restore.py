@@ -15,7 +15,12 @@ from nzshm_backup.dynamodb_restore import (
 from nzshm_backup.restore_state import add_pending_restore
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import batch_restore_bucket, list_recent_batch_jobs
-from nzshm_backup.s3_restore import restore_s3_bucket
+from nzshm_backup.s3_restore import (
+    _ensure_restore_target,
+    apply_restore_target_policy,
+    make_restore_bucket_name,
+    restore_s3_bucket,
+)
 from nzshm_backup.state import get_state
 
 app = typer.Typer()
@@ -45,9 +50,10 @@ def run_restore(
     tables: list[str] = typer.Option(
         [], "--tables", help="Table names to restore (default: all configured)"
     ),
-    target_bucket: str | None = typer.Option(
-        None, help="S3 destination bucket (single bucket only; must already exist). "
-                   "Defaults to {source-bucket}-restore. Use the original bucket name only for real DR."
+    original: bool = typer.Option(
+        False, "--original",
+        help="Restore to the original source bucket name (real DR). "
+             "Default writes to {source-bucket}-restore (safe testing).",
     ),
     target_table: str | None = typer.Option(
         None, help="DynamoDB target table name (single table only)"
@@ -69,10 +75,13 @@ def run_restore(
     Use --buckets / --tables to select a subset; omit both to restore everything
     configured under --source.
 
-    S3 restore: by default writes to {source-bucket}-restore, not the original bucket.
+    S3 restore (default): writes to {source-bucket}-restore (truncated to 63 chars).
     This is safe for testing — verify the restore, then promote if needed.
-    For real DR (restoring to the original bucket name), pass --target-bucket explicitly.
+    For real DR pass --original to restore into the original bucket name.
     Target buckets must already exist; S3 bucket names are permanent and cannot be renamed.
+
+    For cross-account restores the AllowNzshmBatchRoleWrite bucket policy is applied to
+    the target bucket at runtime (before the Batch job is submitted).
 
     DynamoDB restores are submit-and-return (async). Use 'restore status'
     to check progress.
@@ -115,13 +124,6 @@ def run_restore(
         raise typer.Exit(1)
 
     # Validate target overrides
-    if target_bucket and len(effective_buckets) > 1:
-        typer.echo(
-            "Error: --target-bucket is only valid for a single bucket restore. "
-            "Select one with --buckets.", err=True
-        )
-        raise typer.Exit(1)
-
     if target_table and len(effective_table_arns) > 1:
         typer.echo(
             "Error: --target-table is only valid for a single table restore. "
@@ -142,19 +144,41 @@ def run_restore(
     # S3 restore
     # ------------------------------------------------------------------
     batch_role_arn = config.general.s3_batch_role_arn
+    is_cross_account = account_id != source_account_id
+
+    restore_role_arn_s3 = (
+        source_config.source_account_restore_role_arn
+        or source_config.source_account_role_arn
+    )
+    source_session_s3 = (
+        get_cross_account_session(session, restore_role_arn_s3)
+        if restore_role_arn_s3 and is_cross_account
+        else session
+    )
 
     for bucket_cfg in effective_buckets:
         backup_bucket = source_config.get_backup_bucket_name(
             bucket_cfg.label, region, source_account_id, source
         )
         source_bucket_name = bucket_cfg.arn.split(":::")[-1]
-        dest_bucket = target_bucket or f"{source_bucket_name}-restore"
+        dest_bucket = source_bucket_name if original else make_restore_bucket_name(source_bucket_name)
         prefix_info = f" (prefix: {prefix})" if prefix else ""
         typer.echo(f"  Restoring S3: {backup_bucket} → {dest_bucket}{prefix_info}")
 
         if state.dry_run:
             typer.echo(f"  [DRY RUN] Would restore {backup_bucket} → {dest_bucket}")
             continue
+
+        source_s3_client = source_session_s3.client("s3")
+
+        if not original:
+            _ensure_restore_target(source_s3_client, dest_bucket, region)
+
+        if batch_role_arn and is_cross_account:
+            try:
+                apply_restore_target_policy(source_s3_client, dest_bucket, batch_role_arn)
+            except Exception as e:
+                typer.echo(f"  Warning: could not apply write policy to {dest_bucket}: {e}", err=True)
 
         if batch_role_arn:
             result = batch_restore_bucket(

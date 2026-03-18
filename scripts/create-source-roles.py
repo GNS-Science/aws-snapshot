@@ -45,6 +45,15 @@ from botocore.exceptions import ClientError
 READER_ROLE_NAME = "nzshm-backup-reader"
 RESTORE_ROLE_NAME = "nzshm-backup-restore"
 
+_RESTORE_SUFFIX = "-restore"
+_MAX_BUCKET_NAME_LEN = 63
+
+
+def make_restore_bucket_name(bucket: str) -> str:
+    """Return the canonical restore-target name: {bucket}-restore, truncated to 63 chars."""
+    max_base = _MAX_BUCKET_NAME_LEN - len(_RESTORE_SUFFIX)
+    return bucket[:max_base] + _RESTORE_SUFFIX
+
 
 def build_trust_policy(backup_account_id: str) -> dict:
     return {
@@ -135,9 +144,30 @@ def build_restore_policy(
     region: str,
     account_id: str,
     dynamodb_tables: list[str],
+    s3_buckets: list[str] | None = None,
 ) -> dict:
-    """Restore policy: submit PITR restores and manage PITR/tags on restored tables."""
+    """Restore policy: submit PITR restores, manage PITR/tags, and apply runtime bucket policies."""
     statements = []
+
+    if s3_buckets:
+        restore_bucket_arns = [f"arn:aws:s3:::{make_restore_bucket_name(b)}" for b in s3_buckets]
+        # Create and tag the restore target bucket if it doesn't exist yet.
+        statements.append({
+            "Sid": "CreateRestoreTargetBucket",
+            "Effect": "Allow",
+            "Action": ["s3:CreateBucket", "s3:PutBucketTagging"],
+            "Resource": restore_bucket_arns,
+        })
+        # Needed so restore run can apply AllowNzshmBatchRoleWrite at runtime (self-contained restore).
+        statements.append({
+            "Sid": "PutRestoreTargetPolicy",
+            "Effect": "Allow",
+            "Action": ["s3:GetBucketPolicy", "s3:PutBucketPolicy"],
+            "Resource": (
+                [f"arn:aws:s3:::{b}" for b in s3_buckets] +
+                restore_bucket_arns
+            ),
+        })
 
     if dynamodb_tables:
         statements.append({
@@ -241,14 +271,25 @@ def apply_batch_role_bucket_policy(
         return
 
     sid = "AllowNzshmBatchRoleRead"
-    _merge_bucket_policy_statement(s3_client, bucket, sid, {
-        "Sid": sid,
-        "Effect": "Allow",
-        "Principal": {"AWS": batch_role_arn},
-        "Action": ["s3:GetObject", "s3:GetObjectTagging"],
-        "Resource": f"arn:aws:s3:::{bucket}/*",
-    })
-    print(f"  Added batch role read policy to bucket: {bucket}")
+    try:
+        _merge_bucket_policy_statement(s3_client, bucket, sid, {
+            "Sid": sid,
+            "Effect": "Allow",
+            "Principal": {"AWS": batch_role_arn},
+            "Action": ["s3:GetObject", "s3:GetObjectTagging"],
+            "Resource": f"arn:aws:s3:::{bucket}/*",
+        })
+        print(f"  Added batch role read policy to bucket: {bucket}")
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "AccessDenied":
+            print(
+                f"  WARNING: cannot apply read policy to {bucket} (AccessDenied). "
+                "The bucket may have a restrictive policy blocking s3:GetBucketPolicy for this caller. "
+                "For same-account backups IAM identity policy is sufficient. "
+                "For cross-account, apply AllowNzshmBatchRoleRead manually via the S3 console."
+            )
+        else:
+            raise
 
 
 def apply_batch_role_write_policy(
@@ -280,6 +321,13 @@ def apply_batch_role_write_policy(
     except ClientError as e:
         if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
             print(f"  Skipped {bucket} (bucket does not exist — create it before restoring)")
+        elif e.response["Error"]["Code"] == "AccessDenied":
+            print(
+                f"  WARNING: cannot apply write policy to {bucket} (AccessDenied). "
+                "The bucket may have a restrictive policy blocking s3:GetBucketPolicy for this caller. "
+                "For same-account restores IAM identity policy is sufficient. "
+                "For cross-account, the runtime apply in 'restore run' will attempt this automatically."
+            )
         else:
             raise
 
@@ -392,7 +440,7 @@ def main():
 
     trust_policy = build_trust_policy(backup_account_id)
     reader_policy = build_reader_policy(region, account_id, s3_buckets, dynamodb_tables, backup_account_id)
-    restore_policy = build_restore_policy(region, account_id, dynamodb_tables)
+    restore_policy = build_restore_policy(region, account_id, dynamodb_tables, s3_buckets)
 
     reader_arn = _create_or_update_role(
         iam, READER_ROLE_NAME, trust_policy, reader_policy,
@@ -410,7 +458,7 @@ def main():
         for bucket in s3_buckets:
             apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
             apply_batch_role_write_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
-            apply_batch_role_write_policy(s3, f"{bucket}-restore", batch_role_arn, dry_run=args.dry_run)
+            apply_batch_role_write_policy(s3, make_restore_bucket_name(bucket), batch_role_arn, dry_run=args.dry_run)
 
     if config_mode:
         print("\nWriting role ARNs back to config:")

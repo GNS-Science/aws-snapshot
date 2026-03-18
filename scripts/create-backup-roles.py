@@ -40,6 +40,15 @@ from botocore.exceptions import ClientError
 
 ROLE_NAME = "nzshm-backup-batch-role"
 
+_RESTORE_SUFFIX = "-restore"
+_MAX_BUCKET_NAME_LEN = 63
+
+
+def make_restore_bucket_name(bucket: str) -> str:
+    """Return the canonical restore-target name: {bucket}-restore, truncated to 63 chars."""
+    max_base = _MAX_BUCKET_NAME_LEN - len(_RESTORE_SUFFIX)
+    return bucket[:max_base] + _RESTORE_SUFFIX
+
 TRUST_POLICY = {
     "Version": "2012-10-17",
     "Statement": [
@@ -98,12 +107,12 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
                     "s3:PutObjectTagging",
                     "s3:GetBucketLocation",
                 ],
-                # Covers both the original bucket (real DR) and the {bucket}-restore default
-                # target (safe testing). For cross-account targets the bucket policy must also
-                # allow this role (applied by create-source-roles.py --config <cfg> --source <alias>).
+                # Covers both the original bucket (real DR, --original flag) and the canonical
+                # make_restore_bucket_name() target (safe testing, default). Truncation is applied
+                # consistently so IAM and bucket policy names always align.
                 "Resource": (
                     [f"arn:aws:s3:::{b}/*" for b in source_buckets] +
-                    [f"arn:aws:s3:::{b}-restore/*" for b in source_buckets]
+                    [f"arn:aws:s3:::{make_restore_bucket_name(b)}/*" for b in source_buckets]
                 ) if source_buckets else ["arn:aws:s3:::*/*"],
             },
             {
