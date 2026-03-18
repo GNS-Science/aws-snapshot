@@ -89,5 +89,9 @@ def cli():
     app()
 
 
+import typer.main as _typer_main  # noqa: E402
+
+click_app = _typer_main.get_command(app)
+
 if __name__ == "__main__":
     cli()

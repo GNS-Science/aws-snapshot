@@ -317,16 +317,5 @@ Steady-state (9 TB corpus fully aged into Deep Archive):
 
 ---
 
-## Reference: Pricing
-
-| Service | Unit | NZD |
-|---------|------|-----|
-| S3 Standard | GB-month | $0.036 |
-| S3 Glacier Instant | GB-month | $0.007 |
-| S3 Glacier Deep Archive | GB-month | $0.0017 |
-| DynamoDB Export | GB | $0.16 |
-| Glacier Retrieval (Instant) | GB | $0.079 |
-| Glacier Retrieval (Deep Archive) | GB | $0.126 |
-
 **Created:** 2026-03-16
 **Updated:** 2026-03-17
