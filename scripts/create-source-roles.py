@@ -216,15 +216,8 @@ def _create_or_update_role(iam, role_name: str, trust_policy: dict, permission_p
     return role_arn
 
 
-def apply_batch_role_bucket_policy(
-    s3_client, bucket: str, batch_role_arn: str, dry_run: bool
-) -> None:
-    """Add a bucket policy statement allowing the batch role to read source objects."""
-    if dry_run:
-        print(f"  [dry-run] Would add batch role read policy to {bucket}")
-        return
-
-    sid = "AllowNzshmBatchRoleRead"
+def _merge_bucket_policy_statement(s3_client, bucket: str, sid: str, statement: dict) -> None:
+    """Add or replace a statement (identified by SID) in a bucket policy."""
     try:
         existing = s3_client.get_bucket_policy(Bucket=bucket)
         policy = json.loads(existing["Policy"])
@@ -235,16 +228,52 @@ def apply_batch_role_bucket_policy(
             raise
 
     policy["Statement"] = [s for s in policy["Statement"] if s.get("Sid") != sid]
-    policy["Statement"].append({
+    policy["Statement"].append(statement)
+    s3_client.put_bucket_policy(Bucket=bucket, Policy=json.dumps(policy))
+
+
+def apply_batch_role_bucket_policy(
+    s3_client, bucket: str, batch_role_arn: str, dry_run: bool
+) -> None:
+    """Add a bucket policy statement allowing the batch role to read source objects (backup direction)."""
+    if dry_run:
+        print(f"  [dry-run] Would add batch role read policy to {bucket}")
+        return
+
+    sid = "AllowNzshmBatchRoleRead"
+    _merge_bucket_policy_statement(s3_client, bucket, sid, {
         "Sid": sid,
         "Effect": "Allow",
         "Principal": {"AWS": batch_role_arn},
         "Action": ["s3:GetObject", "s3:GetObjectTagging"],
         "Resource": f"arn:aws:s3:::{bucket}/*",
     })
-
-    s3_client.put_bucket_policy(Bucket=bucket, Policy=json.dumps(policy))
     print(f"  Added batch role read policy to bucket: {bucket}")
+
+
+def apply_batch_role_write_policy(
+    s3_client, bucket: str, batch_role_arn: str, dry_run: bool
+) -> None:
+    """Add a bucket policy statement allowing the batch role to write to source objects (restore direction).
+
+    Required for cross-account S3 Batch restore: the batch role (backup account) writes
+    objects into the original source bucket (source account). The batch role's IAM identity
+    policy already grants PutObject on the source bucket ARNs (WriteRestore statement in
+    create-batch-role.py); this resource policy satisfies the cross-account requirement.
+    """
+    if dry_run:
+        print(f"  [dry-run] Would add batch role write policy to {bucket}")
+        return
+
+    sid = "AllowNzshmBatchRoleWrite"
+    _merge_bucket_policy_statement(s3_client, bucket, sid, {
+        "Sid": sid,
+        "Effect": "Allow",
+        "Principal": {"AWS": batch_role_arn},
+        "Action": ["s3:PutObject", "s3:PutObjectTagging"],
+        "Resource": f"arn:aws:s3:::{bucket}/*",
+    })
+    print(f"  Added batch role write policy to bucket: {bucket}")
 
 
 def write_back_role_arns(config_path: str, source_alias: str,
@@ -372,6 +401,7 @@ def main():
         print(f"\nApplying batch role bucket policies ({batch_role_arn}):")
         for bucket in s3_buckets:
             apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
+            apply_batch_role_write_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
 
     if config_mode:
         print("\nWriting role ARNs back to config:")
