@@ -220,8 +220,8 @@ DynamoDB restores always go to a new table (never overwrite in-place).
 
 ## Documentation
 
-- [Design Plan & Cost Analysis](docs/backup-solution-plan.md)
-- [Typer rationale](docs/TYPER_RATIONALE.md)
+- [Design Plan & Cost Analysis](docs/design/backup-solution-plan.md)
+- [Typer rationale](docs/design/TYPER_RATIONALE.md)
 
 ## License
 
