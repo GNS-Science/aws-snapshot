@@ -88,7 +88,7 @@ rather than a narrow action list.
 - `RestoreTableToPointInTime` performs undocumented internal operations (Scan, Query, …)
   on the restore target table. Narrowing by action leads to whack-a-mole with
   `AccessDeniedException` errors that are difficult to diagnose in production.
-- Restored table names follow the `{original}-restored` convention, which is not in the
+- Restored table names follow the `{original}-restore` convention, which is not in the
   configured table list; resource-level scoping to known ARNs is not possible without
   accepting false denials.
 - Mitigation: this role is only assumed during explicit restore operations, not

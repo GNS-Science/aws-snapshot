@@ -26,7 +26,7 @@ RESTORE_POINT = datetime(2026, 3, 15, 9, 0, tzinfo=timezone.utc)
 
 def test_make_restore_table_name_basic():
     result = make_restore_table_name(TABLE_ARN)
-    assert result == "ToshiAPI-FileTable-restored"
+    assert result == "ToshiAPI-FileTable-restore"
 
 
 def test_make_restore_table_name_truncates_long_name():
@@ -34,12 +34,12 @@ def test_make_restore_table_name_truncates_long_name():
     long_arn = f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/{long_name}"
     result = make_restore_table_name(long_arn)
     assert len(result) == 255
-    assert result.endswith("-restored")
+    assert result.endswith("-restore")
 
 
 def test_make_restore_table_name_exact_max_base():
-    """246-char base name + 9-char suffix = exactly 255."""
-    name = "B" * 246
+    """247-char base name + 8-char suffix = exactly 255."""
+    name = "B" * 247
     arn = f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/{name}"
     result = make_restore_table_name(arn)
     assert len(result) == 255
@@ -52,7 +52,7 @@ def test_make_restore_table_name_exact_max_base():
 
 def test_restore_dry_run_returns_skipped():
     client = MagicMock()
-    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restored", RESTORE_POINT, dry_run=True)
+    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restore", RESTORE_POINT, dry_run=True)
 
     assert result.status == "SKIPPED"
     assert result.dry_run is True
@@ -64,12 +64,12 @@ def test_restore_initiated_on_success():
     client = MagicMock()
     client.restore_table_to_point_in_time.return_value = {
         "TableDescription": {
-            "TableArn": f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/MyTable-restored",
+            "TableArn": f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/MyTable-restore",
             "TableStatus": "CREATING",
         }
     }
 
-    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restored", RESTORE_POINT)
+    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restore", RESTORE_POINT)
 
     assert result.status == "INITIATED"
     assert result.success is True
@@ -77,7 +77,7 @@ def test_restore_initiated_on_success():
     # Restore call has no Tags param (API doesn't support it)
     call_kwargs = client.restore_table_to_point_in_time.call_args[1]
     assert call_kwargs["SourceTableArn"] == TABLE_ARN
-    assert call_kwargs["TargetTableName"] == "MyTable-restored"
+    assert call_kwargs["TargetTableName"] == "MyTable-restore"
     assert call_kwargs["RestoreDateTime"] == RESTORE_POINT
     assert call_kwargs["BillingModeOverride"] == "PAY_PER_REQUEST"
     assert "Tags" not in call_kwargs
@@ -94,7 +94,7 @@ def test_restore_failed_on_client_error():
         "RestoreTableToPointInTime",
     )
 
-    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restored", RESTORE_POINT)
+    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restore", RESTORE_POINT)
 
     assert result.status == "FAILED"
     assert result.success is False
@@ -106,10 +106,10 @@ def test_restore_result_fields():
     client.restore_table_to_point_in_time.return_value = {
         "TableDescription": {"TableArn": "arn:...", "TableStatus": "CREATING"}
     }
-    result = restore_dynamodb_table(client, TABLE_ARN, "T-restored", RESTORE_POINT)
+    result = restore_dynamodb_table(client, TABLE_ARN, "T-restore", RESTORE_POINT)
 
     assert result.source_table_arn == TABLE_ARN
-    assert result.target_table_name == "T-restored"
+    assert result.target_table_name == "T-restore"
     assert result.restore_point == RESTORE_POINT
     assert isinstance(result, DynamoDBRestoreResult)
 
@@ -132,7 +132,7 @@ def test_describe_restore_status_restoring():
         }
     }
 
-    status = describe_restore_status(client, "MyTable-restored")
+    status = describe_restore_status(client, "MyTable-restore")
 
     assert isinstance(status, DynamoDBRestoreStatus)
     assert status.table_status == "CREATING"
@@ -155,7 +155,7 @@ def test_describe_restore_status_completed():
         }
     }
 
-    status = describe_restore_status(client, "MyTable-restored")
+    status = describe_restore_status(client, "MyTable-restore")
 
     assert status.table_status == "ACTIVE"
     assert status.restore_in_progress is False

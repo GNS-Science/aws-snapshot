@@ -26,7 +26,7 @@ graph TB
         RESTORE["🔑 IAM Role\nnzshm-backup-restore"]
         S3SRC["🪣 Source S3 Buckets"]
         DDB["📋 DynamoDB Tables\n(PITR enabled)"]
-        DDB2["📋 Restored DynamoDB Tables\n(<name>-restored)"]
+        DDB2["📋 Restored DynamoDB Tables\n(<name>-restore)"]
     end
 
     EB -->|"triggers (scheduled / manual)"| L
@@ -116,7 +116,7 @@ sequenceDiagram
     STS-->>CLI: Temporary credentials
 
     loop Each DynamoDB table
-        CLI->>DDB: RestoreTableToPointInTime → <name>-restored
+        CLI->>DDB: RestoreTableToPointInTime → <name>-restore
         DDB-->>CLI: RestoreArn (table is CREATING)
         CLI->>SSM: PutParameter — append {restore_arn, source, source_table_arn, restore_point}
     end

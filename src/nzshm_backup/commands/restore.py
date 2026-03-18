@@ -313,7 +313,7 @@ def restore_status(
 
     S3: shows recent restore batch jobs for each configured bucket.
     DynamoDB: queries the live restored-table status. Restored table names follow
-    the <original>-restored convention unless overridden at restore time.
+    the <original>-restore convention unless overridden at restore time.
     """
     try:
         config = load_config()

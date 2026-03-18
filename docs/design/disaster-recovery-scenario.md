@@ -150,13 +150,13 @@ The default restore targets are:
 | Resource | Backup | Restored to |
 |----------|--------|-------------|
 | S3 bucket | original name | `{bucket}-restore` (truncated to 63 chars) |
-| DynamoDB table | original name | `{table}-restored` |
+| DynamoDB table | original name | `{table}-restore` |
 
 This means **every application that reads or writes these resources must accept
 the bucket name and table name as configuration, not hard-coded values.**
 
 During DR:
-1. Restore runs into `-restore` / `-restored` names in parallel with forensics
+1. Restore runs into `-restore` names (buckets and tables) in parallel with forensics
 2. Once data is verified, update application config to point at the new names
 3. Redeploy — no code change, config change only
 
@@ -171,7 +171,7 @@ Examples of what this means in practice:
 - API services: bucket/table names read from config at startup
 
 This requirement should be validated during quarterly DR drills — restore to the
-`-restore` / `-restored` names and verify the application can be pointed at them
+`-restore` names and verify the application can be pointed at them
 with a config change alone.
 
 ---

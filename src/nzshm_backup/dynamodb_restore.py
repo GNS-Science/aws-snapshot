@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 PITR_WATCHER_RULE_NAME = os.environ.get("PITR_WATCHER_RULE_NAME", "nzshm-backup-pitr-watcher")
 
 _MAX_TABLE_NAME_LEN = 255
-_RESTORE_SUFFIX = "-restored"
+_RESTORE_SUFFIX = "-restore"
 
 
 @dataclass
@@ -50,14 +50,14 @@ class DynamoDBRestoreStatus:
 def make_restore_table_name(source_table_arn: str) -> str:
     """Derive a restore target table name from a source ARN.
 
-    Takes the table name from the ARN and appends ``-restored``, truncating
+    Takes the table name from the ARN and appends ``-restore``, truncating
     the base name if necessary to stay within the 255-character DynamoDB limit.
 
     Args:
         source_table_arn: Full DynamoDB table ARN.
 
     Returns:
-        Target table name with ``-restored`` suffix.
+        Target table name with ``-restore`` suffix.
     """
     base_name = source_table_arn.split("/")[-1]
     max_base = _MAX_TABLE_NAME_LEN - len(_RESTORE_SUFFIX)
