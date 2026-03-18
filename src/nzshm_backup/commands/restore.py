@@ -52,8 +52,9 @@ def run_restore(
     ),
     original: bool = typer.Option(
         False, "--original",
-        help="Restore to the original source bucket name (real DR). "
-             "Default writes to {source-bucket}-restore (safe testing).",
+        help="Restore directly into the original source bucket. "
+             "Use only if the original bucket no longer exists. "
+             "Normal DR should use the default -restore target to allow parallel forensics.",
     ),
     target_table: str | None = typer.Option(
         None, help="DynamoDB target table name (single table only)"
@@ -76,8 +77,8 @@ def run_restore(
     configured under --source.
 
     S3 restore (default): writes to {source-bucket}-restore (truncated to 63 chars).
-    This is safe for testing — verify the restore, then promote if needed.
-    For real DR pass --original to restore into the original bucket name.
+    This preserves the original bucket for forensics and allows parallel recovery verification.
+    Pass --original only if the original bucket no longer exists.
     Target buckets must already exist; S3 bucket names are permanent and cannot be renamed.
 
     For cross-account restores the AllowNzshmBatchRoleWrite bucket policy is applied to
