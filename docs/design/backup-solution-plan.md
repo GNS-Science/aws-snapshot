@@ -159,7 +159,9 @@ $ backup restore run --source arkivalist \
     --to-point-in-time 2026-03-15T09:00:00Z
 $ backup restore run --source arkivalist --no-pitr  # skip auto PITR re-enable
 
-# Restore — S3 (direct copy)
+# Restore — S3
+# Currently: direct copy_object (suitable for current small buckets)
+# Planned: S3 Batch Operations for all sizes (see docs/design/s3-restore-strategy.md)
 $ backup restore run --source arkivalist --buckets my-bucket
 $ backup restore run --source arkivalist --buckets my-bucket --prefix models/2026/
 
@@ -168,7 +170,8 @@ $ backup restore status --source arkivalist
 $ backup restore status --source arkivalist --tables arkivalist-api-dev-events
 
 # Testing & validation
-$ backup test restore --source arkivalist            # Sample objects from each backup bucket
+$ backup test restore --source arkivalist            # Sample objects from each backup bucket (direct copy)
+$ backup test restore --source arkivalist --use-batch  # Same, but via S3 Batch (tests IAM + Batch path)
 $ backup test restore --source arkivalist --tables   # DynamoDB round-trip (submit + wait + verify)
 $ backup test integrity --source arkivalist          # ETag + object count verification
 
@@ -363,7 +366,8 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Cross-account restore role (`nzshm-backup-restore`) — separate from reader role
 - [x] Informational tags applied to restored tables (`RestoredBy`, `RestoredFrom`, `RestoredAt`)
 - [x] Verified end-to-end against Arkivalist (cross-account, ap-southeast-2)
-- [ ] S3 Batch Operations for large-bucket restores (documented in `docs/design/s3-restore-strategy.md`, not yet implemented)
+- [ ] S3 Batch Operations for `restore run` — designed (see `docs/design/s3-restore-strategy.md`), not yet implemented; direct `copy_object` is the current path (acceptable for small buckets)
+- [ ] `--use-batch` flag for `backup test restore` — designed, not yet implemented
 - [ ] DynamoDB `import-table` from S3 export (PITR > 35 days fallback — manual CLI only)
 
 ### Phase 5: Testing & Validation ✅ Substantially complete
