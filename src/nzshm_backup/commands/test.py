@@ -9,6 +9,7 @@ import typer
 from nzshm_backup.config import load_config
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES, check_bucket_integrity
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
+from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
 
 app = typer.Typer()
 
@@ -156,12 +157,21 @@ def test_restore(
     sample_size: int = typer.Option(
         10, "--sample-size", help="Number of objects to sample from the backup bucket"
     ),
+    use_batch: bool = typer.Option(
+        False, "--use-batch",
+        help="Exercise the S3 Batch Operations restore path instead of direct copy. "
+             "Requires general.s3_batch_role_arn in config. Slower (Batch has per-job "
+             "setup overhead) but validates the full production restore code path and IAM.",
+    ),
 ):
     """Verify backup restorability without triggering a full restore.
 
     S3: copies a sample of objects from the backup bucket to a temporary bucket,
     verifies ETags match, then deletes the temp bucket. Proves the restore path
     works end-to-end and data is readable from backup.
+
+    By default uses direct copy_object (fast, no IAM role required).
+    Use --use-batch to exercise the S3 Batch Operations path instead.
 
     DynamoDB: confirms PITR is enabled on each table (a prerequisite for
     point-in-time restore) and checks the export bucket has accessible data.
@@ -189,8 +199,16 @@ def test_restore(
     source_account_id = source_config.source_account_id or account_id
     s3 = session.client("s3")
 
+    batch_role_arn = config.general.s3_batch_role_arn
+    if use_batch and not batch_role_arn:
+        typer.echo(
+            "Error: --use-batch requires general.s3_batch_role_arn in config.", err=True
+        )
+        raise typer.Exit(1)
+
     any_failure = False
-    typer.echo(f"\n[{source}] Restore test  (sample_size={sample_size})\n")
+    mode = "batch" if use_batch else "direct copy"
+    typer.echo(f"\n[{source}] Restore test  (sample_size={sample_size}, mode={mode})\n")
 
     for bucket_cfg in source_config.s3_buckets:
         backup_bucket = source_config.get_backup_bucket_name(
@@ -248,25 +266,67 @@ def test_restore(
             any_failure = True
             continue
 
-        # Copy and verify
+        # Copy sample to temp bucket and verify ETags
         copy_errors: list[str] = []
         etag_mismatches: list[str] = []
         try:
-            for obj in sample:
-                key = obj["Key"]
-                expected_etag = obj["ETag"]
-                try:
-                    s3.copy_object(
-                        CopySource={"Bucket": backup_bucket, "Key": key},
-                        Bucket=temp_bucket,
-                        Key=key,
-                        MetadataDirective="COPY",
-                    )
-                    head = s3.head_object(Bucket=temp_bucket, Key=key)
-                    if head["ETag"] != expected_etag:
-                        etag_mismatches.append(key)
-                except Exception as copy_err:
-                    copy_errors.append(f"{key}: {copy_err}")
+            if use_batch:
+                # Write a manifest containing only the sampled keys, then submit a Batch job
+                sample_keys = {obj["Key"] for obj in sample}
+
+                def _sample_rows() -> "Iterator[str]":
+                    for obj in sample:
+                        safe_key = obj["Key"].replace('"', '""')
+                        yield f"{backup_bucket},{safe_key}\n"
+
+                from nzshm_backup.s3_batch import write_manifest_to_s3 as _write_manifest
+                manifest_key = f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
+                manifest_etag, _ = _write_manifest(s3, _sample_rows(), backup_bucket, manifest_key)
+                typer.echo(f"    Submitting batch job ({len(sample)} objects)...")
+                batch_result = batch_restore_bucket(
+                    session=session,
+                    backup_bucket=backup_bucket,
+                    target_bucket=temp_bucket,
+                    batch_role_arn=batch_role_arn,
+                    account_id=account_id,
+                )
+                if batch_result.status != "SUBMITTED":
+                    copy_errors.append(f"Batch job failed: {batch_result.errors}")
+                else:
+                    typer.echo(f"    Waiting for batch job {batch_result.job_id}...")
+                    try:
+                        final_status = wait_for_batch_job(
+                            session, account_id, batch_result.job_id, poll_interval=10, timeout=300
+                        )
+                        if final_status != "Complete":
+                            copy_errors.append(f"Batch job ended with status: {final_status}")
+                        else:
+                            for obj in sample:
+                                key = obj["Key"]
+                                try:
+                                    head = s3.head_object(Bucket=temp_bucket, Key=key)
+                                    if head["ETag"] != obj["ETag"]:
+                                        etag_mismatches.append(key)
+                                except Exception as e:
+                                    copy_errors.append(f"{key}: {e}")
+                    except TimeoutError as e:
+                        copy_errors.append(str(e))
+            else:
+                for obj in sample:
+                    key = obj["Key"]
+                    expected_etag = obj["ETag"]
+                    try:
+                        s3.copy_object(
+                            CopySource={"Bucket": backup_bucket, "Key": key},
+                            Bucket=temp_bucket,
+                            Key=key,
+                            MetadataDirective="COPY",
+                        )
+                        head = s3.head_object(Bucket=temp_bucket, Key=key)
+                        if head["ETag"] != expected_etag:
+                            etag_mismatches.append(key)
+                    except Exception as copy_err:
+                        copy_errors.append(f"{key}: {copy_err}")
         finally:
             # Always clean up temp bucket
             _delete_temp_bucket(s3, temp_bucket)

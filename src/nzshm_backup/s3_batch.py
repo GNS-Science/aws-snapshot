@@ -12,6 +12,7 @@ from typing import Iterator, Literal
 import boto3
 from botocore.exceptions import ClientError
 
+from nzshm_backup.integrity import OPERATIONAL_PREFIXES
 from nzshm_backup.s3_backup import ensure_backup_bucket_ready, get_account_id, get_region
 
 logger = logging.getLogger(__name__)
@@ -285,3 +286,190 @@ def batch_backup_source(
             errors=[{"error": str(e)}],
             dry_run=False,
         )
+
+
+def _build_restore_manifest_rows(
+    s3_client,
+    backup_bucket: str,
+    prefix: str | None = None,
+) -> Iterator[str]:
+    """Yield CSV rows for all restorable objects in a backup bucket.
+
+    Excludes operational prefixes (_manifests/, _batch-reports/, _state/, etc.)
+    which are internal metadata and should not be restored to the workload bucket.
+    """
+    paginator = s3_client.get_paginator("list_objects_v2")
+    kwargs: dict = {"Bucket": backup_bucket}
+    if prefix:
+        kwargs["Prefix"] = prefix
+    for page in paginator.paginate(**kwargs):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if any(key.startswith(p) for p in OPERATIONAL_PREFIXES):
+                continue
+            safe_key = key.replace('"', '""')
+            yield f"{backup_bucket},{safe_key}\n"
+
+
+def batch_restore_bucket(
+    session: boto3.Session,
+    backup_bucket: str,
+    target_bucket: str,
+    batch_role_arn: str,
+    account_id: str,
+    dry_run: bool = False,
+    prefix: str | None = None,
+) -> BatchJobResult:
+    """Submit an S3 Batch Operations job to restore a bucket from backup.
+
+    Unlike batch_backup_source (which diffs source vs backup), this always copies
+    all non-operational objects — restore is a recovery operation where a clean,
+    known state is preferred over partial sync semantics.
+
+    The manifest and job report are stored in the backup bucket. The batch role
+    must have s3:GetObject on the backup bucket and s3:PutObject on the target.
+    For cross-account targets the target bucket policy must also allow the role.
+
+    Args:
+        session:         boto3 Session (backup account).
+        backup_bucket:   Backup bucket to restore from.
+        target_bucket:   Destination bucket to restore into (must exist).
+        batch_role_arn:  IAM role ARN that S3 Batch will assume.
+        account_id:      Backup account ID (for s3control API).
+        dry_run:         If True, build manifest but skip CreateJob.
+        prefix:          Optional key prefix — restores only matching objects.
+
+    Returns:
+        BatchJobResult with status SUBMITTED, SKIPPED, or FAILED.
+    """
+    s3_client = session.client("s3")
+    manifest_key = f"_manifests/restore-{uuid.uuid4()}.csv"
+    region = get_region(session)
+
+    rows = _build_restore_manifest_rows(s3_client, backup_bucket, prefix)
+
+    if dry_run:
+        row_count = sum(1 for _ in rows)
+        logger.info(f"[DRY RUN] Restore manifest would contain {row_count} objects")
+        return BatchJobResult(
+            source_bucket=backup_bucket,
+            dest_bucket=target_bucket,
+            job_id=None,
+            manifest_key=manifest_key,
+            objects_in_manifest=row_count,
+            status="SKIPPED",
+            dry_run=True,
+        )
+
+    logger.info(f"Writing restore manifest to s3://{backup_bucket}/{manifest_key}")
+    manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
+    logger.info(f"Restore manifest: {row_count} objects, ETag={manifest_etag}")
+
+    if row_count == 0:
+        logger.info("Nothing to restore — manifest is empty")
+        return BatchJobResult(
+            source_bucket=backup_bucket,
+            dest_bucket=target_bucket,
+            job_id=None,
+            manifest_key=manifest_key,
+            objects_in_manifest=0,
+            status="SKIPPED",
+        )
+
+    s3control = session.client("s3control", region_name=region)
+    try:
+        response = s3control.create_job(
+            AccountId=account_id,
+            ConfirmationRequired=False,
+            Operation={
+                "S3PutObjectCopy": {
+                    "TargetResource": f"arn:aws:s3:::{target_bucket}",
+                    "MetadataDirective": "COPY",
+                    "StorageClass": "STANDARD",
+                }
+            },
+            Manifest={
+                "Spec": {
+                    "Format": "S3BatchOperations_CSV_20180820",
+                    "Fields": ["Bucket", "Key"],
+                },
+                "Location": {
+                    "ObjectArn": f"arn:aws:s3:::{backup_bucket}/{manifest_key}",
+                    "ETag": manifest_etag,
+                },
+            },
+            Report={
+                "Bucket": f"arn:aws:s3:::{backup_bucket}",
+                "Format": "Report_CSV_20180820",
+                "Enabled": True,
+                "Prefix": "_batch-reports",
+                "ReportScope": "FailedTasksOnly",
+            },
+            Priority=10,
+            RoleArn=batch_role_arn,
+            ClientRequestToken=str(uuid.uuid4()),
+            Description=f"nzshm-restore: {backup_bucket} → {target_bucket}",
+        )
+        job_id = response["JobId"]
+        logger.info(f"Restore batch job submitted: {job_id} ({row_count} objects)")
+        return BatchJobResult(
+            source_bucket=backup_bucket,
+            dest_bucket=target_bucket,
+            job_id=job_id,
+            manifest_key=manifest_key,
+            objects_in_manifest=row_count,
+            status="SUBMITTED",
+        )
+    except ClientError as e:
+        logger.error(f"Failed to create restore batch job: {e}")
+        return BatchJobResult(
+            source_bucket=backup_bucket,
+            dest_bucket=target_bucket,
+            job_id=None,
+            manifest_key=manifest_key,
+            objects_in_manifest=row_count,
+            status="FAILED",
+            errors=[{"error": str(e)}],
+        )
+
+
+def wait_for_batch_job(
+    session: boto3.Session,
+    account_id: str,
+    job_id: str,
+    poll_interval: int = 10,
+    timeout: int = 600,
+) -> str:
+    """Poll s3control:DescribeJob until the job reaches a terminal state.
+
+    Args:
+        session:       boto3 Session.
+        account_id:    AWS account ID for s3control.
+        job_id:        S3 Batch job ID.
+        poll_interval: Seconds between polls.
+        timeout:       Maximum seconds to wait before raising TimeoutError.
+
+    Returns:
+        Final job status string (e.g. ``"Complete"``, ``"Failed"``).
+
+    Raises:
+        TimeoutError: If the job does not complete within ``timeout`` seconds.
+    """
+    import time
+
+    region = get_region(session)
+    s3control = session.client("s3control", region_name=region)
+    _TERMINAL = {"Complete", "Failed", "Cancelled", "Completing"}
+    elapsed = 0
+
+    while elapsed < timeout:
+        resp = s3control.describe_job(AccountId=account_id, JobId=job_id)
+        status = resp["Job"]["Status"]
+        if status in _TERMINAL:
+            logger.info(f"Batch job {job_id} reached terminal state: {status}")
+            return status
+        logger.info(f"Batch job {job_id}: {status} (elapsed: {elapsed}s)")
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+    raise TimeoutError(f"Batch job {job_id} did not complete within {timeout}s")
