@@ -107,19 +107,22 @@ S3 is the bottleneck — 9 TB of data must be copied from backup to target.
 No native "PITR" equivalent exists for S3; the backup bucket IS the archive.
 
 ```bash
-# Ensure target buckets exist first — S3 bucket names are permanent so the
-# target is always the original bucket name. Recreate if accidentally deleted:
-#   aws s3api create-bucket --bucket nzshm-toshi-api-data --region ap-southeast-2 \
-#       --create-bucket-configuration LocationConstraint=ap-southeast-2
-
-# Submit a Batch Operations restore job for each bucket.
-# Jobs run server-side — no long-lived process required.
+# Default: restores to {bucket}-restore (safe — does not touch the live bucket).
+# Verify the restore, then re-run with --target-bucket <original-name> for real cutover.
 backup restore run --source toshi --buckets toshi-api-data
 backup restore run --source ths --buckets ths-dataset
+# → writes to nzshm-toshi-api-data-restore, ths-dataset-restore
 
 # Monitor progress:
 backup restore status --source toshi
 backup restore status --source ths
+
+# Real DR cutover — restore directly into the original bucket name:
+#   (Recreate the bucket first if it was deleted)
+#   aws s3api create-bucket --bucket nzshm-toshi-api-data --region ap-southeast-2 \
+#       --create-bucket-configuration LocationConstraint=ap-southeast-2
+backup restore run --source toshi --buckets toshi-api-data \
+    --target-bucket nzshm-toshi-api-data
 ```
 
 `backup restore run` uses S3 Batch Operations (see `docs/design/s3-restore-strategy.md`).

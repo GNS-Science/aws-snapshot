@@ -260,20 +260,28 @@ def apply_batch_role_write_policy(
     objects into the original source bucket (source account). The batch role's IAM identity
     policy already grants PutObject on the source bucket ARNs (WriteRestore statement in
     create-backup-roles.py); this resource policy satisfies the cross-account requirement.
+
+    Skips silently if the bucket does not exist (e.g. {bucket}-restore not yet created).
     """
     if dry_run:
         print(f"  [dry-run] Would add batch role write policy to {bucket}")
         return
 
-    sid = "AllowNzshmBatchRoleWrite"
-    _merge_bucket_policy_statement(s3_client, bucket, sid, {
-        "Sid": sid,
-        "Effect": "Allow",
-        "Principal": {"AWS": batch_role_arn},
-        "Action": ["s3:PutObject", "s3:PutObjectTagging"],
-        "Resource": f"arn:aws:s3:::{bucket}/*",
-    })
-    print(f"  Added batch role write policy to bucket: {bucket}")
+    try:
+        sid = "AllowNzshmBatchRoleWrite"
+        _merge_bucket_policy_statement(s3_client, bucket, sid, {
+            "Sid": sid,
+            "Effect": "Allow",
+            "Principal": {"AWS": batch_role_arn},
+            "Action": ["s3:PutObject", "s3:PutObjectTagging"],
+            "Resource": f"arn:aws:s3:::{bucket}/*",
+        })
+        print(f"  Added batch role write policy to bucket: {bucket}")
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
+            print(f"  Skipped {bucket} (bucket does not exist — create it before restoring)")
+        else:
+            raise
 
 
 def write_back_role_arns(config_path: str, source_alias: str,
@@ -402,6 +410,7 @@ def main():
         for bucket in s3_buckets:
             apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
             apply_batch_role_write_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
+            apply_batch_role_write_policy(s3, f"{bucket}-restore", batch_role_arn, dry_run=args.dry_run)
 
     if config_mode:
         print("\nWriting role ARNs back to config:")
