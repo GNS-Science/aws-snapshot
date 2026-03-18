@@ -151,10 +151,13 @@ def build_restore_policy(
         })
         # Restored table names (e.g. <original>-restored) are not in the configured
         # table list, so these permissions must be scoped to all tables in the account.
+        # Note: AWS requires dynamodb:Scan on the target table as an internal check
+        # during RestoreTableToPointInTime (undocumented but enforced).
         statements.append({
             "Sid": "ManageRestoredTables",
             "Effect": "Allow",
             "Action": [
+                "dynamodb:Scan",
                 "dynamodb:TagResource",
                 "dynamodb:UntagResource",
                 "dynamodb:DescribeTable",
