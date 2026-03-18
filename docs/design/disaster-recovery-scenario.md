@@ -58,26 +58,26 @@ DynamoDB can be recovered in parallel with S3 and completes much faster.
 
 ### Preferred: PITR restore (recover to second before attack)
 
-AWS retains PITR data for 35 days after table deletion. Restore each table:
+AWS retains PITR data for 35 days after table deletion. Restore all tables
+with a single CLI command:
 
 ```bash
-# Restore to a point in time just before the attack
+# Restore all configured tables to a point just before the attack
 # (substitute the actual attack timestamp)
-aws dynamodb restore-table-to-point-in-time \
-    --source-table-name ToshiFileObject-PROD \
-    --target-table-name ToshiFileObject-PROD \
-    --restore-date-time "2026-03-15T09:00:00Z" \
-    --region ap-southeast-2
+BACKUP_CONFIG_PATH=backup-config.yaml \
+  backup restore run \
+    --source toshi \
+    --to-point-in-time "2026-03-15T09:00:00Z"
 
-# Repeat for each table:
-#   ToshiIdentity-PROD
-#   ToshiTableObject-PROD
-#   ToshiThingObject-PROD
+# Monitor progress:
+BACKUP_CONFIG_PATH=backup-config.yaml \
+  backup restore status --source toshi
 ```
 
 - Each table restore runs independently and in parallel
 - Typical duration: 2–8 hours per table depending on size
-- Re-enable PITR on restored tables immediately after restore completes
+- PITR is re-enabled automatically on each table once it reaches ACTIVE
+  (via `pitr-watcher` Lambda — see `docs/design/dynamodb-pitr-watcher.md`)
 
 ### Fallback: import from S3 export (if PITR > 35 days)
 
@@ -169,7 +169,7 @@ faster per-GB than many small objects.
 2. Recreate S3 buckets and DynamoDB tables (can use different names initially)
 3. Restore data (Phase 1 + Phase 2, targeting new account)
 4. Update all service references pointing to PROD resources
-5. Run `scripts/create-reader-role.py` in new account to re-establish backup path
+5. Run `scripts/create-source-roles.py` in new account to re-establish backup path
 6. Decommission old PROD account after forensic review
 
 ---
@@ -196,7 +196,6 @@ manually during a real incident:
 | Gap | Impact | Notes |
 |-----|--------|-------|
 | S3 restore uses direct copy_object | Not suitable for 8 TB ToshiBucket | S3 Batch Operations implementation pending — see `docs/design/s3-restore-strategy.md` |
-| PITR not re-enabled post-restore | Restored table has no point-in-time protection until manual action | `pitr-watcher` Lambda pending — see `docs/design/dynamodb-pitr-watcher.md` |
 | No `import-table-from-s3` integration | PITR fallback requires manual CLI | Low priority if PITR window covers 35 days |
 | No restore runbook tested | Unknown failure modes | Quarterly DR drill (Phase 5) needed |
 
