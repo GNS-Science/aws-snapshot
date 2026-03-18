@@ -14,7 +14,7 @@ from nzshm_backup.dynamodb_restore import (
 )
 from nzshm_backup.restore_state import add_pending_restore
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
-from nzshm_backup.s3_batch import batch_restore_bucket
+from nzshm_backup.s3_batch import batch_restore_bucket, list_recent_batch_jobs
 from nzshm_backup.s3_restore import restore_s3_bucket
 from nzshm_backup.state import get_state
 
@@ -260,17 +260,35 @@ def run_restore(
         raise typer.Exit(1)
 
 
+RESTORE_BATCH_STATUS_ICON = {
+    "Complete": "✓",
+    "Failed": "✗",
+    "Cancelled": "✗",
+    "Active": "⋯",
+    "Completing": "⋯",
+    "Preparing": "⋯",
+    "New": "⋯",
+    "Paused": "⏸",
+    "Suspended": "⏸",
+}
+RESTORE_BATCH_JOB_LIMIT = 3
+
+
 @app.command("status")
 def restore_status(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
+    buckets: list[str] = typer.Option(
+        [], "--buckets", help="Bucket labels to check (default: all configured)"
+    ),
     tables: list[str] = typer.Option(
         [], "--tables", help="Table names to check (default: all configured)"
     ),
 ):
-    """Show status of in-progress DynamoDB restores.
+    """Show status of in-progress restores (S3 Batch jobs and DynamoDB PITR restores).
 
-    Queries the live table status. Restored table names follow the
-    <original>-restored convention unless overridden at restore time.
+    S3: shows recent restore batch jobs for each configured bucket.
+    DynamoDB: queries the live restored-table status. Restored table names follow
+    the <original>-restored convention unless overridden at restore time.
     """
     try:
         config = load_config()
@@ -284,45 +302,97 @@ def restore_status(
         raise typer.Exit(1)
 
     source_config = config.sources[source]
+    region = config.general.region
+    session = boto3.Session()
+    current_account = get_account_id(session)
+    source_account_id = source_config.source_account_id or current_account
+
+    typer.echo(f"\n[{source}] restore status:")
+
+    # ------------------------------------------------------------------
+    # S3 Batch restore jobs
+    # ------------------------------------------------------------------
+    effective_buckets = [
+        b for b in source_config.s3_buckets
+        if not buckets or b.label in buckets
+    ]
+    if effective_buckets:
+        typer.echo("\n  S3 restore jobs:")
+        s3control = session.client("s3control", region_name=region)
+        for bucket_cfg in effective_buckets:
+            backup_bucket = source_config.get_backup_bucket_name(
+                bucket_cfg.label, region, source_account_id, source
+            )
+            try:
+                jobs = list_recent_batch_jobs(
+                    s3control, current_account, backup_bucket,
+                    limit=RESTORE_BATCH_JOB_LIMIT,
+                )
+                # Filter to restore jobs only (description starts with "nzshm-restore:")
+                jobs = [j for j in jobs if "nzshm-restore:" in j.get("Description", "")]
+                if not jobs:
+                    typer.echo(f"    {bucket_cfg.label}: no restore jobs found")
+                    continue
+                for job in jobs:
+                    status = job.get("Status", "Unknown")
+                    icon = RESTORE_BATCH_STATUS_ICON.get(status, "?")
+                    job_id = job.get("JobId", "")[:8]
+                    created = job.get("CreationTime")
+                    ts = f"  [{created.strftime('%Y-%m-%d %H:%M UTC')}]" if created else ""
+                    progress = job.get("ProgressSummary", {})
+                    total = progress.get("TotalNumberOfTasks", 0)
+                    failed = progress.get("NumberOfTasksFailed", 0)
+                    desc = job.get("Description", "")
+                    target = desc.split("→")[-1].strip() if "→" in desc else ""
+                    if status == "Complete" and failed == 0:
+                        progress_str = f"{total}/{total} objects"
+                    elif failed:
+                        progress_str = f"{failed} failed / {total} objects"
+                    else:
+                        succeeded = progress.get("NumberOfTasksSucceeded", 0)
+                        progress_str = f"{succeeded}/{total} objects"
+                    typer.echo(
+                        f"    {icon} {bucket_cfg.label} → {target}: {status}  "
+                        f"job/{job_id}…{ts}  ({progress_str})"
+                    )
+            except Exception as e:
+                typer.echo(f"    {bucket_cfg.label}: error fetching restore status ({e})")
+
+    # ------------------------------------------------------------------
+    # DynamoDB PITR restore status
+    # ------------------------------------------------------------------
     effective_table_arns = [
         arn for arn in source_config.dynamodb_tables
         if not tables or arn.split("/")[-1] in tables
     ]
+    if effective_table_arns:
+        restore_role_arn = (
+            source_config.source_account_restore_role_arn
+            or source_config.source_account_role_arn
+        )
+        source_session = (
+            get_cross_account_session(session, restore_role_arn)
+            if restore_role_arn and current_account != source_account_id
+            else session
+        )
+        dynamodb_client = source_session.client("dynamodb")
 
-    if not effective_table_arns:
-        typer.echo("No DynamoDB tables configured for this source.")
-        return
-
-    session = boto3.Session()
-    current_account = get_account_id(session)
-    source_account_id = source_config.source_account_id or current_account
-    restore_role_arn = (
-        source_config.source_account_restore_role_arn
-        or source_config.source_account_role_arn
-    )
-    source_session = (
-        get_cross_account_session(session, restore_role_arn)
-        if restore_role_arn and current_account != source_account_id
-        else session
-    )
-    dynamodb_client = source_session.client("dynamodb")
-
-    typer.echo(f"\n[{source}] DynamoDB restore status:\n")
-    for table_arn in effective_table_arns:
-        table_name = table_arn.split("/")[-1]
-        restore_target = make_restore_table_name(table_arn)
-        try:
-            status = describe_restore_status(dynamodb_client, restore_target)
-            icon = RESTORE_STATUS_ICON.get(status.table_status, "?")
-            ts = (
-                f"  [{status.restore_date_time.strftime('%Y-%m-%d %H:%M UTC')}]"
-                if status.restore_date_time
-                else ""
-            )
-            typer.echo(f"  {icon} {table_name} → {restore_target}: {status.table_status}{ts}")
-            if status.restore_in_progress:
-                typer.echo("    restore in progress...")
-        except Exception as e:
-            typer.echo(f"  ? {table_name} → {restore_target}: {e}")
+        typer.echo("\n  DynamoDB restore status:")
+        for table_arn in effective_table_arns:
+            table_name = table_arn.split("/")[-1]
+            restore_target = make_restore_table_name(table_arn)
+            try:
+                status = describe_restore_status(dynamodb_client, restore_target)
+                icon = RESTORE_STATUS_ICON.get(status.table_status, "?")
+                ts = (
+                    f"  [{status.restore_date_time.strftime('%Y-%m-%d %H:%M UTC')}]"
+                    if status.restore_date_time
+                    else ""
+                )
+                typer.echo(f"    {icon} {table_name} → {restore_target}: {status.table_status}{ts}")
+                if status.restore_in_progress:
+                    typer.echo("      restore in progress...")
+            except Exception as e:
+                typer.echo(f"    ? {table_name} → {restore_target}: {e}")
 
     typer.echo("")

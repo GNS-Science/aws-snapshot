@@ -433,6 +433,35 @@ def batch_restore_bucket(
         )
 
 
+def list_recent_batch_jobs(
+    s3control_client,
+    account_id: str,
+    description_contains: str,
+    limit: int = 3,
+) -> list[dict]:
+    """Return recent S3 Batch jobs whose description contains description_contains, newest first.
+
+    Args:
+        s3control_client:      boto3 s3control client
+        account_id:            AWS account ID
+        description_contains:  substring to match against job Description
+        limit:                 maximum number of jobs to return
+    """
+    jobs = []
+    kwargs: dict = {"AccountId": account_id, "MaxResults": 25}
+    while True:
+        response = s3control_client.list_jobs(**kwargs)
+        for job in response.get("Jobs", []):
+            if description_contains in job.get("Description", ""):
+                jobs.append(job)
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+        kwargs["NextToken"] = next_token
+    jobs.sort(key=lambda j: j.get("CreationTime") or "", reverse=True)
+    return jobs[:limit]
+
+
 def wait_for_batch_job(
     session: boto3.Session,
     account_id: str,

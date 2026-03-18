@@ -9,6 +9,7 @@ import typer
 from nzshm_backup.config import load_config
 from nzshm_backup.run_state import read_run_state
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
+from nzshm_backup.s3_batch import list_recent_batch_jobs
 
 app = typer.Typer()
 
@@ -29,21 +30,7 @@ BATCH_STATUS_ICON = {
 
 
 def _get_recent_batch_jobs(s3control_client, account_id: str, source_bucket: str) -> list[dict]:
-    """Return recent batch jobs whose description references source_bucket, newest first."""
-    jobs = []
-    kwargs: dict = {"AccountId": account_id, "MaxResults": 25}
-    while True:
-        response = s3control_client.list_jobs(**kwargs)
-        for job in response.get("Jobs", []):
-            desc = job.get("Description", "")
-            if source_bucket in desc:
-                jobs.append(job)
-        next_token = response.get("NextToken")
-        if not next_token:
-            break
-        kwargs["NextToken"] = next_token
-    jobs.sort(key=lambda j: j.get("CreationTime") or "", reverse=True)
-    return jobs[:BATCH_JOB_LIMIT]
+    return list_recent_batch_jobs(s3control_client, account_id, source_bucket, limit=BATCH_JOB_LIMIT)
 
 
 def _get_recent_exports(dynamodb_client, table_arn: str, limit: int = EXPORT_LIMIT) -> list[dict]:
