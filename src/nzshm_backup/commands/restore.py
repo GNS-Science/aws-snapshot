@@ -46,7 +46,7 @@ def run_restore(
         [], "--tables", help="Table names to restore (default: all configured)"
     ),
     target_bucket: str | None = typer.Option(
-        None, help="S3 destination bucket (single bucket only)"
+        None, help="S3 destination bucket (single bucket only; must already exist — S3 buckets cannot be renamed)"
     ),
     target_table: str | None = typer.Option(
         None, help="DynamoDB target table name (single table only)"
@@ -67,6 +67,10 @@ def run_restore(
     Restores S3 buckets and/or DynamoDB tables for the given source.
     Use --buckets / --tables to select a subset; omit both to restore everything
     configured under --source.
+
+    S3 restore: target buckets must already exist. S3 bucket names are permanent
+    (they cannot be renamed), so the target is always the original source bucket.
+    If a bucket was accidentally deleted, recreate it (empty) before running restore.
 
     DynamoDB restores are submit-and-return (async). Use 'restore status'
     to check progress.

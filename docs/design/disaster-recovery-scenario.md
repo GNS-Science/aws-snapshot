@@ -107,6 +107,11 @@ S3 is the bottleneck — 9 TB of data must be copied from backup to target.
 No native "PITR" equivalent exists for S3; the backup bucket IS the archive.
 
 ```bash
+# Ensure target buckets exist first — S3 bucket names are permanent so the
+# target is always the original bucket name. Recreate if accidentally deleted:
+#   aws s3api create-bucket --bucket nzshm-toshi-api-data --region ap-southeast-2 \
+#       --create-bucket-configuration LocationConstraint=ap-southeast-2
+
 # Submit a Batch Operations restore job for each bucket.
 # Jobs run server-side — no long-lived process required.
 backup restore run --source toshi --buckets toshi-api-data
@@ -117,10 +122,9 @@ backup restore status --source toshi
 backup restore status --source ths
 ```
 
-`backup restore run` always uses S3 Batch Operations (see
-`docs/design/s3-restore-strategy.md`). Jobs run server-side, handle retries
-automatically, and produce a per-object completion report. The restore target
-bucket is created if absent.
+`backup restore run` uses S3 Batch Operations (see `docs/design/s3-restore-strategy.md`).
+Jobs run server-side, handle retries automatically, and produce a per-object completion
+report. Target buckets must already exist before submitting.
 
 **Estimated duration:** 12–48 hours depending on object count and sizes.
 S3 intra-region copy throughput varies; large BLOB files (HDF5, NetCDF) copy
