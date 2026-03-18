@@ -137,46 +137,45 @@ Steady State Monthly Costs:
 
 ## CLI Tool Design
 
-### Command Structure
+### Command Structure (as implemented)
 
 ```bash
-# Schedule management
-$ backup schedule show          # View current schedule
-$ backup schedule set --frequency weekly --mode standard
-$ backup schedule enable/disable
-
 # Manual backup trigger
-$ backup run --source toshi     # Manual trigger
-$ backup run --source ths
-$ backup run --all
+$ backup run --source arkivalist          # Run backup for one source
+$ backup run --source arkivalist --dry-run
 
-# Restore operations
-$ backup restore list --source toshi --limit 10
-$ backup restore preview --date 2026-02-15 --source toshi --target-bucket test-restore
-$ backup restore run --date 2026-02-15 --source toshi --target-bucket <dest>
-$ backup restore run --date 2026-02-15 --table ThingTable --target-account <aws-id>
-$ backup restore run --date 2026-02-15 --prefix "models/2026/" --target-bucket <dest>
-$ backup restore cancel --job-id <id>
+# Backup status
+$ backup status --source arkivalist       # Last run, per-bucket/table state
+$ backup status --source arkivalist --format json
+
+# Schedule management
+$ backup schedule show --source arkivalist
+$ backup schedule add --source arkivalist --frequency weekly
+$ backup schedule remove --source arkivalist
+
+# Restore — DynamoDB (async, submit-and-return)
+$ backup restore run --source arkivalist \
+    --tables arkivalist-api-dev-events \
+    --to-point-in-time 2026-03-15T09:00:00Z
+$ backup restore run --source arkivalist --no-pitr  # skip auto PITR re-enable
+
+# Restore — S3 (direct copy)
+$ backup restore run --source arkivalist --buckets my-bucket
+$ backup restore run --source arkivalist --buckets my-bucket --prefix models/2026/
+
+# Restore status
+$ backup restore status --source arkivalist
+$ backup restore status --source arkivalist --tables arkivalist-api-dev-events
 
 # Testing & validation
-$ backup test restore --latest --validate-integrity --report-only
-$ backup test integrity --date 2026-02-15 --detail
-$ backup test full-drill --source toshi --isolated-environment
-
-# Status & reporting
-$ backup status                 # Current state, last run, next run
-$ backup report --period 30d    # Cost & activity report
-$ backup report compliance --format pdf
-
-# Cost management
-$ backup costs predict          # Before/after cost projection
-$ backup costs report --last-month
-$ backup costs breakdown --by-source
-$ backup costs export --format csv
+$ backup test restore --source arkivalist            # Sample objects from each backup bucket
+$ backup test restore --source arkivalist --tables   # DynamoDB round-trip (submit + wait + verify)
+$ backup test integrity --source arkivalist          # ETag + object count verification
 
 # Configuration
 $ backup config show
-$ backup config set --key retention.days --value 365
+$ backup config push    # Write config to SSM Parameter Store (for Lambda)
+$ backup config pull    # Read config from SSM
 ```
 
 ### Key Features
@@ -348,53 +347,50 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [ ] Create S3 Batch IAM role in production account (`python scripts/create-batch-role.py`)
 - [ ] Set `s3_batch_role_arn` + `use_s3_batch: true` for toshi in production config
 
-### Phase 3: Notifications + Reporting (Week 4)
+### Phase 3: Notifications + Reporting
 - [ ] SES email integration
 - [ ] Slack webhook integration
 - [ ] Cost tracking implementation
-- [ ] Status/reporting commands
 - [ ] Budget alerts setup
 
-### Phase 4: Restore Functionality (Week 5-6)
-- [ ] Restore list/preview commands
-- [ ] S3 restore operations (all tiers)
-- [ ] DynamoDB import operations
-- [ ] Dry-run/cost estimation
-- [ ] Glacier retrieval handling
-- [ ] Approval workflow implementation
+### Phase 4: Restore Functionality ✅ Substantially complete
 
-### Phase 5: Testing & Validation (Week 7)
-- [ ] Automated restore tests
-- [ ] Integrity validation (checksums, counts)
-- [ ] Test scheduling (EventBridge)
+- [x] S3 restore — direct object copy (`s3_restore.py`, `backup restore run --buckets`)
+- [x] DynamoDB PITR restore — submit-and-return (`backup restore run --tables --to-point-in-time`)
+- [x] `backup restore status` — live table status polling
+- [x] `--no-pitr` flag for short-lived test restores
+- [x] Automatic PITR re-enable via `pitr-watcher` Lambda (SSM-based, EventBridge rule lifecycle)
+- [x] Cross-account restore role (`nzshm-backup-restore`) — separate from reader role
+- [x] Informational tags applied to restored tables (`RestoredBy`, `RestoredFrom`, `RestoredAt`)
+- [x] Verified end-to-end against Arkivalist (cross-account, ap-southeast-2)
+- [ ] S3 Batch Operations for large-bucket restores (documented in `docs/design/s3-restore-strategy.md`, not yet implemented)
+- [ ] DynamoDB `import-table` from S3 export (PITR > 35 days fallback — manual CLI only)
+
+### Phase 5: Testing & Validation ✅ Substantially complete
+
+- [x] `backup test restore` — samples objects from each backup bucket; round-trip DynamoDB restore
+- [x] `backup test integrity` — ETag + object count verification (S3 + DynamoDB)
+- [x] S3 versioning on backup buckets (`version_retention_days` config)
+- [x] Last-run state persisted to `_state/last-run.json` in backup bucket
+- [ ] Test scheduling (EventBridge-triggered automated test runs)
 - [ ] Compliance reporting (HTML/PDF)
-- [ ] Test result notifications
 
-### Phase 6: Parallel Run + Cutover (Week 8-10)
+### Phase 6: Parallel Run + Cutover
 
-> **Strategy change:** Rather than first exercising the full restore lifecycle against
-> the critical Toshi/THS production data, we will run a complete backup→restore→validate
-> cycle on **Arkivalist** first. Arkivalist (account `456789012345`) is a separate AWS
-> account from the spike/backup account (`345678901234`), has similar backup targets
-> (S3 + DynamoDB) but at much smaller scale, and is lower-criticality.
->
-> Crucially, Arkivalist is **cross-account** — backing it up exercises the account
-> isolation pattern (see `docs/design/ACCOUNT_ISOLATION.md`) that will also be required
-> for NSHM production (`210987654321`). This makes it the ideal first real-world target:
-> it validates both the restore lifecycle and cross-account IAM before we touch NSHM data.
+> **Strategy:** Run the full backup→restore→validate cycle on **Arkivalist** first
+> (account `456789012345`, cross-account from backup account `345678901234`).
+> Arkivalist is lower-criticality but exercises the same cross-account IAM pattern
+> required for NSHM production (`210987654321`). See `docs/design/ACCOUNT_ISOLATION.md`.
 
-- [ ] Confirm Arkivalist S3 bucket names and DynamoDB table ARNs (account `456789012345`)
-- [ ] Add `arkivalist` source to `backup-config.yaml`
-- [ ] Implement cross-account session support (`get_cross_account_session`, see `ACCOUNT_ISOLATION.md`)
-- [ ] Create IAM role in Arkivalist account trusted by backup Lambda role
-- [ ] Run full backup→restore→validate cycle on Arkivalist (Phases 4–5)
-- [ ] Apply same cross-account pattern to NSHM production (`210987654321`) before cutover
+- [x] Arkivalist S3 buckets and DynamoDB tables configured
+- [x] Cross-account session support (`get_cross_account_session`)
+- [x] IAM roles created in Arkivalist account (`nzshm-backup-reader`, `nzshm-backup-restore`)
+- [x] Full backup→restore→validate cycle verified on Arkivalist (S3 + DynamoDB)
+- [ ] Apply cross-account pattern to NSHM production (`210987654321`)
 - [ ] Parallel run with AWS Backup (2-3 months) — toshi + ths
-- [ ] Restore drill validation against NSHM production data
+- [ ] Restore drill against NSHM production data
 - [ ] Cost verification
-- [ ] Documentation
-- [ ] Cutover planning
-- [ ] AWS Backup decommission
+- [ ] Cutover planning + AWS Backup decommission
 
 ---
 
@@ -588,6 +584,20 @@ testing:
 6. ✅ Sandbox demo tooling and guide
 7. ✅ Test suite: 69 tests passing
 
+**Phase 4 + 5 (Restore + Testing):**
+1. ✅ S3 restore — direct copy with ETag-based skip (`s3_restore.py`)
+2. ✅ DynamoDB PITR restore — async submit-and-return (`dynamodb_restore.py`)
+3. ✅ `backup restore run` + `backup restore status` CLI commands
+4. ✅ `backup test restore` — S3 sample restore + DynamoDB round-trip
+5. ✅ `backup test integrity` — S3 ETag/count + DynamoDB export verification
+6. ✅ S3 versioning on backup buckets (`version_retention_days` config field)
+7. ✅ Last-run state persisted to `_state/last-run.json` in backup bucket
+8. ✅ `pitr-watcher` Lambda — automatic PITR re-enable via SSM pending list + EventBridge
+9. ✅ Split IAM roles: `nzshm-backup-reader` (read-only) + `nzshm-backup-restore` (restore ops)
+10. ✅ `scripts/create-source-roles.py` — creates both roles, writes ARNs back to config
+11. ✅ Verified end-to-end cross-account: Arkivalist backup + restore + PITR re-enable
+12. ✅ Test suite: 152 tests passing
+
 ---
 
 ## Appendix A: AWS Pricing Reference (ap-southeast-2)
@@ -622,7 +632,7 @@ testing:
 
 ---
 
-**Document Version:** 1.0  
-**Created:** 2026-03-09  
-**Status:** Approved for Implementation  
-**Owner:** NSHM DevOps Team  
+**Document Version:** 1.3
+**Created:** 2026-03-09  **Last updated:** 2026-03-18
+**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress (Arkivalist validated; NSHM production pending).
+**Owner:** NSHM DevOps Team
