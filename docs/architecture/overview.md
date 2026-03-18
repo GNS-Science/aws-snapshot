@@ -3,31 +3,43 @@
 ## Account Layout
 
 Two AWS accounts are involved. The backup Lambda runs in the **backup account** and assumes
-a cross-account reader role to access source data in each **source account**.
+a cross-account role to access source data in each **source account**.
+
+Two cross-account roles exist per source (created by `scripts/create-source-roles.py`):
+
+- **`nzshm-backup-reader`** — read-only; assumed by the backup Lambda for S3 sync and DynamoDB exports
+- **`nzshm-backup-restore`** — assumed by the restore CLI and pitr-watcher Lambda for PITR restore, PITR re-enable, and tagging
 
 ```mermaid
 graph TB
     subgraph backup["Backup Account (595842668254)"]
         EB["⏰ EventBridge\nScheduled rules"]
         L["λ Lambda\nnzshm-backup-dev"]
-        SSM["🗂 SSM Parameter Store\n/nzshm-backup/dev/config"]
+        PW["λ pitr-watcher\n(rate: 5 min, disabled when idle)"]
+        SSM["🗂 SSM Parameter Store\n/nzshm-backup/dev/config\n/nzshm-backup/pending-restores"]
         S3BB["🪣 S3 Backup Buckets\nbb-{source}-s3-{label}-{region}-{acct}"]
         S3DY["🪣 DynamoDB Export Buckets\nbb-{source}-dynamo-{region}-{acct}"]
     end
 
     subgraph source["Source Account (e.g. Arkivalist 816711409078)"]
-        ROLE["🔑 IAM Role\nnzshm-backup-reader"]
+        READER["🔑 IAM Role\nnzshm-backup-reader"]
+        RESTORE["🔑 IAM Role\nnzshm-backup-restore"]
         S3SRC["🪣 Source S3 Buckets"]
         DDB["📋 DynamoDB Tables\n(PITR enabled)"]
+        DDB2["📋 Restored DynamoDB Tables\n(<name>-restored)"]
     end
 
     EB -->|"triggers (scheduled / manual)"| L
     L -->|"reads config"| SSM
-    L -->|"sts:AssumeRole"| ROLE
-    ROLE -.->|"s3:GetObject / ListBucket"| S3SRC
+    L -->|"sts:AssumeRole"| READER
+    READER -.->|"s3:GetObject / ListBucket"| S3SRC
     L -->|"incremental sync"| S3BB
-    ROLE -.->|"dynamodb:ExportTableToPointInTime"| DDB
+    READER -.->|"dynamodb:ExportTableToPointInTime"| DDB
     DDB -->|"writes export data\n(IAM role credentials)"| S3DY
+
+    PW -->|"reads/writes pending list"| SSM
+    PW -->|"sts:AssumeRole"| RESTORE
+    RESTORE -.->|"dynamodb:DescribeTable\ndynamodb:UpdateContinuousBackups\ndynamodb:TagResource"| DDB2
 ```
 
 ---
@@ -82,6 +94,57 @@ sequenceDiagram
 
 ---
 
+## Restore Flow
+
+DynamoDB restores are submit-and-return (async, 2–8 hours). S3 restores use
+direct copy (small buckets) or S3 Batch Operations (large buckets).
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant CLI as backup restore run (CLI)
+    participant STS as STS
+    participant DDB as DynamoDB (source acct)
+    participant SSM as SSM Parameter Store
+    participant EB as EventBridge
+    participant PW as pitr-watcher Lambda
+    participant DDB2 as Restored Table (source acct)
+
+    User->>CLI: backup restore run --source X --to-point-in-time T
+
+    CLI->>STS: AssumeRole nzshm-backup-restore
+    STS-->>CLI: Temporary credentials
+
+    loop Each DynamoDB table
+        CLI->>DDB: RestoreTableToPointInTime → <name>-restored
+        DDB-->>CLI: RestoreArn (table is CREATING)
+        CLI->>SSM: PutParameter — append {restore_arn, source, source_table_arn, restore_point}
+    end
+
+    CLI->>EB: EnableRule nzshm-backup-pitr-watcher
+
+    Note over DDB2: 2–8 hours later...
+
+    loop Every 5 minutes
+        EB->>PW: Invoke
+        PW->>SSM: GetParameter — read pending list
+        PW->>STS: AssumeRole nzshm-backup-restore
+        PW->>DDB2: DescribeTable
+        alt Table ACTIVE
+            PW->>DDB2: UpdateContinuousBackups (enable PITR)
+            PW->>DDB2: TagResource (RestoredBy, RestoredFrom, RestoredAt)
+            PW->>SSM: PutParameter — remove entry from list
+        else Table still CREATING
+            Note over PW: retry next invocation
+        end
+        alt No pending entries remain
+            PW->>EB: DisableRule nzshm-backup-pitr-watcher
+        end
+    end
+```
+
+---
+
 ## Bucket Naming Convention
 
 | Type | Pattern | Example |
@@ -98,17 +161,25 @@ All backup buckets are:
 
 ## Cross-Account IAM
 
-For each cross-account source, a one-time setup creates a reader role:
+For each cross-account source, a one-time setup creates both roles:
 
-```
-scripts/create-reader-role.py --backup-account-id 595842668254 \
-    --dynamodb-tables table1 table2 \
-    --s3-buckets bucket1
+```bash
+scripts/create-source-roles.py \
+    --config backup-config.yaml \
+    --source <alias>
 ```
 
-The reader role grants:
+Both role ARNs are written back to the config file automatically.
+
+**`nzshm-backup-reader`** (assumed by backup Lambda):
 - `s3:GetObject`, `s3:ListBucket` on named source buckets
 - `dynamodb:ExportTableToPointInTime`, `dynamodb:DescribeContinuousBackups` on named tables
 - `dynamodb:ListExports`, `dynamodb:DescribeExport` for status queries
-- `s3:PutObject` on `bb-*` backup buckets (needed because DynamoDB cross-account exports
-  write using the calling role's credentials, not the `dynamodb.amazonaws.com` service principal)
+- `s3:PutObject` on `bb-*` backup buckets (DynamoDB cross-account exports write
+  using the calling role's credentials, not the `dynamodb.amazonaws.com` service principal)
+
+**`nzshm-backup-restore`** (assumed by restore CLI and pitr-watcher Lambda):
+- `dynamodb:RestoreTableToPointInTime` on named source tables
+- `dynamodb:*` on `table/*` in the source account — required because
+  `RestoreTableToPointInTime` makes undocumented internal calls (Scan, Query, etc.)
+  on the restore target table; resource-level scoping is not practical
