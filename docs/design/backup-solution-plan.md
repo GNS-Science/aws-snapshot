@@ -366,8 +366,8 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Cross-account restore role (`nzshm-backup-restore`) — separate from reader role
 - [x] Informational tags applied to restored tables (`RestoredBy`, `RestoredFrom`, `RestoredAt`)
 - [x] Verified end-to-end against Arkivalist (cross-account, ap-southeast-2)
-- [ ] S3 Batch Operations for `restore run` — designed (see `docs/design/s3-restore-strategy.md`), not yet implemented; direct `copy_object` is the current path (acceptable for small buckets)
-- [ ] `--use-batch` flag for `backup test restore` — designed, not yet implemented
+- [x] S3 Batch Operations for `restore run` — default when `s3_batch_role_arn` configured; direct `copy_object` fallback otherwise
+- [x] `--use-batch` flag for `backup test restore` — exercises S3 Batch path for sampled objects
 - [ ] DynamoDB `import-table` from S3 export (PITR > 35 days fallback — manual CLI only)
 
 ### Phase 5: Testing & Validation ✅ Substantially complete

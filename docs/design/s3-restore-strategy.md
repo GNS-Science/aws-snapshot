@@ -107,8 +107,9 @@ bucket policy must allow `s3:PutObject` from the batch role ARN.
 
 ## Current status
 
-- `backup restore run` — implemented with direct `copy_object` (suitable for current small buckets)
-- `backup test restore` — implemented with direct `copy_object`; `--use-batch` flag pending
-- S3 Batch path — **not yet implemented**; tracked as the next restore milestone
+- `backup restore run` — S3 Batch Operations (default when `s3_batch_role_arn` configured); direct `copy_object` fallback for unconfigured environments
+- `backup test restore` — direct `copy_object` by default; `--use-batch` flag exercises the S3 Batch path for sampled objects
+- S3 Batch path — **implemented** (`batch_restore_bucket` in `s3_batch.py`); `create-batch-role.py` updated with `ReadBackup` permission
 
 **Created:** 2026-03-18
+**Updated:** 2026-03-18
