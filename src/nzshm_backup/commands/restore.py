@@ -14,6 +14,7 @@ from nzshm_backup.dynamodb_restore import (
 )
 from nzshm_backup.restore_state import add_pending_restore
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
+from nzshm_backup.s3_batch import batch_restore_bucket
 from nzshm_backup.s3_restore import restore_s3_bucket
 from nzshm_backup.state import get_state
 
@@ -134,6 +135,8 @@ def run_restore(
     # ------------------------------------------------------------------
     # S3 restore
     # ------------------------------------------------------------------
+    batch_role_arn = config.general.s3_batch_role_arn
+
     for bucket_cfg in effective_buckets:
         backup_bucket = source_config.get_backup_bucket_name(
             bucket_cfg.label, region, source_account_id, source
@@ -146,19 +149,41 @@ def run_restore(
             typer.echo(f"  [DRY RUN] Would restore {backup_bucket} → {dest_bucket}")
             continue
 
-        result = restore_s3_bucket(session, backup_bucket, dest_bucket, prefix=prefix)
-
-        if result.success:
-            mb = result.bytes_transferred / (1024 * 1024)
-            typer.echo(
-                f"  ✓ {result.objects_copied} objects copied ({mb:.1f} MB), "
-                f"{result.objects_skipped} skipped"
+        if batch_role_arn:
+            result = batch_restore_bucket(
+                session, backup_bucket, dest_bucket, batch_role_arn, account_id, prefix=prefix
             )
+            if result.status == "SUBMITTED":
+                typer.echo(
+                    f"  ✓ Batch job submitted: {result.job_id} "
+                    f"({result.objects_in_manifest} objects)"
+                )
+                typer.echo(f"    Check progress: backup restore status --source {source}")
+            elif result.status == "SKIPPED":
+                typer.echo("  ✓ Nothing to restore — backup bucket is empty")
+            else:
+                for err in result.errors:
+                    typer.echo(f"  ✗ {err['error']}", err=True)
+                errors.append(f"{dest_bucket}: batch job failed")
         else:
-            typer.echo(f"  ✗ Restore completed with {len(result.errors)} error(s)", err=True)
-            for err in result.errors:
-                typer.echo(f"    - {err['key']}: {err['error']}", err=True)
-            errors.append(f"{dest_bucket}: {len(result.errors)} copy errors")
+            typer.echo(
+                "    (s3_batch_role_arn not configured — using direct copy; "
+                "set general.s3_batch_role_arn for large-bucket restores)"
+            )
+            direct_result = restore_s3_bucket(session, backup_bucket, dest_bucket, prefix=prefix)
+            if direct_result.success:
+                mb = direct_result.bytes_transferred / (1024 * 1024)
+                typer.echo(
+                    f"  ✓ {direct_result.objects_copied} objects copied ({mb:.1f} MB), "
+                    f"{direct_result.objects_skipped} skipped"
+                )
+            else:
+                typer.echo(
+                    f"  ✗ Restore completed with {len(direct_result.errors)} error(s)", err=True
+                )
+                for err in direct_result.errors:
+                    typer.echo(f"    - {err['key']}: {err['error']}", err=True)
+                errors.append(f"{dest_bucket}: {len(direct_result.errors)} copy errors")
 
     # ------------------------------------------------------------------
     # DynamoDB restore

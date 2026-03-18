@@ -77,10 +77,10 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
                 ],
             },
             {
-                "Sid": "ReadManifest",
+                "Sid": "ReadBackup",
                 "Effect": "Allow",
-                "Action": ["s3:GetObject"],
-                "Resource": [f"arn:aws:s3:::bb-*-{region}-*/_manifests/*"],
+                "Action": ["s3:GetObject", "s3:GetObjectTagging"],
+                "Resource": [f"arn:aws:s3:::bb-*-{region}-*/*"],
             },
             {
                 "Sid": "WriteReport",

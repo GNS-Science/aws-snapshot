@@ -6,7 +6,9 @@ from moto import mock_aws
 
 from nzshm_backup.s3_batch import (
     BatchJobResult,
+    _build_restore_manifest_rows,
     batch_backup_source,
+    batch_restore_bucket,
     build_manifest_csv,
     write_manifest_to_s3,
 )
@@ -244,6 +246,110 @@ def test_config_requires_batch_role_when_use_s3_batch():
                 }
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# _build_restore_manifest_rows
+# ---------------------------------------------------------------------------
+
+
+def test_build_restore_manifest_rows_excludes_operational(s3_client):
+    """Operational prefix objects are excluded from restore manifest rows."""
+    _create_bucket(s3_client, "bb-src-s3-main-ap-southeast-2-111111111111")
+    bucket = "bb-src-s3-main-ap-southeast-2-111111111111"
+    _put_object(s3_client, bucket, "data/file.txt")
+    _put_object(s3_client, bucket, "_manifests/m.csv")
+    _put_object(s3_client, bucket, "_batch-reports/r.csv")
+    _put_object(s3_client, bucket, "_state/last-run.json")
+
+    rows = list(_build_restore_manifest_rows(s3_client, bucket))
+
+    assert len(rows) == 1
+    assert f"{bucket},data/file.txt\n" in rows
+
+
+def test_build_restore_manifest_rows_prefix_filter(s3_client):
+    """Only objects under the given prefix are yielded."""
+    _create_bucket(s3_client, "bb-src2")
+    _put_object(s3_client, "bb-src2", "a/file1.txt")
+    _put_object(s3_client, "bb-src2", "b/file2.txt")
+
+    rows = list(_build_restore_manifest_rows(s3_client, "bb-src2", prefix="a/"))
+
+    assert len(rows) == 1
+    assert "bb-src2,a/file1.txt\n" in rows
+
+
+# ---------------------------------------------------------------------------
+# batch_restore_bucket
+# ---------------------------------------------------------------------------
+
+
+def test_batch_restore_dry_run(aws_session, s3_client):
+    """Dry run counts restorable objects without writing manifest or submitting job."""
+    backup = "bb-src-s3-main-ap-southeast-2-111111111111"
+    _create_bucket(s3_client, backup)
+    _put_object(s3_client, backup, "data/a.txt")
+    _put_object(s3_client, backup, "data/b.txt")
+    _put_object(s3_client, backup, "_manifests/m.csv")   # excluded
+
+    result = batch_restore_bucket(
+        session=aws_session,
+        backup_bucket=backup,
+        target_bucket="original-bucket",
+        batch_role_arn="arn:aws:iam::111111111111:role/nzshm-backup-batch-role",
+        account_id="111111111111",
+        dry_run=True,
+    )
+
+    assert result.status == "SKIPPED"
+    assert result.dry_run is True
+    assert result.objects_in_manifest == 2
+    assert result.job_id is None
+
+
+def test_batch_restore_skipped_when_empty(aws_session, s3_client):
+    """Returns SKIPPED when backup bucket is empty (nothing to restore)."""
+    backup = "bb-empty-s3-main-ap-southeast-2-111111111111"
+    _create_bucket(s3_client, backup)
+
+    result = batch_restore_bucket(
+        session=aws_session,
+        backup_bucket=backup,
+        target_bucket="original-bucket",
+        batch_role_arn="arn:aws:iam::111111111111:role/nzshm-backup-batch-role",
+        account_id="111111111111",
+        dry_run=False,
+    )
+
+    assert result.status == "SKIPPED"
+    assert result.objects_in_manifest == 0
+    assert result.job_id is None
+
+
+def test_batch_restore_excludes_operational_in_dry_run(aws_session, s3_client):
+    """Operational prefixes are excluded even in dry_run mode."""
+    backup = "bb-ops-s3-main-ap-southeast-2-111111111111"
+    _create_bucket(s3_client, backup)
+    _put_object(s3_client, backup, "real/data.json")
+    _put_object(s3_client, backup, "_state/last-run.json")
+    _put_object(s3_client, backup, "_batch-reports/job.csv")
+
+    result = batch_restore_bucket(
+        session=aws_session,
+        backup_bucket=backup,
+        target_bucket="dest",
+        batch_role_arn="arn:aws:iam::111111111111:role/nzshm-backup-batch-role",
+        account_id="111111111111",
+        dry_run=True,
+    )
+
+    assert result.objects_in_manifest == 1
+
+
+# ---------------------------------------------------------------------------
+# Config validation
+# ---------------------------------------------------------------------------
 
 
 def test_config_accepts_batch_role_when_use_s3_batch():
