@@ -40,12 +40,7 @@ provider:
             - dynamodb:DescribeExport
             - dynamodb:DescribeTable
             - dynamodb:UpdateContinuousBackups
-            - dynamodb:UntagResource
             - dynamodb:TagResource
-          Resource: "*"
-        - Effect: Allow
-          Action:
-            - tag:GetResources
           Resource: "*"
         - Effect: Allow
           Action:
@@ -85,7 +80,7 @@ functions:
           enabled: false
           name: nzshm-backup-pitr-watcher
           schedule: rate(5 minutes)
-          description: Poll for PITRPending=true DynamoDB tables after restore
+          description: Poll SSM for pending DynamoDB restores and re-enable PITR
 
   backup:
     handler: nzshm_backup.lambda_handler.handler

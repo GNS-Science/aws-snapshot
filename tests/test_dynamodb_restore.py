@@ -81,12 +81,8 @@ def test_restore_initiated_on_success():
     assert call_kwargs["RestoreDateTime"] == RESTORE_POINT
     assert call_kwargs["BillingModeOverride"] == "PAY_PER_REQUEST"
     assert "Tags" not in call_kwargs
-    # Tags applied separately via tag_resource (enable_pitr=True by default)
-    tag_call = client.tag_resource.call_args[1]
-    tags = {t["Key"]: t["Value"] for t in tag_call["Tags"]}
-    assert tags["PITRPending"] == "true"
-    assert tags["RestoredBy"] == "nzshm-backup"
-    assert tag_call["ResourceArn"] == result.restore_arn
+    # PITR re-enable is handled by pitr-watcher Lambda via SSM — no tag_resource call here
+    client.tag_resource.assert_not_called()
 
 
 def test_restore_failed_on_client_error():

@@ -12,6 +12,7 @@ from nzshm_backup.dynamodb_restore import (
     make_restore_table_name,
     restore_dynamodb_table,
 )
+from nzshm_backup.restore_state import add_pending_restore
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_restore import restore_s3_bucket
 from nzshm_backup.state import get_state
@@ -173,6 +174,7 @@ def run_restore(
             else session
         )
         dynamodb_client = source_session.client("dynamodb")
+        ssm_client = session.client("ssm")
 
         for table_arn in effective_table_arns:
             table_name = table_arn.split("/")[-1]
@@ -188,12 +190,18 @@ def run_restore(
 
             result = restore_dynamodb_table(
                 dynamodb_client, table_arn, dest_table, restore_point,
-                enable_pitr=not no_pitr,
             )
 
             if result.success:
                 typer.echo(f"  ✓ Restore submitted: {dest_table} ({result.restore_arn})")
-                if not no_pitr:
+                if not no_pitr and result.restore_arn:
+                    add_pending_restore(
+                        ssm_client,
+                        restore_arn=result.restore_arn,
+                        source=source,
+                        source_table_arn=table_arn,
+                        restore_point_iso=restore_point.isoformat(),
+                    )
                     typer.echo("    PITR will be re-enabled automatically once ACTIVE")
                 typer.echo(
                     f"    Check progress: backup restore status "
