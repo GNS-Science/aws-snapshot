@@ -1,5 +1,6 @@
 """S3 restore operations — copy objects from a backup bucket to a target bucket."""
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,6 +13,65 @@ from nzshm_backup.integrity import OPERATIONAL_PREFIXES
 from nzshm_backup.s3_backup import bucket_exists, get_account_id, get_region
 
 logger = logging.getLogger(__name__)
+
+_MAX_BUCKET_NAME_LEN = 63
+_RESTORE_SUFFIX = "-restore"
+
+
+def make_restore_bucket_name(bucket: str) -> str:
+    """Derive a restore target bucket name from a source bucket name.
+
+    Appends ``-restore`` (8 chars), truncating the base name if necessary to
+    stay within S3's 63-character bucket name limit.
+
+    Mirrors ``make_restore_table_name()`` in ``dynamodb_restore.py``.
+
+    Args:
+        bucket: Source bucket name.
+
+    Returns:
+        Target bucket name with ``-restore`` suffix, at most 63 characters.
+    """
+    max_base = _MAX_BUCKET_NAME_LEN - len(_RESTORE_SUFFIX)
+    if len(bucket) > max_base:
+        logger.warning(
+            f"Bucket name {bucket!r} truncated to {max_base} chars to fit '-restore' suffix"
+        )
+        bucket = bucket[:max_base]
+    return bucket + _RESTORE_SUFFIX
+
+
+def apply_restore_target_policy(s3_client, target_bucket: str, batch_role_arn: str) -> None:
+    """Merge-safe: grant AllowNzshmBatchRoleWrite on target bucket for the batch role.
+
+    Called at runtime just before Batch job submission so ``restore run`` is
+    self-contained — no pre-run setup steps beyond creating the target bucket.
+
+    Args:
+        s3_client:      boto3 S3 client scoped to the account that owns target_bucket.
+        target_bucket:  The restore destination bucket.
+        batch_role_arn: ARN of the S3 Batch Operations role (backup account).
+    """
+    sid = "AllowNzshmBatchRoleWrite"
+    try:
+        existing = s3_client.get_bucket_policy(Bucket=target_bucket)
+        policy = json.loads(existing["Policy"])
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchBucketPolicy":
+            policy = {"Version": "2012-10-17", "Statement": []}
+        else:
+            raise
+
+    policy["Statement"] = [s for s in policy["Statement"] if s.get("Sid") != sid]
+    policy["Statement"].append({
+        "Sid": sid,
+        "Effect": "Allow",
+        "Principal": {"AWS": batch_role_arn},
+        "Action": ["s3:PutObject", "s3:PutObjectTagging"],
+        "Resource": f"arn:aws:s3:::{target_bucket}/*",
+    })
+    s3_client.put_bucket_policy(Bucket=target_bucket, Policy=json.dumps(policy))
+    logger.info(f"Applied {sid} policy to {target_bucket}")
 
 
 @dataclass

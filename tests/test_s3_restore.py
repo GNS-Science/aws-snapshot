@@ -5,7 +5,12 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from nzshm_backup.s3_restore import RestoreResult, restore_s3_bucket
+from nzshm_backup.s3_restore import (
+    RestoreResult,
+    apply_restore_target_policy,
+    make_restore_bucket_name,
+    restore_s3_bucket,
+)
 
 REGION = "ap-southeast-2"
 
@@ -140,3 +145,72 @@ def test_restore_empty_backup_bucket():
     assert result.success
     assert result.objects_copied == 0
     assert isinstance(result, RestoreResult)
+
+
+# ---------------------------------------------------------------------------
+# make_restore_bucket_name
+# ---------------------------------------------------------------------------
+
+def test_make_restore_bucket_name_short():
+    """Short names get -restore appended as-is."""
+    assert make_restore_bucket_name("mybucket") == "mybucket-restore"
+
+
+def test_make_restore_bucket_name_exact_55_chars():
+    """A 55-char base name fits exactly (55 + 8 = 63)."""
+    base = "a" * 55
+    assert make_restore_bucket_name(base) == base + "-restore"
+    assert len(make_restore_bucket_name(base)) == 63
+
+
+def test_make_restore_bucket_name_truncates_long_name():
+    """Names longer than 55 chars are truncated so the result is 63 chars."""
+    long_name = "arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh"  # 58 chars
+    result = make_restore_bucket_name(long_name)
+    assert result.endswith("-restore")
+    assert len(result) == 63
+    assert result == long_name[:55] + "-restore"
+
+
+def test_make_restore_bucket_name_exactly_63_chars_result():
+    """Result is always at most 63 characters."""
+    for length in range(50, 70):
+        result = make_restore_bucket_name("x" * length)
+        assert len(result) <= 63
+        assert result.endswith("-restore")
+
+
+# ---------------------------------------------------------------------------
+# apply_restore_target_policy
+# ---------------------------------------------------------------------------
+
+@mock_aws
+def test_apply_restore_target_policy_creates_new_policy():
+    """Policy is created on a bucket with no existing policy."""
+    session = boto3.Session(region_name=REGION)
+    s3 = session.client("s3")
+    _make_bucket(s3, "restore-target")
+
+    apply_restore_target_policy(s3, "restore-target", "arn:aws:iam::123456789012:role/batch-role")
+
+    import json
+    policy = json.loads(s3.get_bucket_policy(Bucket="restore-target")["Policy"])
+    sids = [s["Sid"] for s in policy["Statement"]]
+    assert "AllowNzshmBatchRoleWrite" in sids
+
+
+@mock_aws
+def test_apply_restore_target_policy_is_merge_safe():
+    """Re-applying the policy replaces the existing SID, not duplicates it."""
+    session = boto3.Session(region_name=REGION)
+    s3 = session.client("s3")
+    _make_bucket(s3, "restore-target")
+    batch_arn = "arn:aws:iam::123456789012:role/batch-role"
+
+    apply_restore_target_policy(s3, "restore-target", batch_arn)
+    apply_restore_target_policy(s3, "restore-target", batch_arn)
+
+    import json
+    policy = json.loads(s3.get_bucket_policy(Bucket="restore-target")["Policy"])
+    matching = [s for s in policy["Statement"] if s["Sid"] == "AllowNzshmBatchRoleWrite"]
+    assert len(matching) == 1
