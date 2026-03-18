@@ -99,9 +99,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             continue
 
         source_account_id = source_config.source_account_id or backup_account_id
+        restore_role_arn = (
+            source_config.source_account_restore_role_arn
+            or source_config.source_account_role_arn
+        )
         source_session = (
-            get_cross_account_session(session, source_config.source_account_role_arn)
-            if source_config.source_account_role_arn and backup_account_id != source_account_id
+            get_cross_account_session(session, restore_role_arn)
+            if restore_role_arn and backup_account_id != source_account_id
             else session
         )
 
