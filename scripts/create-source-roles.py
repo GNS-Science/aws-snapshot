@@ -1,56 +1,36 @@
 #!/usr/bin/env python3
-"""DEPRECATED: use scripts/create-source-roles.py instead.
+"""One-time setup: create IAM roles in a SOURCE account for nzshm-backup.
 
-create-source-roles.py creates both the reader role (read-only) and the
-restore role (RestoreTableToPointInTime, PITR re-enable, tag management),
-and writes both ARNs back to the config file.
+Creates two roles:
 
-This script is retained for reference only.
+  nzshm-backup-reader   — read-only; assumed by the backup Lambda for S3 sync
+                          and DynamoDB exports.
 
----
-
-One-time setup: create the IAM reader role in a SOURCE account.
-
-This role is assumed by the backup Lambda (running in the BACKUP account)
-to read S3 buckets and initiate DynamoDB exports cross-account.
+  nzshm-backup-restore  — restore operations; assumed by the restore CLI and
+                          pitr-watcher Lambda for RestoreTableToPointInTime,
+                          PITR re-enable, and tag management.
 
 Account context:
     Run this while authenticated to the SOURCE account (e.g. Arkivalist 456789012345).
 
 Usage (config-driven — recommended):
-    # Derives everything from the config file; writes source_account_role_arn back.
-    python scripts/create-reader-role.py \
+    python scripts/create-source-roles.py \
         --config backup-config.sandbox.yaml \
         --source arkivalist
 
     # Dry-run first to preview what will be created:
-    python scripts/create-reader-role.py \
+    python scripts/create-source-roles.py \
         --config backup-config.sandbox.yaml \
         --source arkivalist \
         --dry-run
 
 Usage (explicit — for scripting or when config is unavailable):
-    python scripts/create-reader-role.py \
+    python scripts/create-source-roles.py \
         --backup-account-id 345678901234 \
-        --s3-buckets arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh \
-        --dynamodb-tables arkivalist-api-dev-events arkivalist-api-dev-feedback \
-            arkivalist-api-dev-invite-codes arkivalist-api-dev-mission-events \
-            arkivalist-api-dev-mission-runs
+        --s3-buckets my-source-bucket \
+        --dynamodb-tables MyTable-PROD
 
-    # With S3 Batch support (required when use_s3_batch: true):
-    python scripts/create-reader-role.py \
-        --backup-account-id 345678901234 \
-        --batch-role-arn arn:aws:iam::345678901234:role/nzshm-backup-batch-role \
-        --s3-buckets nzshm-toshi-api-data \
-        --dynamodb-tables ToshiFileObject-PROD ...
-
-After running (explicit mode only):
-    Copy the printed ARN into backup-config.yaml under the source:
-        sources:
-          arkivalist:
-            source_account_role_arn: "arn:aws:iam::456789012345:role/nzshm-backup-reader"
-
-    Config-driven mode writes this back automatically.
+Config-driven mode writes both role ARNs back to the config file automatically.
 """
 
 import argparse
@@ -62,7 +42,8 @@ import boto3
 import yaml
 from botocore.exceptions import ClientError
 
-ROLE_NAME = "nzshm-backup-reader"
+READER_ROLE_NAME = "nzshm-backup-reader"
+RESTORE_ROLE_NAME = "nzshm-backup-restore"
 
 
 def build_trust_policy(backup_account_id: str) -> dict:
@@ -81,13 +62,14 @@ def build_trust_policy(backup_account_id: str) -> dict:
     }
 
 
-def build_permission_policy(
+def build_reader_policy(
     region: str,
     account_id: str,
     s3_buckets: list[str],
     dynamodb_tables: list[str],
     backup_account_id: str = "",
 ) -> dict:
+    """Read-only policy: S3 source reads + DynamoDB export initiation."""
     statements = []
 
     if s3_buckets:
@@ -149,15 +131,94 @@ def build_permission_policy(
     return {"Version": "2012-10-17", "Statement": statements}
 
 
+def build_restore_policy(
+    region: str,
+    account_id: str,
+    dynamodb_tables: list[str],
+) -> dict:
+    """Restore policy: submit PITR restores and manage PITR/tags on restored tables."""
+    statements = []
+
+    if dynamodb_tables:
+        statements.append({
+            "Sid": "SubmitPITRRestore",
+            "Effect": "Allow",
+            "Action": ["dynamodb:RestoreTableToPointInTime"],
+            "Resource": [
+                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}"
+                for t in dynamodb_tables
+            ],
+        })
+        # Restored table names (e.g. <original>-restored) are not in the configured
+        # table list, so these permissions must be scoped to all tables in the account.
+        statements.append({
+            "Sid": "ManageRestoredTables",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:TagResource",
+                "dynamodb:UntagResource",
+                "dynamodb:DescribeTable",
+                "dynamodb:UpdateContinuousBackups",
+            ],
+            "Resource": [f"arn:aws:dynamodb:{region}:{account_id}:table/*"],
+        })
+        statements.append({
+            "Sid": "PITRPendingTagScan",
+            "Effect": "Allow",
+            "Action": ["tag:GetResources"],
+            "Resource": ["*"],
+        })
+
+    return {"Version": "2012-10-17", "Statement": statements}
+
+
+def _create_or_update_role(iam, role_name: str, trust_policy: dict, permission_policy: dict,
+                            description: str, dry_run: bool) -> str:
+    """Create or update an IAM role and its inline policy. Returns the role ARN."""
+    if dry_run:
+        print(f"\n[DRY RUN] Would create/update role: {role_name}")
+        print(f"  Description: {description}")
+        print(f"  Trust policy:\n{json.dumps(trust_policy, indent=4)}")
+        print(f"  Permission policy:\n{json.dumps(permission_policy, indent=4)}")
+        # Return a plausible ARN for dry-run write-back previews
+        caller = boto3.client("sts").get_caller_identity()
+        return f"arn:aws:iam::{caller['Account']}:role/{role_name}"
+
+    try:
+        resp = iam.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=json.dumps(trust_policy),
+            Description=description,
+            Tags=[{"Key": "ManagedBy", "Value": "nzshm-backup"}],
+        )
+        role_arn = resp["Role"]["Arn"]
+        print(f"\nCreated role: {role_arn}")
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "EntityAlreadyExists":
+            role_arn = iam.get_role(RoleName=role_name)["Role"]["Arn"]
+            print(f"\nRole already exists, updating: {role_arn}")
+            iam.update_assume_role_policy(
+                RoleName=role_name,
+                PolicyDocument=json.dumps(trust_policy),
+            )
+        else:
+            print(f"ERROR creating role {role_name}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    policy_name = f"nzshm-backup-{role_name.removeprefix('nzshm-backup-')}-permissions"
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName=policy_name,
+        PolicyDocument=json.dumps(permission_policy),
+    )
+    print(f"  Attached inline policy: {policy_name}")
+    return role_arn
+
+
 def apply_batch_role_bucket_policy(
     s3_client, bucket: str, batch_role_arn: str, dry_run: bool
 ) -> None:
-    """Add a bucket policy statement allowing the batch role to read source objects.
-
-    S3 Batch Operations copies using the batch role's credentials. For cross-account
-    source buckets the batch role (in the backup account) needs both an identity policy
-    (already in create-batch-role.py) AND a resource policy on the source bucket.
-    """
+    """Add a bucket policy statement allowing the batch role to read source objects."""
     if dry_run:
         print(f"  [dry-run] Would add batch role read policy to {bucket}")
         return
@@ -185,14 +246,18 @@ def apply_batch_role_bucket_policy(
     print(f"  Added batch role read policy to bucket: {bucket}")
 
 
-def write_back_role_arn(config_path: str, source_alias: str, role_arn: str) -> None:
-    """Update source_account_role_arn in the config YAML file."""
+def write_back_role_arns(config_path: str, source_alias: str,
+                          reader_arn: str, restore_arn: str) -> None:
+    """Update both role ARNs in the config YAML file."""
     with open(config_path) as f:
         data = yaml.safe_load(f)
-    data["sources"][source_alias]["source_account_role_arn"] = role_arn
+    data["sources"][source_alias]["source_account_role_arn"] = reader_arn
+    data["sources"][source_alias]["source_account_restore_role_arn"] = restore_arn
     with open(config_path, "w") as f:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
-    print(f"  Updated {config_path}: sources.{source_alias}.source_account_role_arn = {role_arn}")
+    print(f"  Updated {config_path}:")
+    print(f"    sources.{source_alias}.source_account_role_arn = {reader_arn}")
+    print(f"    sources.{source_alias}.source_account_restore_role_arn = {restore_arn}")
 
 
 def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_override: str | None):
@@ -210,7 +275,6 @@ def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_over
 
     source = sources[source_alias]
 
-    # Derive backup account ID from lambda_arn: arn:aws:lambda:{region}:{account_id}:...
     lambda_arn = general.get("lambda_arn", "")
     parts = lambda_arn.split(":")
     if len(parts) < 6 or not parts[4].isdigit():
@@ -226,7 +290,6 @@ def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_over
     s3_buckets = [b["arn"].split(":::")[-1] for b in source.get("s3_buckets", [])]
     dynamodb_tables = [arn.split("/")[-1] for arn in source.get("dynamodb_tables", [])]
 
-    # Batch role: explicit override > config (when use_s3_batch: true)
     batch_role_arn = batch_role_arn_override
     if batch_role_arn is None and source.get("use_s3_batch"):
         batch_role_arn = general.get("s3_batch_role_arn")
@@ -239,33 +302,25 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
-    # Config-driven mode
     config_group = parser.add_argument_group("config-driven mode (recommended)")
     config_group.add_argument("--config", default=None, help="Path to backup config YAML file")
-    config_group.add_argument("--source", default=None, help="Source alias from config (e.g. arkivalist)")
+    config_group.add_argument("--source", default=None, help="Source alias from config")
 
-    # Explicit mode
     explicit_group = parser.add_argument_group("explicit mode")
-    explicit_group.add_argument("--backup-account-id", default=None, help="Account ID that runs the backup Lambda")
-    explicit_group.add_argument("--s3-buckets", nargs="*", default=[], help="Source S3 bucket names (not ARNs)")
-    explicit_group.add_argument("--dynamodb-tables", nargs="*", default=[], help="Source DynamoDB table names (not ARNs)")
+    explicit_group.add_argument("--backup-account-id", default=None)
+    explicit_group.add_argument("--s3-buckets", nargs="*", default=[])
+    explicit_group.add_argument("--dynamodb-tables", nargs="*", default=[])
     explicit_group.add_argument("--region", default="ap-southeast-2")
 
-    # Shared
-    parser.add_argument(
-        "--batch-role-arn", default=None,
-        help="Override batch role ARN. In config mode, auto-derived from general.s3_batch_role_arn "
-             "when use_s3_batch: true.",
-    )
+    parser.add_argument("--batch-role-arn", default=None)
     parser.add_argument(
         "--profile", default=None,
         help="AWS profile (SOURCE account). NOTE: SSO requires eval first: "
              "eval $(aws configure export-credentials --profile <profile> --format env)",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Preview changes without making API calls")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    # Determine mode
     config_mode = args.config is not None and args.source is not None
     explicit_mode = args.backup_account_id is not None
 
@@ -294,68 +349,40 @@ def main():
     print(f"Source account: {account_id}  Backup account: {backup_account_id}  Region: {region}")
     if config_mode:
         print(f"Config: {args.config}  Source: {args.source}")
-    print(f"S3 buckets: {s3_buckets or '(none)'}")
+    print(f"S3 buckets:      {s3_buckets or '(none)'}")
     print(f"DynamoDB tables: {dynamodb_tables or '(none)'}")
-    if batch_role_arn:
-        print(f"Batch role: {batch_role_arn}")
 
     trust_policy = build_trust_policy(backup_account_id)
-    permission_policy = build_permission_policy(
-        region, account_id, s3_buckets, dynamodb_tables, backup_account_id
+    reader_policy = build_reader_policy(region, account_id, s3_buckets, dynamodb_tables, backup_account_id)
+    restore_policy = build_restore_policy(region, account_id, dynamodb_tables)
+
+    reader_arn = _create_or_update_role(
+        iam, READER_ROLE_NAME, trust_policy, reader_policy,
+        description="Read-only role assumed by nzshm-backup Lambda for S3 backup and DynamoDB exports",
+        dry_run=args.dry_run,
     )
-
-    if args.dry_run:
-        print(f"\n[DRY RUN] Would create/update role: {ROLE_NAME}")
-        print("\nTrust policy:")
-        print(json.dumps(trust_policy, indent=2))
-        print("\nPermission policy:")
-        print(json.dumps(permission_policy, indent=2))
-        if batch_role_arn and s3_buckets:
-            print(f"\nBatch role bucket policies ({batch_role_arn}):")
-            for bucket in s3_buckets:
-                apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=True)
-        if config_mode:
-            role_arn = f"arn:aws:iam::{account_id}:role/{ROLE_NAME}"
-            print(f"\n[dry-run] Would update {args.config}: "
-                  f"sources.{args.source}.source_account_role_arn = {role_arn}")
-        return
-
-    # Create or update role
-    try:
-        resp = iam.create_role(
-            RoleName=ROLE_NAME,
-            AssumeRolePolicyDocument=json.dumps(trust_policy),
-            Description="Read-only role assumed by nzshm-backup Lambda for cross-account backup",
-            Tags=[{"Key": "ManagedBy", "Value": "nzshm-backup"}],
-        )
-        role_arn = resp["Role"]["Arn"]
-        print(f"\nCreated role: {role_arn}")
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "EntityAlreadyExists":
-            role_arn = f"arn:aws:iam::{account_id}:role/{ROLE_NAME}"
-            print(f"\nRole already exists: {role_arn}")
-        else:
-            print(f"ERROR creating role: {e}", file=sys.stderr)
-            sys.exit(1)
-
-    iam.put_role_policy(
-        RoleName=ROLE_NAME,
-        PolicyName="nzshm-backup-reader-permissions",
-        PolicyDocument=json.dumps(permission_policy),
+    restore_arn = _create_or_update_role(
+        iam, RESTORE_ROLE_NAME, trust_policy, restore_policy,
+        description="Restore role assumed by nzshm-backup for DynamoDB PITR restore and PITR re-enable",
+        dry_run=args.dry_run,
     )
-    print("Attached inline policy: nzshm-backup-reader-permissions")
 
     if batch_role_arn and s3_buckets:
-        print(f"\nApplying batch role bucket policies:")
+        print(f"\nApplying batch role bucket policies ({batch_role_arn}):")
         for bucket in s3_buckets:
-            apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=False)
+            apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
 
     if config_mode:
-        print(f"\nWriting role ARN back to config:")
-        write_back_role_arn(args.config, args.source, role_arn)
+        print("\nWriting role ARNs back to config:")
+        if not args.dry_run:
+            write_back_role_arns(args.config, args.source, reader_arn, restore_arn)
+        else:
+            print(f"  [dry-run] Would set source_account_role_arn = {reader_arn}")
+            print(f"  [dry-run] Would set source_account_restore_role_arn = {restore_arn}")
     else:
         print(f"\nAdd to backup-config.yaml under the relevant source:")
-        print(f"    source_account_role_arn: \"{role_arn}\"")
+        print(f"    source_account_role_arn: \"{reader_arn}\"")
+        print(f"    source_account_restore_role_arn: \"{restore_arn}\"")
 
 
 if __name__ == "__main__":

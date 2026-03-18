@@ -126,8 +126,14 @@ class SourceConfig(BaseModel):
     dynamodb_export_format: Literal["DYNAMODB_JSON", "ION"] = "DYNAMODB_JSON"
     source_account_role_arn: str | None = Field(
         None,
-        description="IAM role ARN in the source account to assume for cross-account access. "
-        "If None, the Lambda's own credentials are used (same-account backup).",
+        description="IAM role ARN in the source account to assume for cross-account read access "
+        "(S3 backup, DynamoDB export). If None, the Lambda's own credentials are used.",
+    )
+    source_account_restore_role_arn: str | None = Field(
+        None,
+        description="IAM role ARN in the source account to assume for cross-account restore "
+        "operations (RestoreTableToPointInTime, PITR re-enable, tag management). "
+        "Required for cross-account DynamoDB restores. If None, falls back to source_account_role_arn.",
     )
     source_account_id: str | None = Field(
         None,
@@ -202,6 +208,13 @@ class ConfigModel(BaseModel):
                     raise ValueError(
                         f"sources.{alias}: source_account_id {source.source_account_id!r} "
                         f"does not match account in source_account_role_arn ({arn_account!r})"
+                    )
+            if source.source_account_restore_role_arn and source.source_account_id:
+                arn_account = source.source_account_restore_role_arn.split(":")[4]
+                if arn_account != source.source_account_id:
+                    raise ValueError(
+                        f"sources.{alias}: source_account_id {source.source_account_id!r} "
+                        f"does not match account in source_account_restore_role_arn ({arn_account!r})"
                     )
             if source.source_account_id:
                 for table_arn in source.dynamodb_tables:
