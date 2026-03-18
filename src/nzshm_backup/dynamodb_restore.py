@@ -134,22 +134,31 @@ def restore_dynamodb_table(
         return result
 
     # RestoreTableToPointInTime does not accept Tags — apply them separately.
-    # tag_resource works on tables in CREATING state.
+    # The table may not be immediately visible to tag_resource after submission,
+    # so retry a few times with a short delay.
     if enable_pitr and result.restore_arn:
-        try:
-            dynamodb_client.tag_resource(
-                ResourceArn=result.restore_arn,
-                Tags=[
-                    {"Key": "RestoredBy",     "Value": "nzshm-backup"},
-                    {"Key": PITR_PENDING_TAG,  "Value": "true"},
-                    {"Key": "RestoredFrom",   "Value": source_table_arn.split("/")[-1]},
-                    {"Key": "RestoredAt",     "Value": restore_point.isoformat()},
-                ],
-            )
-            logger.info(f"Tagged {target_table_name} with PITRPending=true")
-        except ClientError as e:
-            # Non-fatal: watcher won't fire automatically, but restore itself succeeded.
-            logger.warning(f"Could not tag {target_table_name} for PITR watcher: {e}")
+        import time
+
+        tags = [
+            {"Key": "RestoredBy",    "Value": "nzshm-backup"},
+            {"Key": PITR_PENDING_TAG, "Value": "true"},
+            {"Key": "RestoredFrom",  "Value": source_table_arn.split("/")[-1]},
+            {"Key": "RestoredAt",    "Value": restore_point.isoformat()},
+        ]
+        for attempt in range(4):
+            try:
+                dynamodb_client.tag_resource(ResourceArn=result.restore_arn, Tags=tags)
+                logger.info(f"Tagged {target_table_name} with PITRPending=true")
+                break
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ResourceNotFoundException" and attempt < 3:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    logger.info(f"Table not yet visible for tagging, retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    # Non-fatal: watcher won't fire automatically, but restore itself succeeded.
+                    logger.warning(f"Could not tag {target_table_name} for PITR watcher: {e}")
+                    break
 
     return result
 
