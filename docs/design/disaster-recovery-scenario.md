@@ -106,32 +106,73 @@ S3KeyPrefix=dynamodb-exports/ToshiFileObject-PROD/2026/03/01 \
 S3 is the bottleneck — 9 TB of data must be copied from backup to target.
 No native "PITR" equivalent exists for S3; the backup bucket IS the archive.
 
+### Default: restore to `-restore` bucket (correct for DR)
+
 ```bash
-# Default: restores to {bucket}-restore (safe — does not touch the live bucket).
-# Verify the restore, then re-run with --target-bucket <original-name> for real cutover.
+# Restores to {bucket}-restore — the original bucket is preserved untouched
+# for parallel forensic investigation. Services are pointed at the restore
+# target once recovery is verified (see Configurable Names requirement below).
 backup restore run --source toshi --buckets toshi-api-data
 backup restore run --source ths --buckets ths-dataset
-# → writes to nzshm-toshi-api-data-restore, ths-dataset-restore
+# → creates nzshm-toshi-api-data-restore, ths-dataset-restore automatically
+#   and submits S3 Batch jobs
 
 # Monitor progress:
 backup restore status --source toshi
 backup restore status --source ths
+```
 
-# Real DR cutover — restore directly into the original bucket name:
-#   (Recreate the bucket first if it was deleted)
-#   aws s3api create-bucket --bucket nzshm-toshi-api-data --region ap-southeast-2 \
-#       --create-bucket-configuration LocationConstraint=ap-southeast-2
-backup restore run --source toshi --buckets toshi-api-data \
-    --target-bucket nzshm-toshi-api-data
+### Edge case: `--original` (bucket was deleted entirely)
+
+Only use this if the source bucket no longer exists and forensics is not needed:
+
+```bash
+backup restore run --source toshi --buckets toshi-api-data --original
+# → restores into nzshm-toshi-api-data (must not exist — created automatically)
 ```
 
 `backup restore run` uses S3 Batch Operations (see `docs/design/s3-restore-strategy.md`).
 Jobs run server-side, handle retries automatically, and produce a per-object completion
-report. Target buckets must already exist before submitting.
+report. The restore target bucket is created automatically if it does not exist.
 
 **Estimated duration:** 12–48 hours depending on object count and sizes.
 S3 intra-region copy throughput varies; large BLOB files (HDF5, NetCDF) copy
 faster per-GB than many small objects.
+
+---
+
+## Operational system requirement: configurable resource names
+
+**This is the most important architectural pre-condition for DR recovery.**
+
+The default restore targets are:
+
+| Resource | Backup | Restored to |
+|----------|--------|-------------|
+| S3 bucket | original name | `{bucket}-restore` (truncated to 63 chars) |
+| DynamoDB table | original name | `{table}-restored` |
+
+This means **every application that reads or writes these resources must accept
+the bucket name and table name as configuration, not hard-coded values.**
+
+During DR:
+1. Restore runs into `-restore` / `-restored` names in parallel with forensics
+2. Once data is verified, update application config to point at the new names
+3. Redeploy — no code change, config change only
+
+**If names are hard-coded, step 2 requires a code change and redeploy under incident
+pressure, adding hours to RTO and introducing error risk.**
+
+Examples of what this means in practice:
+
+- Lambda environment variables: `BUCKET_NAME`, `TABLE_NAME` — not literals in code
+- ECS/EKS task definitions: inject via SSM Parameter Store or Secrets Manager
+- CDK/Terraform: resource names as stack parameters, not constants
+- API services: bucket/table names read from config at startup
+
+This requirement should be validated during quarterly DR drills — restore to the
+`-restore` / `-restored` names and verify the application can be pointed at them
+with a config change alone.
 
 ---
 
@@ -202,9 +243,9 @@ manually during a real incident:
 
 | Gap | Impact | Notes |
 |-----|--------|-------|
-| S3 restore uses direct copy_object | Not suitable for 8 TB ToshiBucket | S3 Batch Operations implementation pending — see `docs/design/s3-restore-strategy.md` |
 | No `import-table-from-s3` integration | PITR fallback requires manual CLI | Low priority if PITR window covers 35 days |
-| No restore runbook tested | Unknown failure modes | Quarterly DR drill (Phase 5) needed |
+| No restore runbook tested end-to-end | Unknown failure modes | Quarterly DR drill needed |
+| Configurable names not yet validated | DR cutover requires config-only change | Must be verified per application during DR drill |
 
 ---
 
