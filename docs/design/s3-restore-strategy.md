@@ -81,7 +81,7 @@ Add S3 Batch job status alongside existing DynamoDB restore status:
   ⋯ bb-toshi-s3-api-... → nzshm-toshi-api-data  Active (42% complete)  job: a1b2c3d4
 
 [arkivalist] DynamoDB restore status:
-  ✓ arkivalist-api-dev-events → arkivalist-api-dev-events-restored: ACTIVE
+  ✓ arkivalist-api-dev-events → arkivalist-api-dev-events-restore: ACTIVE
 ```
 
 ### `test restore --use-batch`

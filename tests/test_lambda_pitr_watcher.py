@@ -7,7 +7,7 @@ import pytest
 from nzshm_backup.lambda_pitr_watcher import _process_source_entries, handler
 
 REGION = "ap-southeast-2"
-TABLE_NAME = "my-table-restored"
+TABLE_NAME = "my-table-restore"
 TABLE_ARN = f"arn:aws:dynamodb:{REGION}:123456789012:table/{TABLE_NAME}"
 
 SOURCE_TABLE_ARN = f"arn:aws:dynamodb:{REGION}:123456789012:table/my-table"

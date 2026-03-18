@@ -184,7 +184,7 @@ def build_restore_policy(
         #   1. RestoreTableToPointInTime performs undocumented internal checks
         #      (Scan, Query, ...) on the restore TARGET table — narrowing by action
         #      leads to whack-a-mole with AccessDeniedException errors.
-        #   2. Restored table names (<original>-restored) are not in the configured
+        #   2. Restored table names (<original>-restore) are not in the configured
         #      table list so resource-level scoping to known ARNs is not possible.
         # This role is only assumed during explicit restore operations, not continuously.
         statements.append({
