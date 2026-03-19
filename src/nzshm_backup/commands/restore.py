@@ -242,7 +242,7 @@ def run_restore(
             )
 
             if state.dry_run:
-                typer.echo(f"  [DRY RUN] Would submit PITR restore for {table_name}")
+                typer.echo(f"  [DRY RUN] Would submit PITR restore: {table_name} → {dest_table}")
                 continue
 
             result = restore_dynamodb_table(
