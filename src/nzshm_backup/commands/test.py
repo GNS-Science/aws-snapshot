@@ -176,6 +176,7 @@ def test_restore(
 
     DynamoDB: confirms PITR is enabled on each table (a prerequisite for
     point-in-time restore) and checks the export bucket has accessible data.
+    DynamoDB checks are read-only and run even with --dry-run.
 
     Objects in archived storage tiers (Glacier, Deep Archive) are skipped —
     they require a separate restore request before they can be copied.
@@ -361,6 +362,8 @@ def test_restore(
     # DynamoDB tables — check PITR enabled + export bucket accessible
     # ------------------------------------------------------------------
     if source_config.dynamodb_tables:
+        if state.dry_run:
+            typer.echo("  DynamoDB checks are read-only — running even in dry-run mode\n")
         source_session = (
             get_cross_account_session(session, source_config.source_account_role_arn)
             if source_config.source_account_role_arn
