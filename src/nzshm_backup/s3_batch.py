@@ -319,6 +319,9 @@ def batch_restore_bucket(
     account_id: str,
     dry_run: bool = False,
     prefix: str | None = None,
+    prebuilt_manifest_key: str | None = None,
+    prebuilt_manifest_etag: str | None = None,
+    prebuilt_manifest_row_count: int | None = None,
 ) -> BatchJobResult:
     """Submit an S3 Batch Operations job to restore a bucket from backup.
 
@@ -331,38 +334,60 @@ def batch_restore_bucket(
     For cross-account targets the target bucket policy must also allow the role.
 
     Args:
-        session:         boto3 Session (backup account).
-        backup_bucket:   Backup bucket to restore from.
-        target_bucket:   Destination bucket to restore into (must exist).
-        batch_role_arn:  IAM role ARN that S3 Batch will assume.
-        account_id:      Backup account ID (for s3control API).
-        dry_run:         If True, build manifest but skip CreateJob.
-        prefix:          Optional key prefix — restores only matching objects.
+        session:                      boto3 Session (backup account).
+        backup_bucket:                Backup bucket to restore from.
+        target_bucket:                Destination bucket to restore into (must exist).
+        batch_role_arn:               IAM role ARN that S3 Batch will assume.
+        account_id:                   Backup account ID (for s3control API).
+        dry_run:                      If True, build manifest but skip CreateJob.
+        prefix:                       Optional key prefix — restores only matching objects.
+        prebuilt_manifest_key:        S3 key of a pre-written manifest in backup_bucket.
+                                      If provided, skips manifest generation entirely.
+        prebuilt_manifest_etag:       ETag of the pre-written manifest (required with
+                                      prebuilt_manifest_key).
+        prebuilt_manifest_row_count:  Row count for the pre-written manifest (used for
+                                      the returned BatchJobResult).
 
     Returns:
         BatchJobResult with status SUBMITTED, SKIPPED, or FAILED.
     """
     s3_client = session.client("s3")
-    manifest_key = f"_manifests/restore-{uuid.uuid4()}.csv"
     region = get_region(session)
 
-    rows = _build_restore_manifest_rows(s3_client, backup_bucket, prefix)
+    if prebuilt_manifest_key is not None:
+        manifest_key = prebuilt_manifest_key
+        manifest_etag = prebuilt_manifest_etag
+        row_count = prebuilt_manifest_row_count or 0
+        if dry_run:
+            logger.info(f"[DRY RUN] Using pre-built manifest: {manifest_key} ({row_count} objects)")
+            return BatchJobResult(
+                source_bucket=backup_bucket,
+                dest_bucket=target_bucket,
+                job_id=None,
+                manifest_key=manifest_key,
+                objects_in_manifest=row_count,
+                status="SKIPPED",
+                dry_run=True,
+            )
+    else:
+        manifest_key = f"_manifests/restore-{uuid.uuid4()}.csv"
+        rows = _build_restore_manifest_rows(s3_client, backup_bucket, prefix)
 
-    if dry_run:
-        row_count = sum(1 for _ in rows)
-        logger.info(f"[DRY RUN] Restore manifest would contain {row_count} objects")
-        return BatchJobResult(
-            source_bucket=backup_bucket,
-            dest_bucket=target_bucket,
-            job_id=None,
-            manifest_key=manifest_key,
-            objects_in_manifest=row_count,
-            status="SKIPPED",
-            dry_run=True,
-        )
+        if dry_run:
+            row_count = sum(1 for _ in rows)
+            logger.info(f"[DRY RUN] Restore manifest would contain {row_count} objects")
+            return BatchJobResult(
+                source_bucket=backup_bucket,
+                dest_bucket=target_bucket,
+                job_id=None,
+                manifest_key=manifest_key,
+                objects_in_manifest=row_count,
+                status="SKIPPED",
+                dry_run=True,
+            )
 
-    logger.info(f"Writing restore manifest to s3://{backup_bucket}/{manifest_key}")
-    manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
+        logger.info(f"Writing restore manifest to s3://{backup_bucket}/{manifest_key}")
+        manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
     logger.info(f"Restore manifest: {row_count} objects, ETag={manifest_etag}")
 
     if row_count == 0:
