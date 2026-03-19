@@ -281,7 +281,7 @@ def test_restore(
 
                 from nzshm_backup.s3_batch import write_manifest_to_s3 as _write_manifest
                 manifest_key = f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
-                manifest_etag, _ = _write_manifest(s3, _sample_rows(), backup_bucket, manifest_key)
+                manifest_etag, manifest_row_count = _write_manifest(s3, _sample_rows(), backup_bucket, manifest_key)
                 typer.echo(f"    Submitting batch job ({len(sample)} objects)...")
                 batch_result = batch_restore_bucket(
                     session=session,
@@ -289,6 +289,9 @@ def test_restore(
                     target_bucket=temp_bucket,
                     batch_role_arn=batch_role_arn,
                     account_id=account_id,
+                    prebuilt_manifest_key=manifest_key,
+                    prebuilt_manifest_etag=manifest_etag,
+                    prebuilt_manifest_row_count=manifest_row_count,
                 )
                 if batch_result.status != "SUBMITTED":
                     copy_errors.append(f"Batch job failed: {batch_result.errors}")
