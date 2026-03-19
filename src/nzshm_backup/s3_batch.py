@@ -488,7 +488,7 @@ def wait_for_batch_job(
 
     region = get_region(session)
     s3control = session.client("s3control", region_name=region)
-    _TERMINAL = {"Complete", "Failed", "Cancelled", "Completing"}
+    _TERMINAL = {"Complete", "Failed", "Cancelled"}
     elapsed = 0
 
     while elapsed < timeout:
