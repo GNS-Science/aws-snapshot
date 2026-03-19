@@ -270,6 +270,9 @@ def test_restore(
                 Bucket=temp_bucket,
                 Tagging={"TagSet": [{"Key": "ManagedBy", "Value": "nzshm-backup"}, {"Key": "Type", "Value": "restore-test"}]},
             )
+            if use_batch and batch_role_arn:
+                from nzshm_backup.s3_restore import apply_restore_target_policy
+                apply_restore_target_policy(s3, temp_bucket, batch_role_arn)
         except Exception as e:
             typer.echo(f"    ✗ Failed to create temp bucket: {e}", err=True)
             any_failure = True
