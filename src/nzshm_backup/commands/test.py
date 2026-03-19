@@ -10,6 +10,7 @@ from nzshm_backup.config import load_config
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES, check_bucket_integrity
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
+from nzshm_backup.state import get_state
 
 app = typer.Typer()
 
@@ -181,6 +182,8 @@ def test_restore(
 
     Exits with code 1 if any check fails.
     """
+    state = get_state()
+
     try:
         config = load_config()
     except FileNotFoundError as e:
@@ -251,6 +254,11 @@ def test_restore(
         # Create temp bucket
         ts = int(datetime.now(timezone.utc).timestamp())
         temp_bucket = f"bb-restore-test-{ts}-{account_id}"
+        if state.dry_run:
+            typer.echo(f"    [DRY RUN] Would create temp bucket: {temp_bucket}")
+            typer.echo(f"    [DRY RUN] Would copy {len(sample)} objects and verify ETags")
+            continue
+
         typer.echo(f"    Creating temp bucket: {temp_bucket}")
         try:
             kwargs: dict = {"Bucket": temp_bucket, "ACL": "private"}
