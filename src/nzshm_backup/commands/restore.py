@@ -46,7 +46,7 @@ def _detect_latest_restore_point(
     config,
     source: str,
     source_config,
-    account_id: str,
+    source_account_id: str,
 ) -> str | None:
     """Return ISO 8601 UTC string for the most conservative latest-successful backup time.
 
@@ -61,7 +61,7 @@ def _detect_latest_restore_point(
 
     for bucket_cfg in source_config.s3_buckets:
         backup_bucket = source_config.get_backup_bucket_name(
-            bucket_cfg.label, config.general.region, account_id, source
+            bucket_cfg.label, config.general.region, source_account_id, source
         )
         state = read_run_state(session, backup_bucket)
         if state and state.get("status") not in ("failed", None) and state.get("checked_at"):
@@ -177,7 +177,7 @@ def run_restore(
         raise typer.Exit(1)
 
     if latest:
-        to_point_in_time = _detect_latest_restore_point(session, config, source, source_config, account_id)
+        to_point_in_time = _detect_latest_restore_point(session, config, source, source_config, source_account_id)
         if not to_point_in_time:
             typer.echo(
                 "Error: --latest: no successful backup run state found for any configured bucket.", err=True
