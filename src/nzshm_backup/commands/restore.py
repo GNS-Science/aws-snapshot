@@ -69,6 +69,7 @@ def run_restore(
         help="Skip automatic PITR re-enable after DynamoDB restore. "
              "Use only for short-lived test restores that will be deleted immediately.",
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Execute a restore from backup.
 
@@ -88,6 +89,8 @@ def run_restore(
     to check progress.
     """
     state = get_state()
+    if dry_run:
+        state.dry_run = True
 
     try:
         config = load_config()

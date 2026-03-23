@@ -17,12 +17,15 @@ def run(
     full_sync: bool = typer.Option(
         False, "--full-sync", help="Force full copy instead of incremental"
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Execute manual backup.
 
     Triggers backup for specified source(s). Respects the global --dry-run flag.
     """
     state = get_state()
+    if dry_run:
+        state.dry_run = True
     logger = setup_logging(json_format=False, verbose=state.verbose)
 
     try:
