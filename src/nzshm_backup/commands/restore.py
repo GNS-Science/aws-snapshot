@@ -135,7 +135,7 @@ def run_restore(
         )
         raise typer.Exit(1)
 
-    if effective_table_arns and not to_point_in_time:
+    if effective_table_arns and not to_point_in_time and not state.dry_run:
         typer.echo(
             "Error: --to-point-in-time is required when restoring DynamoDB tables.", err=True
         )
@@ -239,14 +239,14 @@ def run_restore(
         for table_arn in effective_table_arns:
             table_name = table_arn.split("/")[-1]
             dest_table = target_table if target_table else make_restore_table_name(table_arn)
+            if state.dry_run:
+                typer.echo(f"  [DRY RUN] Would submit PITR restore: {table_name} → {dest_table}")
+                continue
+
             typer.echo(
                 f"  Restoring DynamoDB: {table_name} → {dest_table} "
                 f"at {restore_point.isoformat()}"
             )
-
-            if state.dry_run:
-                typer.echo(f"  [DRY RUN] Would submit PITR restore: {table_name} → {dest_table}")
-                continue
 
             result = restore_dynamodb_table(
                 dynamodb_client, table_arn, dest_table, restore_point,
