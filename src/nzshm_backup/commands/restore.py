@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import boto3
 import typer
+from botocore.exceptions import ClientError
 
 from nzshm_backup.config import load_config
 from nzshm_backup.dynamodb_restore import (
@@ -26,11 +27,19 @@ from nzshm_backup.state import get_state
 app = typer.Typer()
 
 RESTORE_STATUS_ICON = {
+    "RESTORED": "✓",
     "ACTIVE": "✓",
     "RESTORING": "⋯",
     "CREATING": "⋯",
     "FAILED": "✗",
 }
+
+
+def _fmt_dt(dt) -> str:
+    """Format datetime (or ISO string) in local timezone."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
 
 def _parse_point_in_time(ts: str) -> datetime:
@@ -183,7 +192,7 @@ def run_restore(
                 "Error: --latest: no successful backup run state found for any configured bucket.", err=True
             )
             raise typer.Exit(1)
-        typer.echo(f"  Auto-detected restore point: {to_point_in_time}  (from last successful S3 backup)")
+        typer.echo(f"  Auto-detected restore point: {_fmt_dt(to_point_in_time)}  (from last successful S3 backup)")
 
     if effective_table_arns and not to_point_in_time and not state.dry_run:
         typer.echo(
@@ -416,7 +425,7 @@ def restore_status(
                     icon = RESTORE_BATCH_STATUS_ICON.get(status, "?")
                     job_id = job.get("JobId", "")[:8]
                     created = job.get("CreationTime")
-                    ts = f"  [{created.strftime('%Y-%m-%d %H:%M UTC')}]" if created else ""
+                    ts = f"  [{_fmt_dt(created)}]" if created else ""
                     progress = job.get("ProgressSummary", {})
                     total = progress.get("TotalNumberOfTasks", 0)
                     failed = progress.get("NumberOfTasksFailed", 0)
@@ -461,15 +470,20 @@ def restore_status(
             restore_target = make_restore_table_name(table_arn)
             try:
                 status = describe_restore_status(dynamodb_client, restore_target)
-                icon = RESTORE_STATUS_ICON.get(status.table_status, "?")
-                ts = (
-                    f"  [{status.restore_date_time.strftime('%Y-%m-%d %H:%M UTC')}]"
-                    if status.restore_date_time
-                    else ""
+                display_status = (
+                    "RESTORED" if status.table_status == "ACTIVE" and not status.restore_in_progress
+                    else status.table_status
                 )
-                typer.echo(f"    {icon} {table_name} → {restore_target}: {status.table_status}{ts}")
+                icon = RESTORE_STATUS_ICON.get(display_status, "?")
+                ts = f"  [{_fmt_dt(status.restore_date_time)}]" if status.restore_date_time else ""
+                typer.echo(f"    {icon} {table_name} → {restore_target}: {display_status}{ts}")
                 if status.restore_in_progress:
                     typer.echo("      restore in progress...")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    typer.echo(f"    - {table_name} → {restore_target}: not yet restored")
+                else:
+                    typer.echo(f"    ? {table_name} → {restore_target}: {e}")
             except Exception as e:
                 typer.echo(f"    ? {table_name} → {restore_target}: {e}")
 
