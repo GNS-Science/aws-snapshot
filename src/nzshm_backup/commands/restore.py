@@ -41,6 +41,38 @@ def _parse_point_in_time(ts: str) -> datetime:
     return dt
 
 
+def _detect_latest_restore_point(
+    session: boto3.Session,
+    config,
+    source: str,
+    source_config,
+    account_id: str,
+) -> str | None:
+    """Return ISO 8601 UTC string for the most conservative latest-successful backup time.
+
+    Reads _state/last-run.json from each backup bucket for the source and returns
+    the minimum checked_at across all buckets with a non-failed status.  This is
+    the latest time at which ALL S3 data was known good, suitable as a DynamoDB
+    PITR target for a consistent restore.
+    """
+    from nzshm_backup.run_state import read_run_state
+
+    checked_ats = []
+
+    for bucket_cfg in source_config.s3_buckets:
+        backup_bucket = source_config.get_backup_bucket_name(
+            bucket_cfg.label, config.general.region, account_id, source
+        )
+        state = read_run_state(session, backup_bucket)
+        if state and state.get("status") not in ("failed", None) and state.get("checked_at"):
+            checked_ats.append(state["checked_at"])
+
+    if not checked_ats:
+        return None
+    # Most conservative: oldest of the per-bucket latest times (all buckets covered by this point)
+    return min(checked_ats)
+
+
 @app.command("run")
 def run_restore(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
@@ -62,6 +94,11 @@ def run_restore(
     to_point_in_time: str | None = typer.Option(
         None, "--to-point-in-time",
         help="ISO datetime for DynamoDB PITR, e.g. 2026-03-15T09:00:00Z (required when restoring tables)",
+    ),
+    latest: bool = typer.Option(
+        False, "--latest",
+        help="Auto-detect restore point from the most recent successful S3 backup run. "
+             "Mutually exclusive with --to-point-in-time.",
     ),
     prefix: str | None = typer.Option(None, help="Restore only objects under this S3 key prefix"),
     no_pitr: bool = typer.Option(
@@ -88,6 +125,10 @@ def run_restore(
     DynamoDB restores are submit-and-return (async). Use 'restore status'
     to check progress.
     """
+    if latest and to_point_in_time:
+        typer.echo("Error: --latest and --to-point-in-time are mutually exclusive.", err=True)
+        raise typer.Exit(1)
+
     state = get_state()
     if dry_run:
         state.dry_run = True
@@ -134,6 +175,15 @@ def run_restore(
             "Select one with --tables.", err=True
         )
         raise typer.Exit(1)
+
+    if latest:
+        to_point_in_time = _detect_latest_restore_point(session, config, source, source_config, account_id)
+        if not to_point_in_time:
+            typer.echo(
+                "Error: --latest: no successful backup run state found for any configured bucket.", err=True
+            )
+            raise typer.Exit(1)
+        typer.echo(f"  Auto-detected restore point: {to_point_in_time}  (from last successful S3 backup)")
 
     if effective_table_arns and not to_point_in_time and not state.dry_run:
         typer.echo(
