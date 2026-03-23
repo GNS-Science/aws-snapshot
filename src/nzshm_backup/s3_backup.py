@@ -84,13 +84,23 @@ def get_region(session: boto3.Session) -> str:
 
 
 def bucket_exists(s3_client, bucket: str) -> bool:
-    """Check if S3 bucket exists."""
+    """Check if S3 bucket exists.
+
+    A 403 response means the bucket exists but the caller lacks s3:ListBucket on it —
+    common when checking a restore-target bucket via a cross-account role that has
+    s3:CreateBucket but not yet s3:ListBucket (role policy not yet updated).  Treat
+    403 as "exists" so the caller skips creation and proceeds to the policy apply step.
+    """
     try:
         s3_client.head_bucket(Bucket=bucket)
         return True
     except ClientError as e:
-        if e.response["Error"]["Code"] == "404":
+        code = e.response["Error"]["Code"]
+        if code == "404":
             return False
+        if code == "403":
+            # Bucket exists; caller lacks HeadBucket permission.
+            return True
         raise
 
 

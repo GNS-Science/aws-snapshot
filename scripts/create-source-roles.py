@@ -151,11 +151,12 @@ def build_restore_policy(
 
     if s3_buckets:
         restore_bucket_arns = [f"arn:aws:s3:::{make_restore_bucket_name(b)}" for b in s3_buckets]
-        # Create and tag the restore target bucket if it doesn't exist yet.
+        # Create, tag, and check existence of the restore target bucket.
+        # s3:ListBucket is required for HeadBucket (used by bucket_exists).
         statements.append({
             "Sid": "CreateRestoreTargetBucket",
             "Effect": "Allow",
-            "Action": ["s3:CreateBucket", "s3:PutBucketTagging"],
+            "Action": ["s3:CreateBucket", "s3:PutBucketTagging", "s3:ListBucket", "s3:GetBucketLocation"],
             "Resource": restore_bucket_arns,
         })
         # Needed so restore run can apply AllowNzshmBatchRoleWrite at runtime (self-contained restore).
