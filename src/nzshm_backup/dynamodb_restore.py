@@ -122,9 +122,18 @@ def restore_dynamodb_table(
             f"({result.restore_arn})"
         )
     except ClientError as e:
-        logger.error(f"Restore failed for {source_table_arn}: {e}")
+        code = e.response["Error"]["Code"]
+        if code == "TableAlreadyExistsException":
+            msg = (
+                f"Target table '{target_table_name}' already exists. "
+                "Delete it first or choose a different target name."
+            )
+            logger.error(msg)
+            result.errors.append({"table_arn": source_table_arn, "error": msg})
+        else:
+            logger.error(f"Restore failed for {source_table_arn}: {e}")
+            result.errors.append({"table_arn": source_table_arn, "error": str(e)})
         result.status = "FAILED"
-        result.errors.append({"table_arn": source_table_arn, "error": str(e)})
         return result
 
     return result

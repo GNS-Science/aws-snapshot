@@ -1,10 +1,18 @@
 """Status command - current backup state."""
 
 import json
+from datetime import datetime
 from typing import Literal
 
 import boto3
 import typer
+
+
+def _fmt_dt(dt) -> str:
+    """Format datetime (or ISO string) in local timezone."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
 from nzshm_backup.config import load_config
 from nzshm_backup.run_state import read_run_state
@@ -78,7 +86,7 @@ def _print_source_status(
                 detail = dynamodb_client.describe_export(ExportArn=latest["ExportArn"])
                 desc = detail["ExportDescription"]
                 start_time = desc.get("StartTime")
-                ts = f"  [{start_time.strftime('%Y-%m-%d %H:%M UTC')}]" if start_time else ""
+                ts = f"  [{_fmt_dt(start_time)}]" if start_time else ""
                 typer.echo(f"    {status_icon} {table_name}: {status}{ts}")
 
                 if status == "FAILED":
@@ -105,9 +113,9 @@ def _print_source_status(
             try:
                 state = read_run_state(session, backup_bucket)
                 if state:
-                    checked = state.get("checked_at", "")[:16].replace("T", " ")
+                    checked = _fmt_dt(state["checked_at"]) if state.get("checked_at") else "unknown"
                     st = state.get("status", "unknown")
-                    typer.echo(f"    last run: {checked} UTC — {st}")
+                    typer.echo(f"    last run: {checked} — {st}")
 
                 jobs = _get_recent_batch_jobs(s3control, account_id, source_bucket)
                 if not jobs:
@@ -118,7 +126,7 @@ def _print_source_status(
                     icon = BATCH_STATUS_ICON.get(status, "?")
                     job_id = job.get("JobId", "")[:8]
                     created = job.get("CreationTime")
-                    ts = f"  [{created.strftime('%Y-%m-%d %H:%M UTC')}]" if created else ""
+                    ts = f"  [{_fmt_dt(created)}]" if created else ""
                     progress = job.get("ProgressSummary", {})
                     total = progress.get("TotalNumberOfTasks", 0)
                     failed = progress.get("NumberOfTasksFailed", 0)
@@ -147,14 +155,14 @@ def _print_source_status(
             )
             state = read_run_state(session, backup_bucket)
             if state:
-                checked = state.get("checked_at", "")[:16].replace("T", " ")
+                checked = _fmt_dt(state["checked_at"]) if state.get("checked_at") else "unknown"
                 st = state.get("status", "unknown")
                 detail = ""
                 if st == "completed":
                     detail = f"  {state.get('objects_copied', 0)} objects copied"
                 elif st == "submitted":
                     detail = f"  job/{state.get('batch_job_id', '')[:8]}…  {state.get('objects_in_manifest', 0)} objects"
-                typer.echo(f"    last run: {checked} UTC — {st}{detail}")
+                typer.echo(f"    last run: {checked} — {st}{detail}")
 
 
 @app.callback(invoke_without_command=True)
