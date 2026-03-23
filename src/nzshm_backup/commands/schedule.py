@@ -61,11 +61,15 @@ def add_schedule(
             "minutely: --time is ignored entirely."
         ),
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Add (create or update) an EventBridge schedule rule for a backup source.
 
     Times must be specified in UTC. NZST is UTC+12, NZDT is UTC+13.
     """
+    state = get_state()
+    if dry_run:
+        state.dry_run = True
     if frequency == "minutely":
         cron_expr = "rate(1 minute)"
     else:
@@ -86,6 +90,10 @@ def add_schedule(
     rule_name = _rule_name(source, frequency)
     session = boto3.Session()
     events = session.client("events")
+
+    if state.dry_run:
+        typer.echo(f"[DRY RUN] Would create/update rule '{rule_name}': {cron_expr}")
+        return
 
     events.put_rule(
         Name=rule_name,
@@ -145,9 +153,16 @@ def remove_schedule(
     frequency: Literal["daily", "weekly", "hourly", "minutely"] = typer.Option(
         ..., help="Backup frequency"
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Remove an EventBridge schedule rule and deregister its Lambda target."""
+    state = get_state()
+    if dry_run:
+        state.dry_run = True
     rule_name = _rule_name(source, frequency)
+    if state.dry_run:
+        typer.echo(f"[DRY RUN] Would delete rule '{rule_name}' and its targets")
+        return
     session = boto3.Session()
     events = session.client("events")
 
@@ -199,14 +214,21 @@ def enable(
         None,
         help="Frequency to enable (daily, weekly, hourly, minutely). Defaults to all.",
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Enable backup EventBridge schedule rule(s) for a source."""
+    state = get_state()
+    if dry_run:
+        state.dry_run = True
     frequencies = [frequency] if frequency else ["daily", "weekly", "hourly", "minutely"]
     session = boto3.Session()
     events = session.client("events")
 
     for freq in frequencies:
         rule_name = _rule_name(source, freq)
+        if state.dry_run:
+            typer.echo(f"[DRY RUN] Would enable: {rule_name}")
+            continue
         try:
             events.enable_rule(Name=rule_name)
             typer.echo(f"Enabled: {rule_name}")
@@ -224,14 +246,21 @@ def disable(
         None,
         help="Frequency to disable (daily, weekly, hourly, minutely). Defaults to all.",
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Disable backup EventBridge schedule rule(s) for a source."""
+    state = get_state()
+    if dry_run:
+        state.dry_run = True
     frequencies = [frequency] if frequency else ["daily", "weekly", "hourly", "minutely"]
     session = boto3.Session()
     events = session.client("events")
 
     for freq in frequencies:
         rule_name = _rule_name(source, freq)
+        if state.dry_run:
+            typer.echo(f"[DRY RUN] Would disable: {rule_name}")
+            continue
         try:
             events.disable_rule(Name=rule_name)
             typer.echo(f"Disabled: {rule_name}")

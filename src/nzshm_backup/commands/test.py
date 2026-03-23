@@ -20,6 +20,7 @@ _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
 @app.command("integrity")
 def test_integrity(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Validate backup integrity: S3 source ↔ backup comparison, DynamoDB PITR + export check.
 
@@ -164,6 +165,7 @@ def test_restore(
              "Requires general.s3_batch_role_arn in config. Slower (Batch has per-job "
              "setup overhead) but validates the full production restore code path and IAM.",
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Verify backup restorability without triggering a full restore.
 
@@ -184,6 +186,8 @@ def test_restore(
     Exits with code 1 if any check fails.
     """
     state = get_state()
+    if dry_run:
+        state.dry_run = True
 
     try:
         config = load_config()
@@ -435,6 +439,7 @@ def _delete_temp_bucket(s3_client, bucket_name: str) -> None:
 def test_full_drill(
     source: str = typer.Option(..., help="Data source to test"),
     isolated_environment: bool = typer.Option(False, help="Restore to isolated environment"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
 ):
     """Run quarterly full disaster recovery drill."""
     typer.echo(f"Full DR drill - coming soon for {source}")
