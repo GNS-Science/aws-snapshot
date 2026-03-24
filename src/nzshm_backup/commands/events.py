@@ -12,7 +12,8 @@ from nzshm_backup.s3_backup import get_account_id
 app = typer.Typer()
 
 _EVENT_ICONS = {
-    "backup_run": "📦",
+    "backup_run": "·",
+    "backup_run_complete": "📦",
     "restore_submitted": "⬇",
     "restore_completed": "✓",
     "pitr_reenabled": "🔒",
@@ -111,6 +112,14 @@ def events(
         elif event_type == "pitr_reenabled":
             table = details.get("table_arn", "?").split("/")[-1]
             typer.echo(f"  {icon} {ts}  pitr_reenabled  {table}")
+
+        elif event_type == "backup_run_complete":
+            ok = "✓" if details.get("success") else "✗"
+            s3 = details.get("s3_buckets", 0)
+            ddb = details.get("dynamodb_tables", 0)
+            errors = details.get("errors", [])
+            err_str = f"  {len(errors)} error(s)" if errors else ""
+            typer.echo(f"  {icon} {ts}  backup_run_complete  {ok}  {s3} S3 bucket(s)  {ddb} DynamoDB table(s){err_str}")
 
         elif event_type == "test_restore":
             bucket = details.get("bucket", "?")

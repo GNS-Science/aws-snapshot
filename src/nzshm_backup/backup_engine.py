@@ -234,4 +234,19 @@ def run_backup_source(
                 [f"{e['table_arn']}: {e['error']}" for e in export_result.errors]
             )
 
+    if not dry_run and source_config.s3_buckets:
+        event_bucket = source_config.get_backup_bucket_name(
+            source_config.s3_buckets[0].label, region, source_account_id, source_alias
+        )
+        append_event(
+            session, event_bucket, "backup_run_complete", source_alias,
+            details={
+                "success": result.success,
+                "s3_buckets": len(source_config.s3_buckets),
+                "dynamodb_tables": len(source_config.dynamodb_tables),
+                "errors": result.errors,
+            },
+            actor=actor,
+        )
+
     return result
