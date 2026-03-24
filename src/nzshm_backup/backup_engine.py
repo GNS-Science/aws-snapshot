@@ -7,6 +7,7 @@ import boto3
 
 from nzshm_backup.config.models import ConfigModel
 from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
+from nzshm_backup.event_log import append_event
 from nzshm_backup.run_state import write_run_state
 from nzshm_backup.s3_backup import backup_source, get_cross_account_session
 from nzshm_backup.s3_batch import batch_backup_source
@@ -57,7 +58,9 @@ def run_backup_source(
     source_config = config.sources[source_alias]  # raises KeyError on unknown alias
     region = config.general.region
 
-    account_id = session.client("sts").get_caller_identity()["Account"]
+    caller = session.client("sts").get_caller_identity()
+    account_id = caller["Account"]
+    actor = caller.get("Arn")
 
     source_session = (
         get_cross_account_session(session, source_config.source_account_role_arn)
@@ -109,6 +112,17 @@ def run_backup_source(
                         batch_job_id=batch_result.job_id,
                         objects_in_manifest=batch_result.objects_in_manifest,
                     )
+                    append_event(
+                        session, backup_bucket_name, "backup_run", source_alias,
+                        details={
+                            "bucket": bucket_name,
+                            "mode": "batch",
+                            "status": batch_result.status.lower(),
+                            "batch_job_id": batch_result.job_id,
+                            "objects_in_manifest": batch_result.objects_in_manifest,
+                        },
+                        actor=actor,
+                    )
             else:
                 sync_result = backup_source(
                     session=session,
@@ -130,11 +144,23 @@ def run_backup_source(
                     }
                 )
                 if not dry_run:
+                    status = "completed" if sync_result.objects_copied > 0 else "skipped"
                     write_run_state(
                         session, backup_bucket_name, bucket_name,
-                        status="completed" if sync_result.objects_copied > 0 else "skipped",
+                        status=status,
                         objects_copied=sync_result.objects_copied,
                         bytes_transferred=sync_result.bytes_transferred,
+                    )
+                    append_event(
+                        session, backup_bucket_name, "backup_run", source_alias,
+                        details={
+                            "bucket": bucket_name,
+                            "mode": "incremental",
+                            "status": status,
+                            "objects_copied": sync_result.objects_copied,
+                            "bytes_transferred": sync_result.bytes_transferred,
+                        },
+                        actor=actor,
                     )
 
         except Exception as e:
