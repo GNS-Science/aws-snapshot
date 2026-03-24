@@ -3,80 +3,99 @@
 The `backup test` subcommand provides integrity checks and round-trip restore
 tests to validate that backups are readable and consistent.
 
-## Integrity check
+## Feature status
 
-Compares the source and backup buckets/tables without restoring anything:
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `test integrity` — S3 object comparison | ✅ Implemented | Full ETag diff; excludes operational prefixes |
+| `test integrity` — DynamoDB PITR check | ✅ Implemented | Read-only; checks PITR enabled + completed exports exist |
+| `test restore` — S3 direct copy sample | ✅ Implemented | Copies N objects to temp bucket, verifies ETags, cleans up |
+| `test restore` — S3 Batch Operations path | ✅ Implemented | `--use-batch`; validates production IAM + Batch pipeline |
+| `test restore` — DynamoDB restorability | ✅ Implemented | Read-only; checks PITR + export bucket accessible |
+| Event log (`test_restore` events) | ✅ Implemented | Emits passed/failed/etag_mismatch to `_events/` |
+| `test full-drill` | ⏳ Not yet implemented | Planned quarterly DR drill |
+| Automated scheduling via EventBridge | ⏳ Not yet implemented | Must be triggered manually for now |
+| Glacier/Deep Archive object test path | ⏳ Not yet implemented | Archived objects are skipped in sample restore |
 
-```bash
-backup test integrity --source toshi
-```
+---
 
-For S3 buckets this compares:
-- Object counts (source vs backup)
-- ETag values for a sample of objects
+## `backup test integrity`
 
-For DynamoDB tables this checks:
-- Whether a recent export exists in the backup bucket
-- Export metadata (item count, status)
-
-Useful before a DR drill to confirm the backup is in good shape.
-
-## Sample restore test
-
-Exercises the actual restore path on a small sample:
+Validates that backup data matches source without performing a restore.
 
 ```bash
-# S3 sample restore (downloads and verifies a subset of objects)
-backup test restore --source toshi
-
-# Force S3 Batch Operations path for the sample (tests IAM + Batch pipeline)
-backup test restore --source toshi --use-batch
-
-# DynamoDB round-trip restore (submit + wait + verify item count)
-backup test restore --source toshi --tables
+backup test integrity --source arkivalist
 ```
 
-The sample restore:
-1. Selects a representative sample of objects from each backup bucket
-2. Copies them to a temporary restore bucket
-3. Verifies object size and ETag against the backup
-4. Cleans up the temporary bucket
+**S3 buckets:**
 
-Results are printed to stdout and can be captured as JSON with `--output json`.
+- Compares every non-operational object in the source bucket against the backup
+- Flags **missing objects** (in source but not in backup)
+- Flags **ETag mismatches** (possible backup poisoning — source mutation propagated to backup)
+- Objects in backup but not in source are intentionally **not** flagged — the backup retains deleted
+  objects until the lifecycle policy expires them
+- Operational prefixes excluded from both sides: `_state/`, `_manifests/`, `_batch-reports/`, `_events/`
+
+**DynamoDB tables:**
+
+- Confirms PITR is enabled on each table (prerequisite for point-in-time restore)
+- Counts all completed exports (paginated — shows the real total, not a capped number)
+- Shows latest export timestamp
+
+Exits with code 1 if any discrepancy or missing protection is found.
+
+---
+
+## `backup test restore`
+
+Exercises the actual restore path on a small sample without a full restore.
+
+```bash
+# S3 sample restore — direct copy (default)
+backup test restore --source arkivalist
+
+# S3 sample restore — S3 Batch Operations path (validates production IAM + code path)
+backup test restore --source arkivalist --use-batch
+
+# Control sample size
+backup test restore --source arkivalist --sample-size 20
+```
+
+**S3 testing:**
+
+1. Samples N objects from each backup bucket (default 10; reduced if fewer available)
+2. Creates a temporary bucket (`bb-restore-test-{ts}-{account_id}`)
+3. Copies objects via direct copy or S3 Batch Operations
+4. Verifies ETags match the backup
+5. Deletes the temporary bucket (always, even on failure)
+
+Objects in archived storage tiers (Glacier, Glacier IR, Deep Archive) are automatically skipped —
+they require a separate restore request before they can be copied.
+
+**DynamoDB testing (read-only, runs even with `--dry-run`):**
+
+- Confirms PITR is enabled (prerequisite for point-in-time restore)
+- Checks the export bucket has accessible data
+
+A `test_restore` event (result: `passed`, `failed`, or `etag_mismatch`) is appended to the event
+log in the backup bucket.
+
+Exits with code 1 if any check fails.
+
+---
+
+## `backup test full-drill`
+
+Not yet implemented. Planned to run a full quarterly disaster recovery drill (restore + validate
+entire dataset to an isolated environment).
+
+---
 
 ## When to run tests
 
 | Test | Recommended cadence |
 |------|---------------------|
 | `test integrity` | Before each DR drill; after any bulk backup run |
-| `test restore` (S3 sample) | Weekly (can be automated via EventBridge) |
-| `test restore --tables` | Monthly; before any production DynamoDB restore |
-| Full DR drill | Quarterly — restore + validate entire dataset |
-
-## Automated test scheduling
-
-Test runs can be triggered by a separate EventBridge rule targeting the Lambda.
-Configuration in `testing` block of `backup-config.yaml`:
-
-```yaml
-testing:
-  weekly_small_test:
-    enabled: true
-    day: wednesday
-    time: "10:00"
-    sample_size_mb: 100
-  monthly_table_restore:
-    enabled: true
-    day: first-monday
-    time: "09:00"
-    table: ToshiAPI-FileTable
-  quarterly_full_drill:
-    enabled: true
-    months: [january, april, july, october]
-    day: 15
-    isolated_environment: true
-```
-
-!!! note
-    Automated test scheduling via EventBridge is planned but not yet wired up.
-    Currently tests must be triggered manually from the CLI.
+| `test restore` (direct copy) | Weekly |
+| `test restore --use-batch` | Monthly — validates the production restore IAM path |
+| `test full-drill` | Quarterly (once implemented) |
