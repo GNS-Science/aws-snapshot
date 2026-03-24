@@ -7,6 +7,7 @@ import typer
 from botocore.exceptions import ClientError
 
 from nzshm_backup.config import load_config
+from nzshm_backup.event_log import append_event
 from nzshm_backup.dynamodb_restore import (
     PITR_WATCHER_RULE_NAME,
     describe_restore_status,
@@ -48,6 +49,15 @@ def _parse_point_in_time(ts: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _primary_backup_bucket(config, source: str, source_config, source_account_id: str) -> str | None:
+    """Return the first configured backup bucket for the source (used for event logging)."""
+    if not source_config.s3_buckets:
+        return None
+    return source_config.get_backup_bucket_name(
+        source_config.s3_buckets[0].label, config.general.region, source_account_id, source
+    )
 
 
 def _detect_latest_restore_point(
@@ -330,6 +340,18 @@ def run_restore(
 
             if result.success:
                 typer.echo(f"  ✓ Restore submitted: {dest_table} ({result.restore_arn})")
+                event_bucket = _primary_backup_bucket(config, source, source_config, source_account_id)
+                if event_bucket:
+                    append_event(
+                        session, event_bucket, "restore_submitted", source,
+                        details={
+                            "table_arn": table_arn,
+                            "dest_table": dest_table,
+                            "restore_point": restore_point.isoformat(),
+                            "restore_arn": result.restore_arn,
+                            "triggered_by": "--latest" if latest else "--to-point-in-time",
+                        },
+                    )
                 if not no_pitr and result.restore_arn:
                     add_pending_restore(
                         ssm_client,
