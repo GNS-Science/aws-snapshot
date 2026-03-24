@@ -34,10 +34,11 @@ def test_pitr_enabled_when_table_active():
     """ACTIVE table → PITR enabled, informational tags applied, entry removed from remaining."""
     dynamo = _make_dynamodb_client("ACTIVE")
 
-    remaining, still_pending = _process_source_entries(dynamo, [_ENTRY], "test-source")
+    remaining, completed, still_pending = _process_source_entries(dynamo, [_ENTRY], "test-source")
 
     assert still_pending == 0
     assert remaining == []
+    assert completed == [_ENTRY]
     dynamo.update_continuous_backups.assert_called_once_with(
         TableName=TABLE_NAME,
         PointInTimeRecoverySpecification={"PointInTimeRecoveryEnabled": True},
@@ -54,10 +55,11 @@ def test_still_pending_when_table_creating():
     """CREATING table → entry kept in remaining, still_pending=1."""
     dynamo = _make_dynamodb_client("CREATING")
 
-    remaining, still_pending = _process_source_entries(dynamo, [_ENTRY], "test-source")
+    remaining, completed, still_pending = _process_source_entries(dynamo, [_ENTRY], "test-source")
 
     assert still_pending == 1
     assert remaining == [_ENTRY]
+    assert completed == []
     dynamo.update_continuous_backups.assert_not_called()
 
 
@@ -65,10 +67,11 @@ def test_no_entries():
     """Empty entry list → nothing to do."""
     dynamo = _make_dynamodb_client()
 
-    remaining, still_pending = _process_source_entries(dynamo, [], "test-source")
+    remaining, completed, still_pending = _process_source_entries(dynamo, [], "test-source")
 
     assert still_pending == 0
     assert remaining == []
+    assert completed == []
     dynamo.describe_table.assert_not_called()
 
 
@@ -77,10 +80,11 @@ def test_describe_table_error_keeps_entry_pending():
     dynamo = MagicMock()
     dynamo.describe_table.side_effect = Exception("Table not found")
 
-    remaining, still_pending = _process_source_entries(dynamo, [_ENTRY], "test-source")
+    remaining, completed, still_pending = _process_source_entries(dynamo, [_ENTRY], "test-source")
 
     assert still_pending == 1
     assert remaining == [_ENTRY]
+    assert completed == []
     dynamo.update_continuous_backups.assert_not_called()
 
 
@@ -99,11 +103,13 @@ def test_mixed_status_entries():
         {"Table": {"TableStatus": "CREATING"}},
     ]
 
-    remaining, still_pending = _process_source_entries(dynamo, entries, "src")
+    remaining, completed, still_pending = _process_source_entries(dynamo, entries, "src")
 
     assert still_pending == 1
     assert len(remaining) == 1
     assert remaining[0]["restore_arn"] == arn_creating
+    assert len(completed) == 1
+    assert completed[0]["restore_arn"] == arn_active
     assert dynamo.update_continuous_backups.call_count == 1
 
 
@@ -153,10 +159,11 @@ def test_handler_disables_rule_when_ssm_empty(mock_session_cls, mock_account_id,
     events.disable_rule.assert_called_once_with(Name="nzshm-backup-pitr-watcher")
 
 
+@patch("nzshm_backup.lambda_pitr_watcher.append_event")
 @patch("nzshm_backup.lambda_pitr_watcher._get_config")
 @patch("nzshm_backup.lambda_pitr_watcher.get_account_id", return_value="123456789012")
 @patch("boto3.Session")
-def test_handler_enables_pitr_and_removes_entry(mock_session_cls, mock_account_id, mock_config):
+def test_handler_enables_pitr_and_removes_entry(mock_session_cls, mock_account_id, mock_config, mock_append):
     """ACTIVE table in SSM → PITR enabled, entry removed, rule disabled."""
     import json
     mock_config.return_value = _make_config({"test-source": _make_source_config()})

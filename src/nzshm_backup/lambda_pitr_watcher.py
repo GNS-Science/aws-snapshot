@@ -9,6 +9,7 @@ import boto3
 from nzshm_backup.config.loader import load_config, load_config_from_env, load_config_from_ssm
 from nzshm_backup.config.models import ConfigModel
 from nzshm_backup.dynamodb_restore import PITR_WATCHER_RULE_NAME
+from nzshm_backup.event_log import append_event
 from nzshm_backup.logging_config import setup_logging
 from nzshm_backup.restore_state import read_pending_restores, write_pending_restores
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
@@ -35,8 +36,8 @@ def _process_source_entries(
     dynamodb_client,
     entries: list[dict],
     source_alias: str,
-) -> tuple[list[dict], int]:
-    """Enable PITR on any ACTIVE tables; return (remaining_entries, still_pending).
+) -> tuple[list[dict], list[dict], int]:
+    """Enable PITR on any ACTIVE tables; return (remaining_entries, completed_entries, still_pending).
 
     Args:
         dynamodb_client: boto3 DynamoDB client scoped to the source account.
@@ -44,9 +45,10 @@ def _process_source_entries(
         source_alias:    Human-readable source name for log messages.
 
     Returns:
-        (remaining, still_pending): entries not yet completed and count thereof.
+        (remaining, completed, still_pending): entries not yet done, entries just completed, count pending.
     """
     remaining = []
+    completed = []
     still_pending = 0
 
     for entry in entries:
@@ -72,6 +74,7 @@ def _process_source_entries(
                 except Exception as tag_err:
                     logger.warning(f"[{source_alias}] Could not tag {table_name}: {tag_err}")
                 logger.info(f"[{source_alias}] PITR enabled and tagged: {table_name}")
+                completed.append(entry)
                 # Entry is done — do not add to remaining
             else:
                 still_pending += 1
@@ -83,7 +86,7 @@ def _process_source_entries(
             still_pending += 1
             remaining.append(entry)
 
-    return remaining, still_pending
+    return remaining, completed, still_pending
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -131,13 +134,36 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             else session
         )
 
-        remaining, still_pending = _process_source_entries(
+        remaining, completed, still_pending = _process_source_entries(
             dynamodb_client=source_session.client("dynamodb"),
             entries=entries,
             source_alias=source_alias,
         )
         remaining_all.extend(remaining)
         total_still_pending += still_pending
+
+        # Emit restore_completed and pitr_reenabled events for tables that just finished
+        if completed and source_config.s3_buckets:
+            event_bucket = source_config.get_backup_bucket_name(
+                source_config.s3_buckets[0].label,
+                config.general.region,
+                source_account_id,
+                source_alias,
+            )
+            for entry in completed:
+                append_event(
+                    session, event_bucket, "restore_completed", source_alias,
+                    details={
+                        "dest_table": entry["restore_arn"].split("/")[-1],
+                        "restore_arn": entry["restore_arn"],
+                        "source_table_arn": entry.get("source_table_arn", ""),
+                        "restore_point": entry.get("restore_point", ""),
+                    },
+                )
+                append_event(
+                    session, event_bucket, "pitr_reenabled", source_alias,
+                    details={"table_arn": entry["restore_arn"]},
+                )
 
     write_pending_restores(ssm_client, remaining_all)
 
