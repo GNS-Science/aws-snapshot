@@ -179,7 +179,17 @@ def run_restore(
     # If either is given, it selects only that type — specifying --buckets
     # does not implicitly also restore all tables, and vice versa.
     if buckets or tables:
-        effective_buckets = [b for b in source_config.s3_buckets if b.label in buckets] if buckets else []
+        def _bucket_matches(b, buckets_set: set[str]) -> bool:
+            source_name = b.arn.split(":::")[-1]
+            backup_name = source_config.get_backup_bucket_name(
+                b.label, region, source_account_id, source
+            )
+            return bool(buckets_set & {b.label, source_name, backup_name})
+
+        effective_buckets = (
+            [b for b in source_config.s3_buckets if _bucket_matches(b, set(buckets))]
+            if buckets else []
+        )
         effective_table_arns = (
             [arn for arn in source_config.dynamodb_tables if arn.split("/")[-1] in tables]
             if tables else []
