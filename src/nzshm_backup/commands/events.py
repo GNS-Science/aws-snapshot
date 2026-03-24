@@ -88,7 +88,7 @@ def events(
 
         # Format a concise summary line per event type
         if event_type == "backup_run":
-            bucket = details.get("bucket", "?")
+            target = details.get("bucket") or details.get("table", "?")
             status = details.get("status", "?")
             mode = details.get("mode", "")
             extra = ""
@@ -96,7 +96,9 @@ def events(
                 extra = f"  {details['objects_copied']} objects"
             elif details.get("objects_in_manifest") is not None:
                 extra = f"  {details['objects_in_manifest']} objects in manifest"
-            typer.echo(f"  {icon} {ts}  backup_run  {bucket}  [{mode}] {status}{extra}")
+            elif details.get("export_arn"):
+                extra = f"  {details['export_arn'].split('/')[-1]}"
+            typer.echo(f"  {icon} {ts}  backup_run  {target}  [{mode}] {status}{extra}")
 
         elif event_type == "restore_submitted":
             table = details.get("dest_table", "?")
