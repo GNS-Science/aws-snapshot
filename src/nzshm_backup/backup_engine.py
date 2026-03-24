@@ -211,6 +211,24 @@ def run_backup_source(
             }
         )
 
+        if not dry_run and export_result.success:
+            # Use the first S3 backup bucket as the event log destination
+            s3_buckets = source_config.s3_buckets
+            if s3_buckets:
+                event_bucket = source_config.get_backup_bucket_name(
+                    s3_buckets[0].label, region, source_account_id, source_alias
+                )
+                append_event(
+                    session, event_bucket, "backup_run", source_alias,
+                    details={
+                        "table": table_name,
+                        "mode": "dynamodb_export",
+                        "status": "submitted",
+                        "export_arn": export_result.export_arn,
+                    },
+                    actor=actor,
+                )
+
         if not export_result.success:
             result.errors.extend(
                 [f"{e['table_arn']}: {e['error']}" for e in export_result.errors]
