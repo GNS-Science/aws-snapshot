@@ -8,7 +8,7 @@ from typing import Any, Literal
 logger = logging.getLogger(__name__)
 
 # Objects written by the backup tooling itself; no counterpart in source buckets.
-OPERATIONAL_PREFIXES = ("_state/", "_manifests/", "_batch-reports/")
+OPERATIONAL_PREFIXES = ("_state/", "_manifests/", "_batch-reports/", "_events/")
 
 
 def _is_operational(key: str) -> bool:

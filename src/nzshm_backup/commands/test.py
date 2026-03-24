@@ -3,6 +3,13 @@
 import random
 from datetime import datetime, timezone
 
+
+def _fmt_dt(dt) -> str:
+    """Format datetime (or ISO string) in local timezone."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+
 import boto3
 import typer
 
@@ -121,7 +128,7 @@ def test_integrity(
                 pitr = resp["ContinuousBackupsDescription"]["PointInTimeRecoveryDescription"]
                 pitr_status = pitr.get("PointInTimeRecoveryStatus", "DISABLED")
                 latest = pitr.get("LatestRestorableDateTime")
-                ts = f"  [latest: {latest.strftime('%Y-%m-%d %H:%M UTC')}]" if latest else ""
+                ts = f"  [latest: {_fmt_dt(latest)}]" if latest else ""
                 if pitr_status == "ENABLED":
                     typer.echo(f"    ✓ PITR enabled{ts}")
                 else:
@@ -131,15 +138,22 @@ def test_integrity(
                 typer.echo(f"    ✗ Could not check PITR: {e}", err=True)
                 any_failure = True
 
-            # Check recent exports
+            # Check recent exports — paginate to get the real count
             try:
-                exports_resp = dynamodb_client.list_exports(TableArn=table_arn, MaxResults=5)
-                exports = exports_resp.get("ExportSummaries", [])
+                exports: list[dict] = []
+                kwargs: dict = {"TableArn": table_arn}
+                while True:
+                    resp = dynamodb_client.list_exports(**kwargs)
+                    exports.extend(resp.get("ExportSummaries", []))
+                    next_token = resp.get("NextToken")
+                    if not next_token:
+                        break
+                    kwargs["NextToken"] = next_token
                 completed = [e for e in exports if e.get("ExportStatus") == "COMPLETED"]
                 if completed:
                     latest_export = max(completed, key=lambda e: e.get("ExportTime") or "")
                     export_ts = latest_export.get("ExportTime")
-                    ts = f"  [{export_ts.strftime('%Y-%m-%d %H:%M UTC')}]" if export_ts else ""
+                    ts = f"  [latest: {_fmt_dt(export_ts)}]" if export_ts else ""
                     typer.echo(f"    ✓ {len(completed)} completed export(s) found{ts}")
                 else:
                     typer.echo("    ✗ no completed exports found — export backup is missing")
@@ -405,7 +419,7 @@ def test_restore(
                 pitr = resp["ContinuousBackupsDescription"]["PointInTimeRecoveryDescription"]
                 if pitr.get("PointInTimeRecoveryStatus") == "ENABLED":
                     latest = pitr.get("LatestRestorableDateTime")
-                    ts = f"  [latest: {latest.strftime('%Y-%m-%d %H:%M UTC')}]" if latest else ""
+                    ts = f"  [latest: {_fmt_dt(latest)}]" if latest else ""
                     typer.echo(f"    ✓ PITR enabled{ts}")
                 else:
                     typer.echo("    ✗ PITR DISABLED — point-in-time restore unavailable")
