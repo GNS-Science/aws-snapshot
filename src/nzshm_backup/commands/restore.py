@@ -241,11 +241,12 @@ def run_restore(
         source_bucket_name = bucket_cfg.arn.split(":::")[-1]
         dest_bucket = source_bucket_name if original else make_restore_bucket_name(source_bucket_name)
         prefix_info = f" (prefix: {prefix})" if prefix else ""
-        typer.echo(f"  Restoring S3: {backup_bucket} → {dest_bucket}{prefix_info}")
 
         if state.dry_run:
-            typer.echo(f"  [DRY RUN] Would restore {backup_bucket} → {dest_bucket}")
+            typer.echo(f"  [DRY RUN] Would restore {backup_bucket} → {dest_bucket}{prefix_info}")
             continue
+
+        typer.echo(f"  Restoring S3: {backup_bucket} → {dest_bucket}{prefix_info}")
 
         source_s3_client = source_session_s3.client("s3")
 
