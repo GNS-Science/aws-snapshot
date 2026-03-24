@@ -1,6 +1,7 @@
 """Schedule management commands (EventBridge)."""
 
 import json
+from datetime import timezone
 from typing import Literal
 
 import boto3
@@ -9,12 +10,51 @@ from botocore.exceptions import ClientError
 
 from nzshm_backup.config.loader import load_config
 from nzshm_backup.state import get_state
+from nzshm_backup.time_utils import parse_datetime
 
 app = typer.Typer()
 
 
 def _rule_name(source: str, frequency: str) -> str:
     return f"nzshm-backup-{source}-{frequency}"
+
+
+def _parse_schedule_time(time_str: str) -> tuple[int, int]:
+    """Parse a time string and return (hour_utc, minute_utc).
+
+    Accepts:
+    - ``HH:MM``             — treated as UTC
+    - ``HH:MM TZ``          — e.g. ``12:15 NZDT``
+    - ``YYYY-MM-DD HH:MM TZ`` — date is ignored; time+tz converted to UTC
+    - ISO 8601 datetime     — time+offset converted to UTC
+
+    Raises ValueError with a user-friendly message on failure.
+    """
+    ts = time_str.strip()
+    # Plain HH:MM — treat as UTC directly (fast path, no import needed)
+    parts = ts.split(":")
+    if len(parts) == 2 and " " not in ts:
+        try:
+            hh, mm = int(parts[0]), int(parts[1])
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                raise ValueError(f"Time out of range: {ts!r}")
+            return hh, mm
+        except ValueError as e:
+            if "out of range" in str(e):
+                raise
+            # Fall through to richer parser
+    # Localised formats — delegate to parse_datetime and convert to UTC
+    try:
+        dt = parse_datetime(ts)
+        dt_utc = dt.astimezone(timezone.utc)
+        return dt_utc.hour, dt_utc.minute
+    except ValueError:
+        pass
+    raise ValueError(
+        f"Invalid time {ts!r}. "
+        "Use HH:MM (UTC), HH:MM TZ (e.g. '12:15 NZDT'), "
+        "or a full datetime (e.g. '2026-03-29 12:15 NZDT')."
+    )
 
 
 @app.command("show")
@@ -55,7 +95,9 @@ def add_schedule(
     time: str = typer.Option(
         "02:00",
         help=(
-            "Time in HH:MM format (UTC). "
+            "Time for the schedule, converted to UTC. "
+            "Accepts: HH:MM (UTC), 'HH:MM TZ' (e.g. '12:15 NZDT'), "
+            "or a full datetime (e.g. '2026-03-29 12:15 NZDT' — date is ignored). "
             "daily/weekly: both HH and MM are used. "
             "hourly: only MM is used (HH ignored). "
             "minutely: --time is ignored entirely."
@@ -65,7 +107,8 @@ def add_schedule(
 ):
     """Add (create or update) an EventBridge schedule rule for a backup source.
 
-    Times must be specified in UTC. NZST is UTC+12, NZDT is UTC+13.
+    Times are converted to UTC. Accepts HH:MM (UTC), 'HH:MM TZ', or a full
+    datetime string like '2026-03-29 12:15 NZDT' (date part is ignored).
     """
     state = get_state()
     if dry_run:
@@ -74,10 +117,9 @@ def add_schedule(
         cron_expr = "rate(1 minute)"
     else:
         try:
-            hh, mm = time.split(":")
-            hh_int, mm_int = int(hh), int(mm)
-        except ValueError:
-            typer.echo(f"Error: Invalid time format '{time}'. Use HH:MM (UTC).", err=True)
+            hh_int, mm_int = _parse_schedule_time(time)
+        except ValueError as e:
+            typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
 
         if frequency == "daily":

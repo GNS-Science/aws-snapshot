@@ -1,6 +1,6 @@
 """Restore operations commands."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import boto3
 import typer
@@ -24,6 +24,7 @@ from nzshm_backup.s3_restore import (
     restore_s3_bucket,
 )
 from nzshm_backup.state import get_state
+from nzshm_backup.time_utils import parse_datetime
 
 app = typer.Typer()
 
@@ -43,42 +44,12 @@ def _fmt_dt(dt) -> str:
     return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
 
-# Offset lookup for common timezone abbreviations (matches _fmt_dt output)
-_TZ_ABBREV: dict[str, timezone] = {
-    "UTC":  timezone.utc,
-    "NZST": timezone(timedelta(hours=12)),
-    "NZDT": timezone(timedelta(hours=13)),
-    "AEST": timezone(timedelta(hours=10)),
-    "AEDT": timezone(timedelta(hours=11)),
-}
-
-
 def _parse_point_in_time(ts: str) -> datetime:
     """Parse a timestamp string into an aware datetime.
 
-    Accepts ISO 8601 (``2026-03-25T07:50:00+13:00``) and the display format
-    emitted by ``_fmt_dt`` (``2026-03-25 07:50 NZDT``).  Bare datetimes with
-    no timezone are assumed UTC.
+    Delegates to ``time_utils.parse_datetime``; see that function for accepted formats.
     """
-    ts = ts.strip()
-    # Try ISO 8601 first
-    try:
-        dt = datetime.fromisoformat(ts)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except ValueError:
-        pass
-    # Try display format "YYYY-MM-DD HH:MM TZ"
-    parts = ts.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1] in _TZ_ABBREV:
-        dt = datetime.strptime(parts[0], "%Y-%m-%d %H:%M")
-        return dt.replace(tzinfo=_TZ_ABBREV[parts[1]])
-    raise ValueError(
-        f"Cannot parse timestamp {ts!r}. "
-        "Use ISO 8601 (e.g. '2026-03-25T07:50:00+13:00') "
-        "or the display format shown in 'backup events' (e.g. '2026-03-25 07:50 NZDT')."
-    )
+    return parse_datetime(ts)
 
 
 def _primary_backup_bucket(config, source: str, source_config, source_account_id: str) -> str | None:
