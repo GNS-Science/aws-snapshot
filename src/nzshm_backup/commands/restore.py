@@ -116,6 +116,11 @@ def run_restore(
              "Use only for short-lived test restores that will be deleted immediately.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Delete existing restore-target DynamoDB table before restoring. "
+             "Required when the -restore table already exists from a previous run.",
+    ),
 ):
     """Execute a restore from backup.
 
@@ -299,8 +304,20 @@ def run_restore(
             table_name = table_arn.split("/")[-1]
             dest_table = target_table if target_table else make_restore_table_name(table_arn)
             if state.dry_run:
-                typer.echo(f"  [DRY RUN] Would submit PITR restore: {table_name} → {dest_table}")
+                prefix = "[DRY RUN] Would delete existing table, then " if force else "[DRY RUN] "
+                typer.echo(f"  {prefix}Would submit PITR restore: {table_name} → {dest_table}")
                 continue
+
+            if force:
+                try:
+                    dynamodb_client.delete_table(TableName=dest_table)
+                    typer.echo(f"  Deleted existing table: {dest_table} (--force)")
+                    # Wait for deletion before submitting restore
+                    waiter = dynamodb_client.get_waiter("table_not_exists")
+                    waiter.wait(TableName=dest_table, WaiterConfig={"Delay": 5, "MaxAttempts": 24})
+                except ClientError as e:
+                    if e.response["Error"]["Code"] != "ResourceNotFoundException":
+                        raise
 
             typer.echo(
                 f"  Restoring DynamoDB: {table_name} → {dest_table} "
