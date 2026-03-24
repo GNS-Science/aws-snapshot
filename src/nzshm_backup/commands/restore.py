@@ -268,6 +268,16 @@ def run_restore(
                     f"({result.objects_in_manifest} objects)"
                 )
                 typer.echo(f"    Check progress: backup restore status --source {source}")
+                append_event(
+                    session, backup_bucket, "restore_submitted", source,
+                    details={
+                        "bucket": dest_bucket,
+                        "source_bucket": backup_bucket,
+                        "mode": "batch",
+                        "batch_job_id": result.job_id,
+                        "objects_in_manifest": result.objects_in_manifest,
+                    },
+                )
             elif result.status == "SKIPPED":
                 typer.echo("  ✓ Nothing to restore — backup bucket is empty")
             else:
@@ -285,6 +295,16 @@ def run_restore(
                 typer.echo(
                     f"  ✓ {direct_result.objects_copied} objects copied ({mb:.1f} MB), "
                     f"{direct_result.objects_skipped} skipped"
+                )
+                append_event(
+                    session, backup_bucket, "restore_submitted", source,
+                    details={
+                        "bucket": dest_bucket,
+                        "source_bucket": backup_bucket,
+                        "mode": "direct_copy",
+                        "objects_copied": direct_result.objects_copied,
+                        "bytes_transferred": direct_result.bytes_transferred,
+                    },
                 )
             else:
                 typer.echo(

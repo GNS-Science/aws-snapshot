@@ -7,6 +7,7 @@ import boto3
 import typer
 
 from nzshm_backup.config import load_config
+from nzshm_backup.event_log import append_event
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES, check_bucket_integrity
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
@@ -355,13 +356,28 @@ def test_restore(
             for err in copy_errors:
                 typer.echo(f"      - {err}", err=True)
             any_failure = True
+            append_event(
+                session, backup_bucket, "test_restore", source,
+                details={"bucket": backup_bucket, "result": "failed", "mode": mode,
+                         "sample_size": len(sample), "copy_errors": len(copy_errors)},
+            )
         elif etag_mismatches:
             typer.echo(f"    ✗ {len(etag_mismatches)} ETag mismatch(es) after copy:", err=True)
             for key in etag_mismatches:
                 typer.echo(f"      - {key}", err=True)
             any_failure = True
+            append_event(
+                session, backup_bucket, "test_restore", source,
+                details={"bucket": backup_bucket, "result": "etag_mismatch", "mode": mode,
+                         "sample_size": len(sample), "etag_mismatches": len(etag_mismatches)},
+            )
         else:
             typer.echo(f"    ✓ {len(sample)} objects copied and verified")
+            append_event(
+                session, backup_bucket, "test_restore", source,
+                details={"bucket": backup_bucket, "result": "passed", "mode": mode,
+                         "sample_size": len(sample)},
+            )
 
         typer.echo("")
 
