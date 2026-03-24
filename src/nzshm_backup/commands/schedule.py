@@ -1,7 +1,7 @@
 """Schedule management commands (EventBridge)."""
 
 import json
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import boto3
@@ -19,40 +19,76 @@ def _rule_name(source: str, frequency: str) -> str:
     return f"nzshm-backup-{source}-{frequency}"
 
 
-def _parse_schedule_time(time_str: str) -> tuple[int, int]:
-    """Parse a time string and return (hour_utc, minute_utc).
+# EventBridge weekday abbreviations indexed by Python isoweekday() (1=Mon…7=Sun)
+_EB_WEEKDAY = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT", 7: "SUN"}
+_EB_TO_ISO  = {v: k for k, v in _EB_WEEKDAY.items()}
+
+
+def _human_schedule_desc(frequency: str, hh_utc: int, mm_utc: int, weekday_utc: str | None) -> str:
+    """Return a human-readable localised description of when the schedule fires."""
+    now_utc = datetime.now(timezone.utc)
+
+    if frequency == "weekly" and weekday_utc:
+        # Find the next (or current) occurrence of weekday_utc
+        target_iso = _EB_TO_ISO[weekday_utc]
+        days_ahead = (target_iso - now_utc.isoweekday()) % 7
+        anchor = (now_utc + timedelta(days=days_ahead)).replace(
+            hour=hh_utc, minute=mm_utc, second=0, microsecond=0
+        )
+        local = anchor.astimezone()
+        return f"→ {local.strftime('%A')} {local.strftime('%H:%M %Z')} locally"
+
+    if frequency in ("daily", "weekly"):
+        anchor = now_utc.replace(hour=hh_utc, minute=mm_utc, second=0, microsecond=0)
+        local = anchor.astimezone()
+        return f"→ {local.strftime('%H:%M %Z')} locally"
+
+    if frequency == "hourly":
+        anchor = now_utc.replace(hour=hh_utc, minute=mm_utc, second=0, microsecond=0)
+        local = anchor.astimezone()
+        return f"→ :{local.strftime('%M')} past each hour ({local.strftime('%Z')})"
+
+    return ""
+
+
+def _parse_schedule_time(time_str: str) -> tuple[int, int, str | None]:
+    """Parse a time string and return (hour_utc, minute_utc, eb_weekday_or_none).
+
+    ``eb_weekday`` is the EventBridge day abbreviation (e.g. ``"SAT"``) derived
+    from the UTC datetime when the input includes a date component; ``None`` when
+    only a time was supplied (caller should use a default day).
 
     Accepts:
-    - ``HH:MM``             — treated as UTC
-    - ``HH:MM TZ``          — e.g. ``12:15 NZDT``
-    - ``YYYY-MM-DD HH:MM TZ`` — date is ignored; time+tz converted to UTC
-    - ISO 8601 datetime     — time+offset converted to UTC
-
-    Raises ValueError with a user-friendly message on failure.
+    - ``HH:MM``               — treated as UTC; weekday=None
+    - ``HH:MM TZ``            — e.g. ``12:15 NZDT``; weekday=None
+    - ``YYYY-MM-DD HH:MM TZ`` — full datetime; weekday taken from UTC result
+    - ISO 8601 datetime       — full datetime; weekday taken from UTC result
     """
     ts = time_str.strip()
-    # Plain HH:MM — treat as UTC directly (fast path, no import needed)
+    has_date = len(ts) >= 10 and ts[:4].isdigit() and ts[4:5] == "-"
+
+    # Plain HH:MM — treat as UTC directly
     parts = ts.split(":")
     if len(parts) == 2 and " " not in ts:
         try:
             hh, mm = int(parts[0]), int(parts[1])
             if not (0 <= hh <= 23 and 0 <= mm <= 59):
                 raise ValueError(f"Time out of range: {ts!r}")
-            return hh, mm
+            return hh, mm, None
         except ValueError as e:
             if "out of range" in str(e):
                 raise
-            # Fall through to richer parser
     # Localised formats — delegate to parse_datetime and convert to UTC
     try:
         dt = parse_datetime(ts)
         dt_utc = dt.astimezone(timezone.utc)
-        return dt_utc.hour, dt_utc.minute
+        weekday = _EB_WEEKDAY[dt_utc.isoweekday()] if has_date else None
+        return dt_utc.hour, dt_utc.minute, weekday
     except ValueError:
         pass
     raise ValueError(
         f"Invalid time {ts!r}. "
-        "Use HH:MM (UTC), HH:MM TZ (e.g. '12:15 NZDT'), "
+        "Use HH:MM (UTC), 'HH:MM TZ' (e.g. '12:15 NZDT'), "
         "or a full datetime (e.g. '2026-03-29 12:15 NZDT')."
     )
 
@@ -97,7 +133,8 @@ def add_schedule(
         help=(
             "Time for the schedule, converted to UTC. "
             "Accepts: HH:MM (UTC), 'HH:MM TZ' (e.g. '12:15 NZDT'), "
-            "or a full datetime (e.g. '2026-03-29 12:15 NZDT' — date is ignored). "
+            "or a full datetime (e.g. '2026-03-29 12:15 NZDT'). "
+            "For weekly schedules, the date determines the day-of-week (in UTC). "
             "daily/weekly: both HH and MM are used. "
             "hourly: only MM is used (HH ignored). "
             "minutely: --time is ignored entirely."
@@ -107,8 +144,8 @@ def add_schedule(
 ):
     """Add (create or update) an EventBridge schedule rule for a backup source.
 
-    Times are converted to UTC. Accepts HH:MM (UTC), 'HH:MM TZ', or a full
-    datetime string like '2026-03-29 12:15 NZDT' (date part is ignored).
+    Times are converted to UTC. For weekly schedules, pass a full datetime
+    (e.g. '2026-03-29 12:15 NZDT') so the correct UTC day-of-week is used.
     """
     state = get_state()
     if dry_run:
@@ -117,15 +154,17 @@ def add_schedule(
         cron_expr = "rate(1 minute)"
     else:
         try:
-            hh_int, mm_int = _parse_schedule_time(time)
+            hh_int, mm_int, weekday = _parse_schedule_time(time)
         except ValueError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
 
+        day: str | None = None
         if frequency == "daily":
             cron_expr = f"cron({mm_int} {hh_int} * * ? *)"
         elif frequency == "weekly":
-            cron_expr = f"cron({mm_int} {hh_int} ? * SUN *)"
+            day = weekday or "SUN"  # default to Sunday if no date provided
+            cron_expr = f"cron({mm_int} {hh_int} ? * {day} *)"
         else:  # hourly
             cron_expr = f"cron({mm_int} * * * ? *)"
 
@@ -133,8 +172,12 @@ def add_schedule(
     session = boto3.Session()
     events = session.client("events")
 
+    human = "" if frequency == "minutely" else _human_schedule_desc(
+        frequency, hh_int, mm_int, day if frequency == "weekly" else None
+    )
+
     if state.dry_run:
-        typer.echo(f"[DRY RUN] Would create/update rule '{rule_name}': {cron_expr}")
+        typer.echo(f"[DRY RUN] Would create/update rule '{rule_name}': {cron_expr}  {human}")
         return
 
     events.put_rule(
@@ -143,7 +186,7 @@ def add_schedule(
         State="ENABLED",
         Description=f"NSHM backup schedule: {source} {frequency} at {time} UTC",
     )
-    typer.echo(f"Rule '{rule_name}' created/updated: {cron_expr}")
+    typer.echo(f"Rule '{rule_name}' created/updated: {cron_expr}  {human}")
 
     try:
         config = load_config()
