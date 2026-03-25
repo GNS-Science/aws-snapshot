@@ -24,6 +24,40 @@ _EB_WEEKDAY = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT", 7: "S
 _EB_TO_ISO  = {v: k for k, v in _EB_WEEKDAY.items()}
 
 
+def _schedule_expr_local_desc(expr: str) -> str:
+    """Parse an EventBridge schedule expression and return a localised description.
+
+    Handles:
+    - ``cron(MM HH * * ? *)``       — daily
+    - ``cron(MM HH ? * DAY *)``     — weekly
+    - ``cron(MM * * * ? *)``        — hourly (at :MM past each hour)
+    - ``rate(...)``                 — returned unchanged
+    """
+    import re
+    if expr.startswith("rate("):
+        return ""
+    m = re.match(r"cron\((\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\)", expr)
+    if not m:
+        return ""
+    mm_s, hh_s, dom, month, dow, year = m.groups()
+    # Hourly: HH field is '*'
+    if hh_s == "*":
+        try:
+            mm = int(mm_s)
+            return _human_schedule_desc("hourly", 0, mm, None)
+        except ValueError:
+            return ""
+    # Daily or weekly
+    try:
+        hh, mm = int(hh_s), int(mm_s)
+    except ValueError:
+        return ""
+    if dow != "?":
+        # weekly — dow is an EB weekday abbreviation (MON…SUN)
+        return _human_schedule_desc("weekly", hh, mm, dow if dow in _EB_TO_ISO else None)
+    return _human_schedule_desc("daily", hh, mm, None)
+
+
 def _human_schedule_desc(frequency: str, hh_utc: int, mm_utc: int, weekday_utc: str | None) -> str:
     """Return a human-readable localised description of when the schedule fires."""
     now_utc = datetime.now(timezone.utc)
@@ -113,12 +147,14 @@ def show():
         typer.echo(json.dumps(rules, indent=2))
         return
 
-    typer.echo(f"{'Rule Name':<45} {'State':<10} {'Schedule'}")
-    typer.echo("-" * 80)
+    typer.echo(f"{'Rule Name':<45} {'State':<10} {'Schedule':<30} {'Local time'}")
+    typer.echo("-" * 100)
     for rule in rules:
+        expr = rule.get("ScheduleExpression", "n/a")
+        local = _schedule_expr_local_desc(expr)
         typer.echo(
             f"{rule['Name']:<45} {rule.get('State', 'UNKNOWN'):<10} "
-            f"{rule.get('ScheduleExpression', 'n/a')}"
+            f"{expr:<30} {local}"
         )
 
 
