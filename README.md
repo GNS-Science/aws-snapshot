@@ -11,10 +11,10 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 | Phase 1 Step 1 | ✅ Complete | CLI skeleton with Typer |
 | Phase 1 Step 2 | ✅ Complete | Config system + S3 backup operations |
 | Phase 2        | ✅ Complete | DynamoDB PITR export + EventBridge scheduling |
-| Phase 3        | 🔄 Planned  | Notifications (SES/Slack) + cost reporting |
-| Phase 4        | 🔄 Planned  | Restore functionality |
-| Phase 5        | 🔄 Planned  | Automated testing + validation |
-| Phase 6        | 🔄 Planned  | Parallel run + cutover from AWS Backup |
+| Phase 3        | ⏳ Not started | Notifications (SES/Slack) + cost reporting |
+| Phase 4        | ✅ Substantially complete | Restore (S3 + DynamoDB, cross-account) |
+| Phase 5        | ✅ Core done | Testing, validation, event audit log |
+| Phase 6        | 🔄 In progress | Parallel run, NSHM cutover (arkivalist done) |
 
 **Tests:** 48 passing · **Coverage:** 72% · **Lint:** ruff + black clean
 
@@ -25,10 +25,14 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 - **Configuration**: YAML config with Pydantic validation, alias→ARN mapping
 - **S3 Backup**: Incremental sync with 3-tier lifecycle policies (Standard → Glacier Instant → Deep Archive)
 - **DynamoDB Backup**: Point-in-Time export to S3, idempotent export bucket setup
-- **EventBridge Scheduling**: Create/enable/disable weekly or daily backup rules via CLI
+- **EventBridge Scheduling**: Create/enable/disable weekly/daily/hourly rules; localised time input and display
 - **Lambda Handler**: EventBridge-triggered backup orchestration (S3 + DynamoDB)
-- **Dry-run mode**: All destructive operations support `--dry-run`
+- **Restore**: S3 (direct copy + S3 Batch Operations) and DynamoDB PITR restore with async status tracking
+- **Testing**: `backup test integrity` (ETag diff + PITR check) and `backup test restore` (sample restore)
+- **Event audit log**: Append-only JSONL log in backup bucket (`_events/`) — all backup/restore events recorded
+- **Dry-run mode**: All mutating operations support `--dry-run`
 - **JSON output**: `--output json` for scripting
+- **Localised timestamps**: CLI input/output in NZDT/NZST/AEST/AEDT
 
 ---
 
@@ -75,11 +79,13 @@ backup --dry-run run --source toshi     # Preview without executing
 ### Schedule management
 
 ```bash
-backup schedule show                    # List EventBridge rules (nzshm-backup-* prefix)
+backup schedule show                    # List EventBridge rules with localised run times
 
-# Times are UTC. NZST = UTC+12, NZDT = UTC+13.
-backup schedule add --source toshi --frequency weekly --time 14:00   # Sun 02:00 NZST
-backup schedule add --source toshi --frequency daily  --time 13:00   # 01:00 NZST
+# --time accepts UTC (HH:MM), localised (HH:MM TZ), or full datetime (YYYY-MM-DD HH:MM TZ)
+backup schedule add --source toshi --frequency weekly --time '02:00 NZST'
+backup schedule add --source toshi --frequency weekly --time '2026-03-29 12:15 NZDT'  # day-of-week from date
+backup schedule add --source toshi --frequency daily  --time '01:00 NZST'
+backup schedule add --source toshi --frequency hourly --time '00:30'       # :30 past each hour
 
 backup schedule enable --source toshi                      # Enable all rules for toshi
 backup schedule enable --source toshi --frequency weekly   # Enable weekly only
@@ -87,7 +93,30 @@ backup schedule disable --source toshi                     # Disable all rules f
 backup schedule remove --source toshi --frequency daily    # Delete rule entirely
 ```
 
-### Status & reporting (stubs — Phase 3)
+### Restore
+
+```bash
+backup restore run --source toshi --buckets nzshm-toshi-api-data
+backup restore run --source toshi --tables ToshiAPI-FileTable --to-point-in-time '2026-03-25 07:50 NZDT'
+backup restore status --source toshi
+```
+
+### Testing
+
+```bash
+backup test integrity --source toshi          # ETag diff + PITR check
+backup test restore --source toshi            # Sample restore (direct copy)
+backup test restore --source toshi --use-batch  # Sample restore via S3 Batch Operations
+```
+
+### Event audit log
+
+```bash
+backup events --source toshi                  # Show recent backup/restore events
+backup events --source toshi --limit 50
+```
+
+### Status & reporting (Phase 3 — not yet implemented)
 
 ```bash
 backup status
