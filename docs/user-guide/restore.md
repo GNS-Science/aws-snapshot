@@ -35,11 +35,23 @@ configured. For small buckets or explicit testing, direct `copy_object` is used.
 
 DynamoDB restores are **asynchronous** — the CLI submits the restore job and returns.
 
+`--to-point-in-time` accepts:
+- ISO 8601: `2026-03-15T09:00:00Z`
+- Display format: `'2026-03-25 07:50 NZDT'` (paste directly from `backup events` output)
+- Bare datetime: `'2026-03-25 09:00'` (assumed UTC)
+- Known timezone abbreviations: `UTC`, `NZST`, `NZDT`, `AEST`, `AEDT`
+
+
 ```bash
-# Restore to a point in time (ISO 8601, UTC)
+# ISO 8601 (UTC)
 backup restore run --source toshi \
     --tables ToshiAPI-FileTable \
     --to-point-in-time 2026-03-15T09:00:00Z
+
+# Localised display format — paste directly from `backup events` output
+backup restore run --source toshi \
+    --tables ToshiAPI-FileTable \
+    --to-point-in-time '2026-03-25 07:50 NZDT'
 
 # Restore without re-enabling PITR on the restored table
 backup restore run --source toshi --tables ToshiAPI-FileTable --no-pitr

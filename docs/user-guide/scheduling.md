@@ -13,26 +13,39 @@ backup schedule show --output json
 Output:
 
 ```
-Rule Name                                     State      Schedule
---------------------------------------------------------------------------------
-nzshm-backup-toshi-weekly                    ENABLED    cron(0 14 ? * SUN *)
-nzshm-backup-ths-weekly                      ENABLED    cron(30 14 ? * SUN *)
+Rule Name                                     State      Schedule                         Local time
+----------------------------------------------------------------------------------------------------
+nzshm-backup-arkivalist-hourly               ENABLED    cron(0 * * * ? *)                → :00 past each hour (NZDT)
+nzshm-backup-arkivalist-weekly               ENABLED    cron(0 14 ? * SAT *)             → Sunday 03:00 NZDT locally
 ```
+
+The **Local time** column shows when the rule fires in the local timezone.
 
 ## Add a schedule
 
 ```bash
-# Weekly backup at 14:00 UTC on Sundays
-backup schedule add --source toshi --frequency weekly --time 14:00
-
-# Daily backup at 02:00 UTC (Active Experiment Mode)
+# Using plain UTC (HH:MM)
 backup schedule add --source toshi --frequency daily --time 02:00
 
-# Hourly backup at :30 past each hour
-backup schedule add --source toshi --frequency hourly --time 00:30
+# Using a localised time — converted to UTC automatically
+backup schedule add --source toshi --frequency daily  --time '02:00 NZST'
+backup schedule add --source toshi --frequency hourly --time '12:30 NZDT'  # :30 past each hour NZDT
+
+# Weekly with a full datetime — determines the UTC day-of-week
+# e.g. Sunday 12:15 NZDT = Saturday 23:15 UTC → cron fires on SAT
+backup schedule add --source toshi --frequency weekly --time '2026-03-29 12:15 NZDT'
+
+# ISO 8601 is also accepted
+backup schedule add --source toshi --frequency daily --time 2026-03-29T02:00:00+13:00
 ```
 
-Times must be in **UTC**. NZST = UTC+12, NZDT = UTC+13.
+`--time` accepts:
+- `HH:MM` — treated as UTC
+- `HH:MM TZ` — e.g. `12:15 NZDT`; converted to UTC (NZST = UTC+12, NZDT = UTC+13, AEST = UTC+10, AEDT = UTC+11)
+- `YYYY-MM-DD HH:MM TZ` — full datetime; for weekly schedules the UTC date determines the day-of-week
+- ISO 8601 datetime
+
+For `hourly`, only the minute component is used. For `minutely`, `--time` is ignored.
 
 The command creates (or updates) the EventBridge rule and registers the Lambda
 as the target. If `general.lambda_arn` is not set in the config, the rule is
@@ -75,12 +88,12 @@ backup schedule remove --source toshi --frequency daily
 
 ## Cron expressions generated
 
-| Frequency | `--time` | EventBridge expression |
-|-----------|----------|----------------------|
-| `weekly` | `14:00` | `cron(0 14 ? * SUN *)` |
-| `daily` | `02:00` | `cron(0 2 * * ? *)` |
-| `hourly` | `00:30` | `cron(30 * * * ? *)` |
-| `minutely` | (ignored) | `rate(1 minute)` |
+| Frequency | `--time` example | EventBridge expression | Notes |
+|-----------|-----------------|----------------------|-------|
+| `weekly` | `'2026-03-29 12:15 NZDT'` | `cron(15 23 ? * SAT *)` | UTC day may differ from local day |
+| `daily` | `'02:00 NZST'` | `cron(0 14 * * ? *)` | |
+| `hourly` | `'12:30 NZDT'` | `cron(30 * * * ? *)` | Only minute used |
+| `minutely` | (ignored) | `rate(1 minute)` | Testing only |
 
 `minutely` is for testing only — it fires every minute regardless of `--time`.
 
