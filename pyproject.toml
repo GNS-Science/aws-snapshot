@@ -70,4 +70,4 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
-addopts = "-v --cov=nzshm_backup --cov-report=term-missing"
+addopts = "--cov=nzshm_backup --cov-report=term-missing"
