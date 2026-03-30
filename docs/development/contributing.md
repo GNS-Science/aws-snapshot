@@ -35,7 +35,7 @@ make test      # run pytest
 make lint      # ruff check + mypy
 make fmt       # black + ruff --fix (auto-fix formatting and lint)
 make check     # lint then test — run before committing
-make upgrade   # upgrade deps with 1-week safety margin
+make upgrade   # upgrade deps (1-week cooldown — see pyproject.toml [tool.uv])
 make sync      # re-sync venv after pulling (uv sync --all-extras)
 ```
 
@@ -65,7 +65,7 @@ Always use the 1-week safety margin to avoid picking up packages released in the
 make upgrade
 ```
 
-This runs `uv lock --upgrade --exclude-newer <7-days-ago>` then re-syncs the environment. Document results in `docs/development/UPDATE_REPORT_<date>.md`.
+This runs `uv lock --upgrade` then re-syncs the environment. The 1-week dependency cooldown is configured in `[tool.uv]` in `pyproject.toml` — see [uv dependency cooldowns](https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns). Document results in `docs/development/UPDATE_REPORT_<date>.md`.
 
 ## Commit style
 
