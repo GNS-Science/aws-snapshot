@@ -19,6 +19,7 @@ def _fmt_dt(dt) -> str:
         dt = datetime.fromisoformat(dt)
     return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
+
 app = typer.Typer()
 
 EXPORT_LIMIT = 5  # most recent exports to show per table
