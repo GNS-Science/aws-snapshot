@@ -318,6 +318,7 @@ def test_restore(
         try:
             if use_batch:
                 assert batch_role_arn  # guarded: use_batch requires batch_role_arn (checked above)
+
                 # Write a manifest containing only the sampled keys, then submit a Batch job
                 def _sample_rows(_s: list = sample, _b: str = backup_bucket) -> Iterator[str]:
                     for obj in _s:

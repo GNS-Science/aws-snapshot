@@ -58,9 +58,11 @@ def _primary_backup_bucket(
     """Return the first configured backup bucket for the source (used for event logging)."""
     if not source_config.s3_buckets:
         return None
-    return str(source_config.get_backup_bucket_name(
-        source_config.s3_buckets[0].label, config.general.region, source_account_id, source
-    ))
+    return str(
+        source_config.get_backup_bucket_name(
+            source_config.s3_buckets[0].label, config.general.region, source_account_id, source
+        )
+    )
 
 
 def _detect_latest_restore_point(
