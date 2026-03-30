@@ -124,7 +124,8 @@ def events(
             errors = details.get("errors", [])
             err_str = f"  {len(errors)} error(s)" if errors else ""
             typer.echo(
-                f"  {icon} {ts}  backup_run_complete  {ok}  {s3} S3 bucket(s)  {ddb} DynamoDB table(s){err_str}"
+                f"  {icon} {ts}  backup_run_complete  {ok}"
+                f"  {s3} S3 bucket(s)  {ddb} DynamoDB table(s){err_str}"
             )
 
         elif event_type == "test_restore":

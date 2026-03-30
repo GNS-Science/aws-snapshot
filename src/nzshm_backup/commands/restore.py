@@ -241,7 +241,8 @@ def run_restore(
             )
             raise typer.Exit(1)
         typer.echo(
-            f"  Auto-detected restore point: {_fmt_dt(to_point_in_time)}  (from last successful S3 backup)"
+            f"  Auto-detected restore point: {_fmt_dt(to_point_in_time)}"
+            "  (from last successful S3 backup)"
         )
 
     if effective_table_arns and not to_point_in_time and not state.dry_run:

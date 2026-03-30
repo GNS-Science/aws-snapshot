@@ -36,7 +36,7 @@ def _process_source_entries(
     entries: list[dict],
     source_alias: str,
 ) -> tuple[list[dict], list[dict], int]:
-    """Enable PITR on any ACTIVE tables; return (remaining_entries, completed_entries, still_pending).
+    """Enable PITR on any ACTIVE tables; return (remaining, completed, still_pending).
 
     Args:
         dynamodb_client: boto3 DynamoDB client scoped to the source account.
@@ -44,7 +44,8 @@ def _process_source_entries(
         source_alias:    Human-readable source name for log messages.
 
     Returns:
-        (remaining, completed, still_pending): entries not yet done, entries just completed, count pending.
+        Tuple of (remaining, completed, still_pending): entries not yet done,
+        entries just completed, count still pending.
     """
     remaining = []
     completed = []

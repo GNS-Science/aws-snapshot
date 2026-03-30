@@ -163,7 +163,9 @@ def _print_source_status(source_alias: str, source_config, session: boto3.Sessio
                 if st == "completed":
                     detail = f"  {state.get('objects_copied', 0)} objects copied"
                 elif st == "submitted":
-                    detail = f"  job/{state.get('batch_job_id', '')[:8]}…  {state.get('objects_in_manifest', 0)} objects"
+                    job_id = state.get("batch_job_id", "")[:8]
+                    n_obj = state.get("objects_in_manifest", 0)
+                    detail = f"  job/{job_id}…  {n_obj} objects"
                 typer.echo(f"    last run: {checked} — {st}{detail}")
 
 
