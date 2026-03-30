@@ -10,22 +10,27 @@ AWS-native backup CLI replacing AWS Backup for NSHM datasets. See `docs/design/b
 
 ```bash
 # Setup
-poetry install            # all deps including dev
+uv sync --all-extras      # install all deps (replaces poetry install)
 
-# Run tests
-poetry run pytest
-poetry run pytest tests/test_foo.py::test_bar
+# Common workflows via Makefile
+make test                 # run pytest
+make lint                 # ruff + mypy
+make fmt                  # black + ruff --fix
+make check                # lint then test
+make upgrade              # upgrade deps with 1-week safety margin (--exclude-newer)
 
-# Lint & format
-poetry run ruff check src/ tests/
-poetry run black src/ tests/
-poetry run mypy src/
+# Run individual tools directly
+uv run pytest tests/test_foo.py::test_bar
+uv run ruff check src/ tests/
+uv run mypy src/
 
 # Run CLI
-poetry run backup --help
-poetry run backup status --source arkivalist
-poetry run backup run --source arkivalist --dry-run
+uv run backup --help
+uv run backup status --source arkivalist
+uv run backup run --source arkivalist --dry-run
 ```
+
+**Dependency upgrades:** always use `make upgrade` (or `uv lock --upgrade --exclude-newer <7-days-ago>`) to avoid picking up packages released in the last week.
 
 ## Architecture
 
