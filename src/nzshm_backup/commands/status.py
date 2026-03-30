@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 import boto3
 import typer
@@ -13,7 +13,7 @@ from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import list_recent_batch_jobs
 
 
-def _fmt_dt(dt) -> str:
+def _fmt_dt(dt: datetime | str) -> str:
     """Format datetime (or ISO string) in local timezone."""
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
@@ -214,7 +214,7 @@ def _print_json_status(sources: list[str], config) -> None:
             else session
         )
         dynamodb_client = source_session.client("dynamodb")
-        tables = {}
+        tables: dict[str, Any] = {}
         for table_arn in source_config.dynamodb_tables:
             table_name = table_arn.split("/")[-1]
             try:

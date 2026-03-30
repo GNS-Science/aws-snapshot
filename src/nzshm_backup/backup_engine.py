@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
+from typing import Literal, cast
 
 import boto3
 
@@ -84,6 +85,7 @@ def run_backup_source(
 
         try:
             if source_config.use_s3_batch:
+                assert config.general.s3_batch_role_arn  # required; validated by ConfigModel
                 batch_result = batch_backup_source(
                     session=session,
                     source_bucket=bucket_name,
@@ -106,11 +108,15 @@ def run_backup_source(
                     }
                 )
                 if not dry_run:
+                    _run_status = cast(
+                        Literal["submitted", "skipped", "completed", "failed"],
+                        batch_result.status.lower(),
+                    )
                     write_run_state(
                         session,
                         backup_bucket_name,
                         bucket_name,
-                        status=batch_result.status.lower(),
+                        status=_run_status,
                         batch_job_id=batch_result.job_id,
                         objects_in_manifest=batch_result.objects_in_manifest,
                     )
@@ -149,7 +155,9 @@ def run_backup_source(
                     }
                 )
                 if not dry_run:
-                    status = "completed" if sync_result.objects_copied > 0 else "skipped"
+                    status: Literal["completed", "skipped"] = (
+                        "completed" if sync_result.objects_copied > 0 else "skipped"
+                    )
                     write_run_state(
                         session,
                         backup_bucket_name,

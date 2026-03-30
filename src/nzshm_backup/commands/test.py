@@ -15,7 +15,7 @@ from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
 from nzshm_backup.state import get_state
 
 
-def _fmt_dt(dt) -> str:
+def _fmt_dt(dt: datetime | str) -> str:
     """Format datetime (or ISO string) in local timezone."""
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
@@ -231,7 +231,7 @@ def test_restore(
     source_account_id = source_config.source_account_id or account_id
     s3 = session.client("s3")
 
-    batch_role_arn = config.general.s3_batch_role_arn
+    batch_role_arn: str | None = config.general.s3_batch_role_arn
     if use_batch and not batch_role_arn:
         typer.echo("Error: --use-batch requires general.s3_batch_role_arn in config.", err=True)
         raise typer.Exit(1)
@@ -317,6 +317,7 @@ def test_restore(
         etag_mismatches: list[str] = []
         try:
             if use_batch:
+                assert batch_role_arn  # guarded: use_batch requires batch_role_arn (checked above)
                 # Write a manifest containing only the sampled keys, then submit a Batch job
                 def _sample_rows(_s: list = sample, _b: str = backup_bucket) -> Iterator[str]:
                     for obj in _s:
@@ -346,6 +347,7 @@ def test_restore(
                     copy_errors.append(f"Batch job failed: {batch_result.errors}")
                 else:
                     typer.echo(f"    Waiting for batch job {batch_result.job_id}...")
+                    assert batch_result.job_id  # set when status == "SUBMITTED"
                     try:
                         final_status = wait_for_batch_job(
                             session, account_id, batch_result.job_id, poll_interval=10, timeout=300
@@ -459,9 +461,9 @@ def test_restore(
                 resp = dynamodb_client.describe_continuous_backups(TableName=table_name)
                 pitr = resp["ContinuousBackupsDescription"]["PointInTimeRecoveryDescription"]
                 if pitr.get("PointInTimeRecoveryStatus") == "ENABLED":
-                    latest = pitr.get("LatestRestorableDateTime")
-                    ts = f"  [latest: {_fmt_dt(latest)}]" if latest else ""
-                    typer.echo(f"    ✓ PITR enabled{ts}")
+                    latest_dt = pitr.get("LatestRestorableDateTime")
+                    pitr_ts = f"  [latest: {_fmt_dt(latest_dt)}]" if latest_dt else ""
+                    typer.echo(f"    ✓ PITR enabled{pitr_ts}")
                 else:
                     typer.echo("    ✗ PITR DISABLED — point-in-time restore unavailable")
                     any_failure = True

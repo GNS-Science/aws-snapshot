@@ -524,7 +524,7 @@ def wait_for_batch_job(
         status = resp["Job"]["Status"]
         if status in _terminal:
             logger.info(f"Batch job {job_id} reached terminal state: {status}")
-            return status
+            return str(status)
         logger.info(f"Batch job {job_id}: {status} (elapsed: {elapsed}s)")
         time.sleep(poll_interval)
         elapsed += poll_interval

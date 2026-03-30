@@ -166,9 +166,9 @@ class GeneralConfig(BaseModel):
     tags: dict[str, str] = Field(
         default_factory=lambda: {"Project": "NSHM", "ManagedBy": "backup-cli"}
     )
-    lambda_arn: str | None = Field(None, description="ARN of the backup Lambda function")
+    lambda_arn: str | None = Field(default=None, description="ARN of the backup Lambda function")
     s3_batch_role_arn: str | None = Field(
-        None,
+        default=None,
         description="ARN of the IAM role S3 Batch Operations assumes. "
         "Required when any source has use_s3_batch: true.",
     )
