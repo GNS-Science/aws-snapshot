@@ -8,7 +8,7 @@ Non-fatal: write failures log a warning but never fail the calling operation.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -92,7 +92,7 @@ def read_events(
             months.append(dt)
             dt = dt.replace(month=dt.month + 1) if dt.month < 12 else dt.replace(year=dt.year + 1, month=1)
     else:
-        prev = now.replace(month=now.month - 1) if now.month > 1 else now.replace(year=now.year - 1, month=12)
+        prev = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
         months = [prev, now]
 
     events: list[dict] = []
