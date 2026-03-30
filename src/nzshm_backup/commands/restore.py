@@ -385,7 +385,7 @@ def run_restore(
                 typer.echo(f"  {prefix}Would submit PITR restore: {table_name} → {dest_table}")
                 continue
 
-            assert restore_point is not None  # ensured by guard at line 248
+            assert restore_point is not None  # non-dry-run DynamoDB restores require to_point_in_time (checked above)
 
             if force:
                 try:
