@@ -5,7 +5,7 @@
 Used `uv` with a 1-week recency filter to avoid upgrading packages released within the last 7 days:
 
 ```bash
-uv lock --upgrade --exclude-newer 2026-03-23
+uv lock --upgrade   # cooldown: exclude-newer = "1 week" set in pyproject.toml
 uv sync --all-extras
 uv run pytest
 ```
@@ -43,5 +43,5 @@ This also migrated the lock file from `poetry.lock` to `uv.lock`.
 ## Notes
 
 - `poetry.lock` is superseded by `uv.lock`. Run `uv sync --all-extras` instead of `poetry install`.
-- The `--exclude-newer` flag handles date filtering automatically; no need to check PyPI release dates manually.
+- The `--exclude-newer` flag handles date filtering automatically; no need to check PyPI release dates manually. The cutoff is now set centrally via `[tool.uv] exclude-newer = "1 week"` in `pyproject.toml` (see [uv dependency cooldowns](https://docs.astral.sh/uv/concepts/resolution/#dependency-cooldowns)), so `make upgrade` no longer needs to pass the flag explicitly.
 - The previously unpinned dev/transitive packages (`coverage`, `black`, `pytest-cov`, `mkdocs-material`, `charset-normalizer`) are now pinned in `uv.lock` at their pre-cutoff versions.
