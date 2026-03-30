@@ -60,9 +60,9 @@ def get_cross_account_session(session: boto3.Session, role_arn: str) -> boto3.Se
         New boto3.Session authenticated as the assumed role
     """
     sts = session.client("sts")
-    creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="nzshm-backup", ExternalId="nzshm-backup")[
-        "Credentials"
-    ]
+    creds = sts.assume_role(
+        RoleArn=role_arn, RoleSessionName="nzshm-backup", ExternalId="nzshm-backup"
+    )["Credentials"]
     return boto3.Session(
         aws_access_key_id=creds["AccessKeyId"],
         aws_secret_access_key=creds["SecretAccessKey"],
@@ -393,10 +393,16 @@ def ensure_backup_bucket_ready(
         apply_lifecycle_policy(s3_client, backup_bucket_name, lifecycle_config)
         apply_no_delete_policy(s3_client, backup_bucket_name)
     elif bucket_is_ours(s3_client, backup_bucket_name):
-        logger.info(f"Backup bucket {backup_bucket_name} already exists (managed by nzshm-backup), proceeding")
+        logger.info(
+            f"Backup bucket {backup_bucket_name} already exists (managed by nzshm-backup), proceeding"
+        )
     else:
-        logger.warning(f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND")
-        raise ValueError(f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND")
+        logger.warning(
+            f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND"
+        )
+        raise ValueError(
+            f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND"
+        )
 
 
 def backup_source(

@@ -92,9 +92,7 @@ def test_add_creates_hourly_rule(events_client):
 
 def test_add_creates_minutely_rule(events_client):
     """add --frequency minutely should create a rate(1 minute) rule."""
-    result = runner.invoke(
-        app, ["add", "--source", "toshi", "--frequency", "minutely"]
-    )
+    result = runner.invoke(app, ["add", "--source", "toshi", "--frequency", "minutely"])
     assert result.exit_code == 0
 
     rules = events_client.list_rules(NamePrefix="nzshm-backup-toshi-minutely")["Rules"]

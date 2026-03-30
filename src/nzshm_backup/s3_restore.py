@@ -10,7 +10,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES
-from nzshm_backup.s3_backup import bucket_exists, get_account_id, get_region
+from nzshm_backup.s3_backup import bucket_exists, get_region
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +63,15 @@ def apply_restore_target_policy(s3_client, target_bucket: str, batch_role_arn: s
             raise
 
     policy["Statement"] = [s for s in policy["Statement"] if s.get("Sid") != sid]
-    policy["Statement"].append({
-        "Sid": sid,
-        "Effect": "Allow",
-        "Principal": {"AWS": batch_role_arn},
-        "Action": ["s3:PutObject", "s3:PutObjectTagging"],
-        "Resource": f"arn:aws:s3:::{target_bucket}/*",
-    })
+    policy["Statement"].append(
+        {
+            "Sid": sid,
+            "Effect": "Allow",
+            "Principal": {"AWS": batch_role_arn},
+            "Action": ["s3:PutObject", "s3:PutObjectTagging"],
+            "Resource": f"arn:aws:s3:::{target_bucket}/*",
+        }
+    )
     s3_client.put_bucket_policy(Bucket=target_bucket, Policy=json.dumps(policy))
     logger.info(f"Applied {sid} policy to {target_bucket}")
 

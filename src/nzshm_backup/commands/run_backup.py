@@ -17,7 +17,9 @@ def run(
     full_sync: bool = typer.Option(
         False, "--full-sync", help="Force full copy instead of incremental"
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Execute manual backup.
 

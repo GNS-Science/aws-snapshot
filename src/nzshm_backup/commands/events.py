@@ -70,8 +70,10 @@ def events(
             if since_dt.tzinfo is None:
                 since_dt = since_dt.replace(tzinfo=timezone.utc)
         except ValueError:
-            typer.echo(f"Error: invalid --since value '{since}'. Use YYYY-MM-DD or ISO datetime.", err=True)
-            raise typer.Exit(1)
+            typer.echo(
+                f"Error: invalid --since value '{since}'. Use YYYY-MM-DD or ISO datetime.", err=True
+            )
+            raise typer.Exit(1) from None
 
     evts = read_events(session, backup_bucket, source=source, since=since_dt, limit=limit)
 
@@ -121,7 +123,9 @@ def events(
             ddb = details.get("dynamodb_tables", 0)
             errors = details.get("errors", [])
             err_str = f"  {len(errors)} error(s)" if errors else ""
-            typer.echo(f"  {icon} {ts}  backup_run_complete  {ok}  {s3} S3 bucket(s)  {ddb} DynamoDB table(s){err_str}")
+            typer.echo(
+                f"  {icon} {ts}  backup_run_complete  {ok}  {s3} S3 bucket(s)  {ddb} DynamoDB table(s){err_str}"
+            )
 
         elif event_type == "test_restore":
             bucket = details.get("bucket", "?")

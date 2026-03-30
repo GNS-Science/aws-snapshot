@@ -100,9 +100,13 @@ def validate_config():
 
 @app.command("push")
 def push_config(
-    config_file: Path = typer.Argument(None, help="Path to config file (default: BACKUP_CONFIG_PATH or backup-config.yaml)"),
+    config_file: Path = typer.Argument(
+        None, help="Path to config file (default: BACKUP_CONFIG_PATH or backup-config.yaml)"
+    ),
     stage: str = typer.Option("dev", help="Deployment stage (e.g. dev, prod)"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be pushed without pushing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be pushed without pushing"
+    ),
 ):
     """Push local config to SSM Parameter Store."""
     if config_file is None:

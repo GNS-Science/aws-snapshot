@@ -161,9 +161,7 @@ def test_validate_dynamodb_arn_account_mismatch_raises():
                 "toshi": SourceConfig(
                     display_name="ToshiAPI",
                     source_account_id="111111111111",
-                    dynamodb_tables=[
-                        "arn:aws:dynamodb:ap-southeast-2:222222222222:table/Foo"
-                    ],
+                    dynamodb_tables=["arn:aws:dynamodb:ap-southeast-2:222222222222:table/Foo"],
                 )
             }
         )
@@ -235,9 +233,7 @@ def test_config_push_uploads_to_ssm(aws_credentials, cli_runner, temp_config_fil
     from nzshm_backup.commands.config import app
 
     with mock_aws():
-        result = cli_runner.invoke(
-            app, ["push", str(temp_config_file), "--stage", "dev"]
-        )
+        result = cli_runner.invoke(app, ["push", str(temp_config_file), "--stage", "dev"])
         assert result.exit_code == 0, result.output
         assert "/nzshm-backup/dev/config" in result.output
 

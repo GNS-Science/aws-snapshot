@@ -152,9 +152,7 @@ class SourceConfig(BaseModel):
         """Generate human-readable backup bucket name from source key and bucket label."""
         return f"bb-{source_key}-s3-{bucket_label}-{region}-{account_id}"
 
-    def get_dynamodb_backup_bucket_name(
-        self, source_key: str, region: str, account_id: str
-    ) -> str:
+    def get_dynamodb_backup_bucket_name(self, source_key: str, region: str, account_id: str) -> str:
         """Generate human-readable DynamoDB export bucket name."""
         return f"bb-{source_key}-dynamo-{region}-{account_id}"
 

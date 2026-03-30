@@ -90,7 +90,11 @@ def read_events(
         dt = since.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         while dt <= now:
             months.append(dt)
-            dt = dt.replace(month=dt.month + 1) if dt.month < 12 else dt.replace(year=dt.year + 1, month=1)
+            dt = (
+                dt.replace(month=dt.month + 1)
+                if dt.month < 12
+                else dt.replace(year=dt.year + 1, month=1)
+            )
     else:
         prev = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
         months = [prev, now]
