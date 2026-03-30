@@ -1,14 +1,14 @@
 """Tests for the append-only JSONL event log."""
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import boto3
 import pytest
 from moto import mock_aws
 
-from nzshm_backup.event_log import append_event, read_events, _event_key
+from nzshm_backup.event_log import _event_key, append_event, read_events
 
 REGION = "ap-southeast-2"
 BUCKET = "test-backup-bucket"
@@ -36,6 +36,7 @@ def s3_session():
 # _event_key
 # ---------------------------------------------------------------------------
 
+
 def test_event_key_format():
     dt = datetime(2026, 3, 25, 7, 50, tzinfo=timezone.utc)
     assert _event_key(dt) == "_events/2026-03/events.jsonl"
@@ -49,6 +50,7 @@ def test_event_key_december():
 # ---------------------------------------------------------------------------
 # append_event
 # ---------------------------------------------------------------------------
+
 
 class TestAppendEvent:
     def test_creates_new_file(self, s3_session):
@@ -122,6 +124,7 @@ class TestAppendEvent:
 # read_events
 # ---------------------------------------------------------------------------
 
+
 class TestReadEvents:
     def _write_raw(self, s3_session, key: str, events: list[dict]):
         s3 = s3_session.client("s3")
@@ -168,7 +171,12 @@ class TestReadEvents:
         old_ts = (now - timedelta(hours=2)).isoformat()
         key = _event_key(now)
         s3 = s3_session.client("s3")
-        old_event = {"event_type": "backup_run", "source": "toshi", "timestamp": old_ts, "details": {}}
+        old_event = {
+            "event_type": "backup_run",
+            "source": "toshi",
+            "timestamp": old_ts,
+            "details": {},
+        }
         s3.put_object(Bucket=BUCKET, Key=key, Body=(json.dumps(old_event) + "\n").encode())
         # Append a fresh event
         append_event(s3_session, BUCKET, "backup_run_complete", "toshi", {})
@@ -193,8 +201,14 @@ class TestReadEvents:
     def test_skips_malformed_lines(self, s3_session):
         key = _event_key(datetime.now(timezone.utc))
         s3 = s3_session.client("s3")
-        good = json.dumps({"event_type": "backup_run", "source": "toshi",
-                           "timestamp": datetime.now(timezone.utc).isoformat(), "details": {}})
+        good = json.dumps(
+            {
+                "event_type": "backup_run",
+                "source": "toshi",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "details": {},
+            }
+        )
         body = "not-json\n" + good + "\n   \n"
         s3.put_object(Bucket=BUCKET, Key=key, Body=body.encode())
         events = read_events(s3_session, BUCKET)

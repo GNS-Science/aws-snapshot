@@ -1,8 +1,6 @@
 """Tests for the pitr-watcher Lambda (SSM-based pending restore discovery)."""
 
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from nzshm_backup.lambda_pitr_watcher import _process_source_entries, handler
 
@@ -29,6 +27,7 @@ def _make_dynamodb_client(table_status: str = "ACTIVE"):
 # ---------------------------------------------------------------------------
 # _process_source_entries unit tests
 # ---------------------------------------------------------------------------
+
 
 def test_pitr_enabled_when_table_active():
     """ACTIVE table → PITR enabled, informational tags applied, entry removed from remaining."""
@@ -93,7 +92,7 @@ def test_mixed_status_entries():
     arn_active = f"arn:aws:dynamodb:{REGION}:123456789012:table/active-table"
     arn_creating = f"arn:aws:dynamodb:{REGION}:123456789012:table/creating-table"
     entries = [
-        {"restore_arn": arn_active,   "source": "src", "submitted_at": "2026-03-18T00:00:00+00:00"},
+        {"restore_arn": arn_active, "source": "src", "submitted_at": "2026-03-18T00:00:00+00:00"},
         {"restore_arn": arn_creating, "source": "src", "submitted_at": "2026-03-18T00:00:00+00:00"},
     ]
 
@@ -117,9 +116,12 @@ def test_mixed_status_entries():
 # handler integration tests (mocked config + AWS clients)
 # ---------------------------------------------------------------------------
 
+
 def _make_source_config(has_dynamo=True):
     cfg = MagicMock()
-    cfg.dynamodb_tables = ["arn:aws:dynamodb:ap-southeast-2:123456789012:table/t1"] if has_dynamo else []
+    cfg.dynamodb_tables = (
+        ["arn:aws:dynamodb:ap-southeast-2:123456789012:table/t1"] if has_dynamo else []
+    )
     cfg.source_account_id = None
     cfg.source_account_role_arn = None
     cfg.source_account_restore_role_arn = None
@@ -144,6 +146,7 @@ def test_handler_disables_rule_when_ssm_empty(mock_session_cls, mock_account_id,
 
     ssm = MagicMock()
     from botocore.exceptions import ClientError
+
     ssm.get_parameter.side_effect = ClientError(
         {"Error": {"Code": "ParameterNotFound", "Message": ""}}, "GetParameter"
     )
@@ -163,18 +166,19 @@ def test_handler_disables_rule_when_ssm_empty(mock_session_cls, mock_account_id,
 @patch("nzshm_backup.lambda_pitr_watcher._get_config")
 @patch("nzshm_backup.lambda_pitr_watcher.get_account_id", return_value="123456789012")
 @patch("boto3.Session")
-def test_handler_enables_pitr_and_removes_entry(mock_session_cls, mock_account_id, mock_config, mock_append):
+def test_handler_enables_pitr_and_removes_entry(
+    mock_session_cls, mock_account_id, mock_config, mock_append
+):
     """ACTIVE table in SSM → PITR enabled, entry removed, rule disabled."""
     import json
+
     mock_config.return_value = _make_config({"test-source": _make_source_config()})
 
     session = MagicMock()
     mock_session_cls.return_value = session
 
     ssm = MagicMock()
-    ssm.get_parameter.return_value = {
-        "Parameter": {"Value": json.dumps({"pending": [_ENTRY]})}
-    }
+    ssm.get_parameter.return_value = {"Parameter": {"Value": json.dumps({"pending": [_ENTRY]})}}
     dynamo = _make_dynamodb_client("ACTIVE")
     events = MagicMock()
     clients = {"ssm": ssm, "dynamodb": dynamo, "events": events}
@@ -195,18 +199,19 @@ def test_handler_enables_pitr_and_removes_entry(mock_session_cls, mock_account_i
 @patch("nzshm_backup.lambda_pitr_watcher._get_config")
 @patch("nzshm_backup.lambda_pitr_watcher.get_account_id", return_value="123456789012")
 @patch("boto3.Session")
-def test_handler_keeps_rule_enabled_when_still_pending(mock_session_cls, mock_account_id, mock_config):
+def test_handler_keeps_rule_enabled_when_still_pending(
+    mock_session_cls, mock_account_id, mock_config
+):
     """CREATING table in SSM → rule stays enabled, entry preserved in SSM."""
     import json
+
     mock_config.return_value = _make_config({"test-source": _make_source_config()})
 
     session = MagicMock()
     mock_session_cls.return_value = session
 
     ssm = MagicMock()
-    ssm.get_parameter.return_value = {
-        "Parameter": {"Value": json.dumps({"pending": [_ENTRY]})}
-    }
+    ssm.get_parameter.return_value = {"Parameter": {"Value": json.dumps({"pending": [_ENTRY]})}}
     dynamo = _make_dynamodb_client("CREATING")
     events = MagicMock()
     clients = {"ssm": ssm, "dynamodb": dynamo, "events": events}

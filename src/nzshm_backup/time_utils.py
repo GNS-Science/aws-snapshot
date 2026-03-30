@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 # Offset lookup for common timezone abbreviations (matches _fmt_dt display output)
 TZ_ABBREV: dict[str, timezone] = {
-    "UTC":  timezone.utc,
+    "UTC": timezone.utc,
     "NZST": timezone(timedelta(hours=12)),
     "NZDT": timezone(timedelta(hours=13)),
     "AEST": timezone(timedelta(hours=10)),

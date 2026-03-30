@@ -1,10 +1,10 @@
 """Tests for shared timezone / datetime parsing utilities."""
 
+from datetime import timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 
-from nzshm_backup.time_utils import parse_datetime, TZ_ABBREV
-
+from nzshm_backup.time_utils import TZ_ABBREV, parse_datetime
 
 NZST = timezone(timedelta(hours=12))
 NZDT = timezone(timedelta(hours=13))

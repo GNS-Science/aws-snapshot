@@ -1,6 +1,5 @@
 """Smoke tests for the backup CLI entry point and subcommands."""
 
-
 import boto3
 import pytest
 import yaml

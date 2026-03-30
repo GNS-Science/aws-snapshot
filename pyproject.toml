@@ -58,6 +58,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "A"]
+ignore = ["B008"]  # typer.Option/Argument in defaults is idiomatic for Typer CLIs
 
 [tool.mypy]
 python_version = "3.10"

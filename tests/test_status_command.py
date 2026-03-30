@@ -30,9 +30,7 @@ def dynamo_config(tmp_path):
         "sources": {
             "toshi": {
                 "display_name": "ToshiAPI",
-                "dynamodb_tables": [
-                    f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/TestTable"
-                ],
+                "dynamodb_tables": [f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/TestTable"],
             }
         },
     }
@@ -134,9 +132,7 @@ def test_status_dynamodb_completed_export(dynamo_config, monkeypatch):
     mock_session.client.return_value = mock_client
 
     with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch(
-            "nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]
-        ):
+        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]):
             result = runner.invoke(app, ["status", "--source", "toshi"])
 
     assert result.exit_code == 0
@@ -165,9 +161,7 @@ def test_status_dynamodb_failed_export_shows_reason(dynamo_config, monkeypatch):
     mock_session.client.return_value = mock_client
 
     with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch(
-            "nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]
-        ):
+        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]):
             result = runner.invoke(app, ["status", "--source", "toshi"])
 
     assert result.exit_code == 0

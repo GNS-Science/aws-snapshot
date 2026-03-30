@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-import boto3
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,7 @@ class DynamoDBRestoreResult:
     source_table_arn: str
     target_table_name: str
     restore_point: datetime
-    restore_arn: str | None = None   # ARN of the new table being created
+    restore_arn: str | None = None  # ARN of the new table being created
     status: Literal["INITIATED", "SKIPPED", "FAILED"] = "INITIATED"
     errors: list[dict[str, Any]] = field(default_factory=list)
     dry_run: bool = False
@@ -40,11 +39,11 @@ class DynamoDBRestoreStatus:
     """Live status of a DynamoDB table restore."""
 
     table_name: str
-    table_status: str                  # e.g. "CREATING", "ACTIVE", "RESTORING"
+    table_status: str  # e.g. "CREATING", "ACTIVE", "RESTORING"
     restore_in_progress: bool
     restore_date_time: datetime | None  # the point-in-time the restore targets
     source_table_arn: str | None
-    restore_status: str | None          # "RESTORING", "SUCCEEDED", "FAILED"
+    restore_status: str | None  # "RESTORING", "SUCCEEDED", "FAILED"
 
 
 def make_restore_table_name(source_table_arn: str) -> str:
@@ -62,9 +61,7 @@ def make_restore_table_name(source_table_arn: str) -> str:
     base_name = source_table_arn.split("/")[-1]
     max_base = _MAX_TABLE_NAME_LEN - len(_RESTORE_SUFFIX)
     if len(base_name) > max_base:
-        logger.warning(
-            f"Table name {base_name!r} truncated to {max_base} chars to fit suffix"
-        )
+        logger.warning(f"Table name {base_name!r} truncated to {max_base} chars to fit suffix")
         base_name = base_name[:max_base]
     return base_name + _RESTORE_SUFFIX
 
@@ -169,7 +166,7 @@ def describe_restore_status(
         restore_in_progress=summary.get("RestoreInProgress", False),
         restore_date_time=restore_dt,
         source_table_arn=summary.get("SourceTableArn"),
-        restore_status="RESTORING" if summary.get("RestoreInProgress") else (
-            "SUCCEEDED" if summary else None
+        restore_status=(
+            "RESTORING" if summary.get("RestoreInProgress") else ("SUCCEEDED" if summary else None)
         ),
     )
