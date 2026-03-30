@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import boto3
-import yaml
+import yaml  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError
 
 from nzshm_backup.config.models import ConfigModel

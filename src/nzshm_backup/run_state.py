@@ -64,7 +64,7 @@ def read_run_state(session: boto3.Session, backup_bucket: str) -> dict | None:
     try:
         s3 = session.client("s3")
         resp = s3.get_object(Bucket=backup_bucket, Key=STATE_KEY)
-        return json.loads(resp["Body"].read())
+        return dict(json.loads(resp["Body"].read()))
     except ClientError as e:
         if e.response["Error"]["Code"] in ("NoSuchKey", "NoSuchBucket"):
             return None

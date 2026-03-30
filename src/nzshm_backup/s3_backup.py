@@ -74,7 +74,7 @@ def get_cross_account_session(session: boto3.Session, role_arn: str) -> boto3.Se
 def get_account_id(session: boto3.Session) -> str:
     """Get AWS account ID from session."""
     sts = session.client("sts")
-    return sts.get_caller_identity()["Account"]
+    return str(sts.get_caller_identity()["Account"])
 
 
 def get_region(session: boto3.Session) -> str:
@@ -141,7 +141,7 @@ def create_backup_bucket(
 
     logger.info(f"Creating backup bucket: {bucket_name}")
 
-    create_bucket_config = {
+    create_bucket_config: dict[str, Any] = {
         "Bucket": bucket_name,
         "ACL": "private",
     }
