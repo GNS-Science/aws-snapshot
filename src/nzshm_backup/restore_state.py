@@ -15,7 +15,8 @@ def read_pending_restores(ssm_client) -> list[dict]:
     """Read pending restore entries from SSM. Returns empty list if parameter absent."""
     try:
         resp = ssm_client.get_parameter(Name=SSM_PARAM_NAME)
-        return json.loads(resp["Parameter"]["Value"]).get("pending", [])
+        data = json.loads(resp["Parameter"]["Value"])
+        return list(data.get("pending", []))
     except ClientError as e:
         if e.response["Error"]["Code"] == "ParameterNotFound":
             return []

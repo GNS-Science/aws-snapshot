@@ -21,7 +21,7 @@ _EVENT_ICONS = {
 }
 
 
-def _fmt_dt(dt) -> str:
+def _fmt_dt(dt: datetime | str) -> str:
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
     return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")

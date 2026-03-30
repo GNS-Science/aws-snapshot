@@ -12,7 +12,7 @@ test:
 
 lint:
 	uv run ruff check src/ tests/
-	uv run mypy src/ || true  # 38 pre-existing type errors — deferred
+	uv run mypy src/
 
 fmt:
 	uv run black src/ tests/

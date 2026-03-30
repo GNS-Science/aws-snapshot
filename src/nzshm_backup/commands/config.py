@@ -46,7 +46,7 @@ def show_config(
             typer.echo(f"Error: Key '{key}' not found", err=True)
             raise typer.Exit(1) from e
     else:
-        import yaml
+        import yaml  # type: ignore[import-untyped]
 
         typer.echo(yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
 

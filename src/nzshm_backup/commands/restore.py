@@ -37,7 +37,7 @@ RESTORE_STATUS_ICON = {
 }
 
 
-def _fmt_dt(dt) -> str:
+def _fmt_dt(dt: datetime | str) -> str:
     """Format datetime (or ISO string) in local timezone."""
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
@@ -58,8 +58,10 @@ def _primary_backup_bucket(
     """Return the first configured backup bucket for the source (used for event logging)."""
     if not source_config.s3_buckets:
         return None
-    return source_config.get_backup_bucket_name(
-        source_config.s3_buckets[0].label, config.general.region, source_account_id, source
+    return str(
+        source_config.get_backup_bucket_name(
+            source_config.s3_buckets[0].label, config.general.region, source_account_id, source
+        )
     )
 
 
@@ -79,7 +81,7 @@ def _detect_latest_restore_point(
     """
     from nzshm_backup.run_state import read_run_state
 
-    checked_ats = []
+    checked_ats: list[str] = []
 
     for bucket_cfg in source_config.s3_buckets:
         backup_bucket = source_config.get_backup_bucket_name(
@@ -383,6 +385,8 @@ def run_restore(
                 typer.echo(f"  {prefix}Would submit PITR restore: {table_name} → {dest_table}")
                 continue
 
+            assert restore_point is not None  # non-dry-run DynamoDB restores require to_point_in_time (checked above)
+
             if force:
                 try:
                     dynamodb_client.delete_table(TableName=dest_table)
@@ -399,15 +403,15 @@ def run_restore(
                 f"at {restore_point.isoformat()}"
             )
 
-            result = restore_dynamodb_table(
+            dynamo_result = restore_dynamodb_table(
                 dynamodb_client,
                 table_arn,
                 dest_table,
                 restore_point,
             )
 
-            if result.success:
-                typer.echo(f"  ✓ Restore submitted: {dest_table} ({result.restore_arn})")
+            if dynamo_result.success:
+                typer.echo(f"  ✓ Restore submitted: {dest_table} ({dynamo_result.restore_arn})")
                 event_bucket = _primary_backup_bucket(
                     config, source, source_config, source_account_id
                 )
@@ -421,14 +425,14 @@ def run_restore(
                             "table_arn": table_arn,
                             "dest_table": dest_table,
                             "restore_point": restore_point.isoformat(),
-                            "restore_arn": result.restore_arn,
+                            "restore_arn": dynamo_result.restore_arn,
                             "triggered_by": "--latest" if latest else "--to-point-in-time",
                         },
                     )
-                if not no_pitr and result.restore_arn:
+                if not no_pitr and dynamo_result.restore_arn:
                     add_pending_restore(
                         ssm_client,
-                        restore_arn=result.restore_arn,
+                        restore_arn=dynamo_result.restore_arn,
                         source=source,
                         source_table_arn=table_arn,
                         restore_point_iso=restore_point.isoformat(),
@@ -439,7 +443,7 @@ def run_restore(
                     f"--source {source} --tables {table_name}"
                 )
             else:
-                for err in result.errors:
+                for err in dynamo_result.errors:
                     typer.echo(f"  ✗ {err['error']}", err=True)
                 errors.append(f"{dest_table}: restore failed")
 
@@ -454,8 +458,8 @@ def run_restore(
 
     typer.echo("")
     if errors:
-        for e in errors:
-            typer.echo(f"  ERROR: {e}", err=True)
+        for error_msg in errors:
+            typer.echo(f"  ERROR: {error_msg}", err=True)
         raise typer.Exit(1)
 
 

@@ -1,5 +1,7 @@
 """Manual backup execution command."""
 
+from typing import TypedDict
+
 import boto3
 import typer
 
@@ -47,7 +49,13 @@ def run(
 
     session = boto3.Session()
 
-    total_results = {
+    class _Totals(TypedDict):
+        objects_copied: int
+        bytes_transferred: int
+        objects_skipped: int
+        errors: list[str]
+
+    total_results: _Totals = {
         "objects_copied": 0,
         "bytes_transferred": 0,
         "objects_skipped": 0,
