@@ -21,6 +21,7 @@ def _fmt_dt(dt) -> str:
         dt = datetime.fromisoformat(dt)
     return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
+
 app = typer.Typer()
 
 _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
@@ -317,9 +318,7 @@ def test_restore(
         try:
             if use_batch:
                 # Write a manifest containing only the sampled keys, then submit a Batch job
-                def _sample_rows(
-                    _s: list = sample, _b: str = backup_bucket
-                ) -> Iterator[str]:
+                def _sample_rows(_s: list = sample, _b: str = backup_bucket) -> Iterator[str]:
                     for obj in _s:
                         safe_key = obj["Key"].replace('"', '""')
                         yield f"{_b},{safe_key}\n"
