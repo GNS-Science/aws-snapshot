@@ -12,6 +12,14 @@ def cli_runner():
     return CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
+    """Unset shell env vars that leak from a developer's real AWS session."""
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AWS_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("BACKUP_CONFIG_PATH", raising=False)
+
+
 @pytest.fixture
 def aws_credentials(monkeypatch):
     """Fake AWS credentials so boto3 calls never hit real AWS."""
