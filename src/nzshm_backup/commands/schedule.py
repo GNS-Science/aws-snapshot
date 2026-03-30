@@ -21,7 +21,7 @@ def _rule_name(source: str, frequency: str) -> str:
 
 # EventBridge weekday abbreviations indexed by Python isoweekday() (1=Mon…7=Sun)
 _EB_WEEKDAY = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT", 7: "SUN"}
-_EB_TO_ISO  = {v: k for k, v in _EB_WEEKDAY.items()}
+_EB_TO_ISO = {v: k for k, v in _EB_WEEKDAY.items()}
 
 
 def _schedule_expr_local_desc(expr: str) -> str:
@@ -34,6 +34,7 @@ def _schedule_expr_local_desc(expr: str) -> str:
     - ``rate(...)``                 — returned unchanged
     """
     import re
+
     if expr.startswith("rate("):
         return ""
     m = re.match(r"cron\((\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\)", expr)
@@ -152,10 +153,7 @@ def show():
     for rule in rules:
         expr = rule.get("ScheduleExpression", "n/a")
         local = _schedule_expr_local_desc(expr)
-        typer.echo(
-            f"{rule['Name']:<45} {rule.get('State', 'UNKNOWN'):<10} "
-            f"{expr:<30} {local}"
-        )
+        typer.echo(f"{rule['Name']:<45} {rule.get('State', 'UNKNOWN'):<10} " f"{expr:<30} {local}")
 
 
 @app.command("add")
@@ -176,7 +174,9 @@ def add_schedule(
             "minutely: --time is ignored entirely."
         ),
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Add (create or update) an EventBridge schedule rule for a backup source.
 
@@ -208,8 +208,10 @@ def add_schedule(
     session = boto3.Session()
     events = session.client("events")
 
-    human = "" if frequency == "minutely" else _human_schedule_desc(
-        frequency, hh_int, mm_int, day if frequency == "weekly" else None
+    human = (
+        ""
+        if frequency == "minutely"
+        else _human_schedule_desc(frequency, hh_int, mm_int, day if frequency == "weekly" else None)
     )
 
     if state.dry_run:
@@ -274,7 +276,9 @@ def remove_schedule(
     frequency: Literal["daily", "weekly", "hourly", "minutely"] = typer.Option(
         ..., help="Backup frequency"
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Remove an EventBridge schedule rule and deregister its Lambda target."""
     state = get_state()
@@ -312,7 +316,10 @@ def remove_schedule(
                 StatementId=f"AllowEventBridge-{rule_name}",
             )
         except ClientError as e:
-            if e.response["Error"]["Code"] in ("ResourceNotFoundException", "NoSuchResourceException"):
+            if e.response["Error"]["Code"] in (
+                "ResourceNotFoundException",
+                "NoSuchResourceException",
+            ):
                 pass  # permission was never added
             else:
                 raise
@@ -335,7 +342,9 @@ def enable(
         None,
         help="Frequency to enable (daily, weekly, hourly, minutely). Defaults to all.",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Enable backup EventBridge schedule rule(s) for a source."""
     state = get_state()
@@ -367,7 +376,9 @@ def disable(
         None,
         help="Frequency to disable (daily, weekly, hourly, minutely). Defaults to all.",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Disable backup EventBridge schedule rule(s) for a source."""
     state = get_state()

@@ -5,14 +5,12 @@ import pytest
 from moto import mock_aws
 
 from nzshm_backup.s3_batch import (
-    BatchJobResult,
     _build_restore_manifest_rows,
     batch_backup_source,
     batch_restore_bucket,
     build_manifest_csv,
     write_manifest_to_s3,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -203,6 +201,7 @@ def test_batch_backup_skipped_when_nothing_to_copy(aws_session, s3_client):
 
     # Tag backup bucket so ensure_backup_bucket_ready accepts it
     from nzshm_backup.s3_backup import create_backup_bucket
+
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
     s3_client.copy_object(
         CopySource={"Bucket": "src3", "Key": "same.txt"},
@@ -291,7 +290,7 @@ def test_batch_restore_dry_run(aws_session, s3_client):
     _create_bucket(s3_client, backup)
     _put_object(s3_client, backup, "data/a.txt")
     _put_object(s3_client, backup, "data/b.txt")
-    _put_object(s3_client, backup, "_manifests/m.csv")   # excluded
+    _put_object(s3_client, backup, "_manifests/m.csv")  # excluded
 
     result = batch_restore_bucket(
         session=aws_session,

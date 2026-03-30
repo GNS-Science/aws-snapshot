@@ -1,6 +1,5 @@
 """Lambda entry point: poll SSM for pending DynamoDB PITR restores and re-enable PITR."""
 
-import logging
 from collections import defaultdict
 from typing import Any
 
@@ -37,7 +36,7 @@ def _process_source_entries(
     entries: list[dict],
     source_alias: str,
 ) -> tuple[list[dict], list[dict], int]:
-    """Enable PITR on any ACTIVE tables; return (remaining_entries, completed_entries, still_pending).
+    """Enable PITR on any ACTIVE tables; return (remaining, completed, still_pending).
 
     Args:
         dynamodb_client: boto3 DynamoDB client scoped to the source account.
@@ -45,7 +44,8 @@ def _process_source_entries(
         source_alias:    Human-readable source name for log messages.
 
     Returns:
-        (remaining, completed, still_pending): entries not yet done, entries just completed, count pending.
+        Tuple of (remaining, completed, still_pending): entries not yet done,
+        entries just completed, count still pending.
     """
     remaining = []
     completed = []
@@ -65,9 +65,12 @@ def _process_source_entries(
                     PointInTimeRecoverySpecification={"PointInTimeRecoveryEnabled": True},
                 )
                 tags = [
-                    {"Key": "RestoredBy",   "Value": "nzshm-backup"},
-                    {"Key": "RestoredFrom", "Value": entry.get("source_table_arn", "").split("/")[-1]},
-                    {"Key": "RestoredAt",   "Value": entry.get("restore_point", "")},
+                    {"Key": "RestoredBy", "Value": "nzshm-backup"},
+                    {
+                        "Key": "RestoredFrom",
+                        "Value": entry.get("source_table_arn", "").split("/")[-1],
+                    },
+                    {"Key": "RestoredAt", "Value": entry.get("restore_point", "")},
                 ]
                 try:
                     dynamodb_client.tag_resource(ResourceArn=restore_arn, Tags=tags)
@@ -125,8 +128,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         source_account_id = source_config.source_account_id or backup_account_id
         restore_role_arn = (
-            source_config.source_account_restore_role_arn
-            or source_config.source_account_role_arn
+            source_config.source_account_restore_role_arn or source_config.source_account_role_arn
         )
         source_session = (
             get_cross_account_session(session, restore_role_arn)
@@ -152,7 +154,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
             for entry in completed:
                 append_event(
-                    session, event_bucket, "restore_completed", source_alias,
+                    session,
+                    event_bucket,
+                    "restore_completed",
+                    source_alias,
                     details={
                         "dest_table": entry["restore_arn"].split("/")[-1],
                         "restore_arn": entry["restore_arn"],
@@ -161,7 +166,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     },
                 )
                 append_event(
-                    session, event_bucket, "pitr_reenabled", source_alias,
+                    session,
+                    event_bucket,
+                    "pitr_reenabled",
+                    source_alias,
                     details={"table_arn": entry["restore_arn"]},
                 )
 

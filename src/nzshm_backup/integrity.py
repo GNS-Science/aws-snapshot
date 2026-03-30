@@ -31,8 +31,8 @@ class IntegrityResult:
 
     source_bucket: str
     backup_bucket: str
-    source_object_count: int = 0   # objects in source (operational prefixes excluded)
-    backup_object_count: int = 0   # objects in backup (operational prefixes excluded)
+    source_object_count: int = 0  # objects in source (operational prefixes excluded)
+    backup_object_count: int = 0  # objects in backup (operational prefixes excluded)
     diffs: list[ObjectDiff] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -118,10 +118,14 @@ def check_bucket_integrity(
     for key, source_etag in source_objects.items():
         backup_etag = backup_objects.get(key)
         if backup_etag is None:
-            result.diffs.append(ObjectDiff(key=key, issue="missing_in_backup", source_etag=source_etag))
+            result.diffs.append(
+                ObjectDiff(key=key, issue="missing_in_backup", source_etag=source_etag)
+            )
         elif backup_etag != source_etag:
             result.diffs.append(
-                ObjectDiff(key=key, issue="etag_mismatch", source_etag=source_etag, backup_etag=backup_etag)
+                ObjectDiff(
+                    key=key, issue="etag_mismatch", source_etag=source_etag, backup_etag=backup_etag
+                )
             )
 
     result.end_time = datetime.now(timezone.utc)

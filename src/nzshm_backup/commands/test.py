@@ -1,14 +1,8 @@
 """Testing and validation commands."""
 
 import random
+from collections.abc import Iterator
 from datetime import datetime, timezone
-
-
-def _fmt_dt(dt) -> str:
-    """Format datetime (or ISO string) in local timezone."""
-    if isinstance(dt, str):
-        dt = datetime.fromisoformat(dt)
-    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
 import boto3
 import typer
@@ -20,6 +14,14 @@ from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
 from nzshm_backup.state import get_state
 
+
+def _fmt_dt(dt) -> str:
+    """Format datetime (or ISO string) in local timezone."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+
+
 app = typer.Typer()
 
 _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
@@ -28,7 +30,9 @@ _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
 @app.command("integrity")
 def test_integrity(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Validate backup integrity: S3 source ↔ backup comparison, DynamoDB PITR + export check.
 
@@ -96,7 +100,9 @@ def test_integrity(
                     if diff.issue == "missing_in_backup":
                         typer.echo(f"      - {diff.key}")
             if result.mismatch_count:
-                typer.echo(f"    ✗ {result.mismatch_count} ETag mismatch(es) — possible backup poisoning:")
+                typer.echo(
+                    f"    ✗ {result.mismatch_count} ETag mismatch(es) — possible backup poisoning:"
+                )
                 for diff in result.diffs:
                     if diff.issue == "etag_mismatch":
                         typer.echo(
@@ -132,7 +138,7 @@ def test_integrity(
                 if pitr_status == "ENABLED":
                     typer.echo(f"    ✓ PITR enabled{ts}")
                 else:
-                    typer.echo(f"    ✗ PITR DISABLED — table cannot be restored to point-in-time")
+                    typer.echo("    ✗ PITR DISABLED — table cannot be restored to point-in-time")
                     any_failure = True
             except Exception as e:
                 typer.echo(f"    ✗ Could not check PITR: {e}", err=True)
@@ -175,12 +181,15 @@ def test_restore(
         10, "--sample-size", help="Number of objects to sample from the backup bucket"
     ),
     use_batch: bool = typer.Option(
-        False, "--use-batch",
+        False,
+        "--use-batch",
         help="Exercise the S3 Batch Operations restore path instead of direct copy. "
-             "Requires general.s3_batch_role_arn in config. Slower (Batch has per-job "
-             "setup overhead) but validates the full production restore code path and IAM.",
+        "Requires general.s3_batch_role_arn in config. Slower (Batch has per-job "
+        "setup overhead) but validates the full production restore code path and IAM.",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Verify backup restorability without triggering a full restore.
 
@@ -224,9 +233,7 @@ def test_restore(
 
     batch_role_arn = config.general.s3_batch_role_arn
     if use_batch and not batch_role_arn:
-        typer.echo(
-            "Error: --use-batch requires general.s3_batch_role_arn in config.", err=True
-        )
+        typer.echo("Error: --use-batch requires general.s3_batch_role_arn in config.", err=True)
         raise typer.Exit(1)
 
     any_failure = False
@@ -269,7 +276,9 @@ def test_restore(
             else all_objects
         )
         if len(sample) < sample_size:
-            typer.echo(f"    Sample reduced to {len(sample)} (fewer copyable objects than requested)")
+            typer.echo(
+                f"    Sample reduced to {len(sample)} (fewer copyable objects than requested)"
+            )
 
         # Create temp bucket
         ts = int(datetime.now(timezone.utc).timestamp())
@@ -287,10 +296,16 @@ def test_restore(
             s3.create_bucket(**kwargs)
             s3.put_bucket_tagging(
                 Bucket=temp_bucket,
-                Tagging={"TagSet": [{"Key": "ManagedBy", "Value": "nzshm-backup"}, {"Key": "Type", "Value": "restore-test"}]},
+                Tagging={
+                    "TagSet": [
+                        {"Key": "ManagedBy", "Value": "nzshm-backup"},
+                        {"Key": "Type", "Value": "restore-test"},
+                    ]
+                },
             )
             if use_batch and batch_role_arn:
                 from nzshm_backup.s3_restore import apply_restore_target_policy
+
                 apply_restore_target_policy(s3, temp_bucket, batch_role_arn)
         except Exception as e:
             typer.echo(f"    ✗ Failed to create temp bucket: {e}", err=True)
@@ -303,16 +318,19 @@ def test_restore(
         try:
             if use_batch:
                 # Write a manifest containing only the sampled keys, then submit a Batch job
-                sample_keys = {obj["Key"] for obj in sample}
-
-                def _sample_rows() -> "Iterator[str]":
-                    for obj in sample:
+                def _sample_rows(_s: list = sample, _b: str = backup_bucket) -> Iterator[str]:
+                    for obj in _s:
                         safe_key = obj["Key"].replace('"', '""')
-                        yield f"{backup_bucket},{safe_key}\n"
+                        yield f"{_b},{safe_key}\n"
 
                 from nzshm_backup.s3_batch import write_manifest_to_s3 as _write_manifest
-                manifest_key = f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
-                manifest_etag, manifest_row_count = _write_manifest(s3, _sample_rows(), backup_bucket, manifest_key)
+
+                manifest_key = (
+                    f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
+                )
+                manifest_etag, manifest_row_count = _write_manifest(
+                    s3, _sample_rows(), backup_bucket, manifest_key
+                )
                 typer.echo(f"    Submitting batch job ({len(sample)} objects)...")
                 batch_result = batch_restore_bucket(
                     session=session,
@@ -371,9 +389,17 @@ def test_restore(
                 typer.echo(f"      - {err}", err=True)
             any_failure = True
             append_event(
-                session, backup_bucket, "test_restore", source,
-                details={"bucket": backup_bucket, "result": "failed", "mode": mode,
-                         "sample_size": len(sample), "copy_errors": len(copy_errors)},
+                session,
+                backup_bucket,
+                "test_restore",
+                source,
+                details={
+                    "bucket": backup_bucket,
+                    "result": "failed",
+                    "mode": mode,
+                    "sample_size": len(sample),
+                    "copy_errors": len(copy_errors),
+                },
             )
         elif etag_mismatches:
             typer.echo(f"    ✗ {len(etag_mismatches)} ETag mismatch(es) after copy:", err=True)
@@ -381,16 +407,31 @@ def test_restore(
                 typer.echo(f"      - {key}", err=True)
             any_failure = True
             append_event(
-                session, backup_bucket, "test_restore", source,
-                details={"bucket": backup_bucket, "result": "etag_mismatch", "mode": mode,
-                         "sample_size": len(sample), "etag_mismatches": len(etag_mismatches)},
+                session,
+                backup_bucket,
+                "test_restore",
+                source,
+                details={
+                    "bucket": backup_bucket,
+                    "result": "etag_mismatch",
+                    "mode": mode,
+                    "sample_size": len(sample),
+                    "etag_mismatches": len(etag_mismatches),
+                },
             )
         else:
             typer.echo(f"    ✓ {len(sample)} objects copied and verified")
             append_event(
-                session, backup_bucket, "test_restore", source,
-                details={"bucket": backup_bucket, "result": "passed", "mode": mode,
-                         "sample_size": len(sample)},
+                session,
+                backup_bucket,
+                "test_restore",
+                source,
+                details={
+                    "bucket": backup_bucket,
+                    "result": "passed",
+                    "mode": mode,
+                    "sample_size": len(sample),
+                },
             )
 
         typer.echo("")
@@ -457,9 +498,7 @@ def _delete_temp_bucket(s3_client, bucket_name: str) -> None:
         for page in paginator.paginate(Bucket=bucket_name):
             objects = [{"Key": o["Key"]} for o in page.get("Contents", [])]
             if objects:
-                s3_client.delete_objects(
-                    Bucket=bucket_name, Delete={"Objects": objects}
-                )
+                s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
         s3_client.delete_bucket(Bucket=bucket_name)
     except Exception as e:
         typer.echo(f"    Warning: failed to clean up temp bucket {bucket_name}: {e}", err=True)
@@ -469,7 +508,9 @@ def _delete_temp_bucket(s3_client, bucket_name: str) -> None:
 def test_full_drill(
     source: str = typer.Option(..., help="Data source to test"),
     isolated_environment: bool = typer.Option(False, help="Restore to isolated environment"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
 ):
     """Run quarterly full disaster recovery drill."""
     typer.echo(f"Full DR drill - coming soon for {source}")

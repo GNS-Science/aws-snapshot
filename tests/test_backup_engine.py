@@ -1,12 +1,11 @@
 """Tests for backup_engine.run_backup_source using moto mocks."""
 
-import pytest
 import boto3
+import pytest
 from moto import mock_aws
 
 from nzshm_backup.backup_engine import SourceBackupResult, run_backup_source
 from nzshm_backup.config.models import ConfigModel, GeneralConfig, S3BucketConfig, SourceConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers
