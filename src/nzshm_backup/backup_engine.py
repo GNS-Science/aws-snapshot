@@ -20,7 +20,7 @@ class SourceBackupResult:
     """Aggregated result of backing up a single source (S3 + DynamoDB)."""
 
     source_alias: str
-    s3_results: list[dict] = field(default_factory=list)       # one entry per bucket
+    s3_results: list[dict] = field(default_factory=list)  # one entry per bucket
     dynamodb_results: list[dict] = field(default_factory=list)  # one entry per table
     errors: list[str] = field(default_factory=list)
 
@@ -107,13 +107,18 @@ def run_backup_source(
                 )
                 if not dry_run:
                     write_run_state(
-                        session, backup_bucket_name, bucket_name,
+                        session,
+                        backup_bucket_name,
+                        bucket_name,
                         status=batch_result.status.lower(),
                         batch_job_id=batch_result.job_id,
                         objects_in_manifest=batch_result.objects_in_manifest,
                     )
                     append_event(
-                        session, backup_bucket_name, "backup_run", source_alias,
+                        session,
+                        backup_bucket_name,
+                        "backup_run",
+                        source_alias,
                         details={
                             "bucket": bucket_name,
                             "mode": "batch",
@@ -146,13 +151,18 @@ def run_backup_source(
                 if not dry_run:
                     status = "completed" if sync_result.objects_copied > 0 else "skipped"
                     write_run_state(
-                        session, backup_bucket_name, bucket_name,
+                        session,
+                        backup_bucket_name,
+                        bucket_name,
                         status=status,
                         objects_copied=sync_result.objects_copied,
                         bytes_transferred=sync_result.bytes_transferred,
                     )
                     append_event(
-                        session, backup_bucket_name, "backup_run", source_alias,
+                        session,
+                        backup_bucket_name,
+                        "backup_run",
+                        source_alias,
                         details={
                             "bucket": bucket_name,
                             "mode": "incremental",
@@ -186,7 +196,9 @@ def run_backup_source(
 
         if not dry_run:
             ensure_dynamodb_backup_bucket_ready(
-                session, export_bucket, source_alias=source_alias,
+                session,
+                export_bucket,
+                source_alias=source_alias,
                 source_account_id=source_account_id,
             )
 
@@ -219,7 +231,10 @@ def run_backup_source(
                     s3_buckets[0].label, region, source_account_id, source_alias
                 )
                 append_event(
-                    session, event_bucket, "backup_run", source_alias,
+                    session,
+                    event_bucket,
+                    "backup_run",
+                    source_alias,
                     details={
                         "table": table_name,
                         "mode": "dynamodb_export",
@@ -230,16 +245,17 @@ def run_backup_source(
                 )
 
         if not export_result.success:
-            result.errors.extend(
-                [f"{e['table_arn']}: {e['error']}" for e in export_result.errors]
-            )
+            result.errors.extend([f"{e['table_arn']}: {e['error']}" for e in export_result.errors])
 
     if not dry_run and source_config.s3_buckets:
         event_bucket = source_config.get_backup_bucket_name(
             source_config.s3_buckets[0].label, region, source_account_id, source_alias
         )
         append_event(
-            session, event_bucket, "backup_run_complete", source_alias,
+            session,
+            event_bucket,
+            "backup_run_complete",
+            source_alias,
             details={
                 "success": result.success,
                 "s3_buckets": len(source_config.s3_buckets),

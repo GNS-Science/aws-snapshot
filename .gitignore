@@ -20,3 +20,4 @@ node_modules/
 
 # Local config (contains account IDs and ARNs)
 backup-config.sandbox.yaml
+poetry.lock

@@ -3,8 +3,6 @@
 import json
 from unittest.mock import patch
 
-import boto3
-import pytest
 from moto import mock_aws
 
 from nzshm_backup.config.models import ConfigModel, GeneralConfig, SourceConfig
@@ -108,9 +106,7 @@ def test_handler_unknown_source_captured_in_results():
 
 def test_handler_config_load_failure_returns_500():
     """Exception raised by get_config → 500 with error message."""
-    with patch(
-        "nzshm_backup.lambda_handler.get_config", side_effect=Exception("SSM unreachable")
-    ):
+    with patch("nzshm_backup.lambda_handler.get_config", side_effect=Exception("SSM unreachable")):
         result = handler({"source": "testsrc", "dry_run": True}, None)
 
     assert result["statusCode"] == 500

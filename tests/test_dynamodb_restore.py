@@ -1,9 +1,7 @@
 """Tests for DynamoDB restore operations."""
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from nzshm_backup.dynamodb_restore import (
     DynamoDBRestoreResult,
@@ -52,7 +50,9 @@ def test_make_restore_table_name_exact_max_base():
 
 def test_restore_dry_run_returns_skipped():
     client = MagicMock()
-    result = restore_dynamodb_table(client, TABLE_ARN, "MyTable-restore", RESTORE_POINT, dry_run=True)
+    result = restore_dynamodb_table(
+        client, TABLE_ARN, "MyTable-restore", RESTORE_POINT, dry_run=True
+    )
 
     assert result.status == "SKIPPED"
     assert result.dry_run is True
@@ -165,9 +165,7 @@ def test_describe_restore_status_completed():
 def test_describe_restore_status_no_restore_summary():
     """Table exists but has no RestoreSummary (not a restored table)."""
     client = MagicMock()
-    client.describe_table.return_value = {
-        "Table": {"TableStatus": "ACTIVE"}
-    }
+    client.describe_table.return_value = {"Table": {"TableStatus": "ACTIVE"}}
 
     status = describe_restore_status(client, "some-table")
 

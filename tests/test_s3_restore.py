@@ -151,6 +151,7 @@ def test_restore_empty_backup_bucket():
 # make_restore_bucket_name
 # ---------------------------------------------------------------------------
 
+
 def test_make_restore_bucket_name_short():
     """Short names get -restore appended as-is."""
     assert make_restore_bucket_name("mybucket") == "mybucket-restore"
@@ -184,6 +185,7 @@ def test_make_restore_bucket_name_exactly_63_chars_result():
 # apply_restore_target_policy
 # ---------------------------------------------------------------------------
 
+
 @mock_aws
 def test_apply_restore_target_policy_creates_new_policy():
     """Policy is created on a bucket with no existing policy."""
@@ -194,6 +196,7 @@ def test_apply_restore_target_policy_creates_new_policy():
     apply_restore_target_policy(s3, "restore-target", "arn:aws:iam::123456789012:role/batch-role")
 
     import json
+
     policy = json.loads(s3.get_bucket_policy(Bucket="restore-target")["Policy"])
     sids = [s["Sid"] for s in policy["Statement"]]
     assert "AllowNzshmBatchRoleWrite" in sids
@@ -211,6 +214,7 @@ def test_apply_restore_target_policy_is_merge_safe():
     apply_restore_target_policy(s3, "restore-target", batch_arn)
 
     import json
+
     policy = json.loads(s3.get_bucket_policy(Bucket="restore-target")["Policy"])
     matching = [s for s in policy["Statement"] if s["Sid"] == "AllowNzshmBatchRoleWrite"]
     assert len(matching) == 1

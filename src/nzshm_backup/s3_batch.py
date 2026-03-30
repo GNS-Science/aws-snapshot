@@ -6,14 +6,15 @@ timeout on first-run syncs of multi-million-object buckets.
 
 import logging
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator, Literal
+from typing import Literal
 
 import boto3
 from botocore.exceptions import ClientError
 
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES
-from nzshm_backup.s3_backup import ensure_backup_bucket_ready, get_account_id, get_region
+from nzshm_backup.s3_backup import ensure_backup_bucket_ready, get_region
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +388,9 @@ def batch_restore_bucket(
             )
 
         logger.info(f"Writing restore manifest to s3://{backup_bucket}/{manifest_key}")
-        manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
+        manifest_etag, row_count = write_manifest_to_s3(
+            s3_client, rows, backup_bucket, manifest_key
+        )
     logger.info(f"Restore manifest: {row_count} objects, ETag={manifest_etag}")
 
     if row_count == 0:
@@ -513,13 +516,13 @@ def wait_for_batch_job(
 
     region = get_region(session)
     s3control = session.client("s3control", region_name=region)
-    _TERMINAL = {"Complete", "Failed", "Cancelled"}
+    _terminal = {"Complete", "Failed", "Cancelled"}
     elapsed = 0
 
     while elapsed < timeout:
         resp = s3control.describe_job(AccountId=account_id, JobId=job_id)
         status = resp["Job"]["Status"]
-        if status in _TERMINAL:
+        if status in _terminal:
             logger.info(f"Batch job {job_id} reached terminal state: {status}")
             return status
         logger.info(f"Batch job {job_id}: {status} (elapsed: {elapsed}s)")

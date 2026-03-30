@@ -7,6 +7,11 @@ from typing import Literal
 import boto3
 import typer
 
+from nzshm_backup.config import load_config
+from nzshm_backup.run_state import read_run_state
+from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
+from nzshm_backup.s3_batch import list_recent_batch_jobs
+
 
 def _fmt_dt(dt) -> str:
     """Format datetime (or ISO string) in local timezone."""
@@ -14,10 +19,6 @@ def _fmt_dt(dt) -> str:
         dt = datetime.fromisoformat(dt)
     return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
 
-from nzshm_backup.config import load_config
-from nzshm_backup.run_state import read_run_state
-from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
-from nzshm_backup.s3_batch import list_recent_batch_jobs
 
 app = typer.Typer()
 
@@ -38,7 +39,9 @@ BATCH_STATUS_ICON = {
 
 
 def _get_recent_batch_jobs(s3control_client, account_id: str, source_bucket: str) -> list[dict]:
-    return list_recent_batch_jobs(s3control_client, account_id, source_bucket, limit=BATCH_JOB_LIMIT)
+    return list_recent_batch_jobs(
+        s3control_client, account_id, source_bucket, limit=BATCH_JOB_LIMIT
+    )
 
 
 def _get_recent_exports(dynamodb_client, table_arn: str, limit: int = EXPORT_LIMIT) -> list[dict]:
@@ -56,9 +59,7 @@ def _get_recent_exports(dynamodb_client, table_arn: str, limit: int = EXPORT_LIM
     return exports[:limit]
 
 
-def _print_source_status(
-    source_alias: str, source_config, session: boto3.Session, config
-) -> None:
+def _print_source_status(source_alias: str, source_config, session: boto3.Session, config) -> None:
     source_session = (
         get_cross_account_session(session, source_config.source_account_role_arn)
         if source_config.source_account_role_arn
@@ -106,7 +107,8 @@ def _print_source_status(
         for bucket_config in source_config.s3_buckets:
             source_bucket = bucket_config.arn.split(":::")[-1]
             backup_bucket = source_config.get_backup_bucket_name(
-                bucket_config.label, config.general.region,
+                bucket_config.label,
+                config.general.region,
                 source_config.source_account_id or get_account_id(session),
                 source_alias,
             )
@@ -149,7 +151,8 @@ def _print_source_status(
         typer.echo(f"  S3 buckets (incremental): {len(source_config.s3_buckets)} configured")
         for bucket_config in source_config.s3_buckets:
             backup_bucket = source_config.get_backup_bucket_name(
-                bucket_config.label, config.general.region,
+                bucket_config.label,
+                config.general.region,
                 source_config.source_account_id or get_account_id(session),
                 source_alias,
             )
@@ -161,7 +164,9 @@ def _print_source_status(
                 if st == "completed":
                     detail = f"  {state.get('objects_copied', 0)} objects copied"
                 elif st == "submitted":
-                    detail = f"  job/{state.get('batch_job_id', '')[:8]}…  {state.get('objects_in_manifest', 0)} objects"
+                    job_id = state.get("batch_job_id", "")[:8]
+                    n_obj = state.get("objects_in_manifest", 0)
+                    detail = f"  job/{job_id}…  {n_obj} objects"
                 typer.echo(f"    last run: {checked} — {st}{detail}")
 
 
@@ -186,9 +191,7 @@ def status(
         typer.echo(f"Error: unknown source '{source}'. Valid: {valid}", err=True)
         raise typer.Exit(1)
 
-    sources_to_check = (
-        list(config.sources.keys()) if source == "all" else [source]
-    )
+    sources_to_check = list(config.sources.keys()) if source == "all" else [source]
 
     if output == "json":
         _print_json_status(sources_to_check, config)

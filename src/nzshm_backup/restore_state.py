@@ -41,12 +41,14 @@ def add_pending_restore(
 ) -> None:
     """Append one entry to the pending restore list."""
     entries = read_pending_restores(ssm_client)
-    entries.append({
-        "restore_arn": restore_arn,
-        "source": source,
-        "source_table_arn": source_table_arn,
-        "restore_point": restore_point_iso,
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
-    })
+    entries.append(
+        {
+            "restore_arn": restore_arn,
+            "source": source,
+            "source_table_arn": source_table_arn,
+            "restore_point": restore_point_iso,
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     write_pending_restores(ssm_client, entries)
     logger.info(f"Recorded pending restore in SSM: {restore_arn}")

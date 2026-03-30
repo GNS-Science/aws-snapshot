@@ -1,19 +1,19 @@
 """Restore operations commands."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import boto3
 import typer
 from botocore.exceptions import ClientError
 
 from nzshm_backup.config import load_config
-from nzshm_backup.event_log import append_event
 from nzshm_backup.dynamodb_restore import (
     PITR_WATCHER_RULE_NAME,
     describe_restore_status,
     make_restore_table_name,
     restore_dynamodb_table,
 )
+from nzshm_backup.event_log import append_event
 from nzshm_backup.restore_state import add_pending_restore
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import batch_restore_bucket, list_recent_batch_jobs
@@ -52,7 +52,9 @@ def _parse_point_in_time(ts: str) -> datetime:
     return parse_datetime(ts)
 
 
-def _primary_backup_bucket(config, source: str, source_config, source_account_id: str) -> str | None:
+def _primary_backup_bucket(
+    config, source: str, source_config, source_account_id: str
+) -> str | None:
     """Return the first configured backup bucket for the source (used for event logging)."""
     if not source_config.s3_buckets:
         return None
@@ -103,16 +105,18 @@ def run_restore(
         [], "--tables", help="Table names to restore (default: all configured)"
     ),
     original: bool = typer.Option(
-        False, "--original",
+        False,
+        "--original",
         help="Restore directly into the original source bucket. "
-             "Use only if the original bucket no longer exists. "
-             "Normal DR should use the default -restore target to allow parallel forensics.",
+        "Use only if the original bucket no longer exists. "
+        "Normal DR should use the default -restore target to allow parallel forensics.",
     ),
     target_table: str | None = typer.Option(
         None, help="DynamoDB target table name (single table only)"
     ),
     to_point_in_time: str | None = typer.Option(
-        None, "--to-point-in-time",
+        None,
+        "--to-point-in-time",
         help=(
             "Restore point for DynamoDB PITR (required when restoring tables). "
             "Accepts ISO 8601 (e.g. '2026-03-25T07:50:00+13:00') or the display "
@@ -122,21 +126,26 @@ def run_restore(
         ),
     ),
     latest: bool = typer.Option(
-        False, "--latest",
+        False,
+        "--latest",
         help="Auto-detect restore point from the most recent successful S3 backup run. "
-             "Mutually exclusive with --to-point-in-time.",
+        "Mutually exclusive with --to-point-in-time.",
     ),
     prefix: str | None = typer.Option(None, help="Restore only objects under this S3 key prefix"),
     no_pitr: bool = typer.Option(
-        False, "--no-pitr",
+        False,
+        "--no-pitr",
         help="Skip automatic PITR re-enable after DynamoDB restore. "
-             "Use only for short-lived test restores that will be deleted immediately.",
+        "Use only for short-lived test restores that will be deleted immediately.",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be done without executing"
+    ),
     force: bool = typer.Option(
-        False, "--force",
+        False,
+        "--force",
         help="Delete existing restore-target DynamoDB table before restoring. "
-             "Required when the -restore table already exists from a previous run.",
+        "Required when the -restore table already exists from a previous run.",
     ),
 ):
     """Execute a restore from backup.
@@ -186,6 +195,7 @@ def run_restore(
     # If either is given, it selects only that type — specifying --buckets
     # does not implicitly also restore all tables, and vice versa.
     if buckets or tables:
+
         def _bucket_matches(b, buckets_set: set[str]) -> bool:
             source_name = b.arn.split(":::")[-1]
             backup_name = source_config.get_backup_bucket_name(
@@ -195,11 +205,13 @@ def run_restore(
 
         effective_buckets = (
             [b for b in source_config.s3_buckets if _bucket_matches(b, set(buckets))]
-            if buckets else []
+            if buckets
+            else []
         )
         effective_table_arns = (
             [arn for arn in source_config.dynamodb_tables if arn.split("/")[-1] in tables]
-            if tables else []
+            if tables
+            else []
         )
     else:
         effective_buckets = list(source_config.s3_buckets)
@@ -213,18 +225,25 @@ def run_restore(
     if target_table and len(effective_table_arns) > 1:
         typer.echo(
             "Error: --target-table is only valid for a single table restore. "
-            "Select one with --tables.", err=True
+            "Select one with --tables.",
+            err=True,
         )
         raise typer.Exit(1)
 
     if latest:
-        to_point_in_time = _detect_latest_restore_point(session, config, source, source_config, source_account_id)
+        to_point_in_time = _detect_latest_restore_point(
+            session, config, source, source_config, source_account_id
+        )
         if not to_point_in_time:
             typer.echo(
-                "Error: --latest: no successful backup run state found for any configured bucket.", err=True
+                "Error: --latest: no successful backup run state found for any configured bucket.",
+                err=True,
             )
             raise typer.Exit(1)
-        typer.echo(f"  Auto-detected restore point: {_fmt_dt(to_point_in_time)}  (from last successful S3 backup)")
+        typer.echo(
+            f"  Auto-detected restore point: {_fmt_dt(to_point_in_time)}"
+            "  (from last successful S3 backup)"
+        )
 
     if effective_table_arns and not to_point_in_time and not state.dry_run:
         typer.echo(
@@ -242,8 +261,7 @@ def run_restore(
     is_cross_account = account_id != source_account_id
 
     restore_role_arn_s3 = (
-        source_config.source_account_restore_role_arn
-        or source_config.source_account_role_arn
+        source_config.source_account_restore_role_arn or source_config.source_account_role_arn
     )
     source_session_s3 = (
         get_cross_account_session(session, restore_role_arn_s3)
@@ -256,7 +274,9 @@ def run_restore(
             bucket_cfg.label, region, source_account_id, source
         )
         source_bucket_name = bucket_cfg.arn.split(":::")[-1]
-        dest_bucket = source_bucket_name if original else make_restore_bucket_name(source_bucket_name)
+        dest_bucket = (
+            source_bucket_name if original else make_restore_bucket_name(source_bucket_name)
+        )
         prefix_info = f" (prefix: {prefix})" if prefix else ""
 
         if state.dry_run:
@@ -274,7 +294,9 @@ def run_restore(
             try:
                 apply_restore_target_policy(source_s3_client, dest_bucket, batch_role_arn)
             except Exception as e:
-                typer.echo(f"  Warning: could not apply write policy to {dest_bucket}: {e}", err=True)
+                typer.echo(
+                    f"  Warning: could not apply write policy to {dest_bucket}: {e}", err=True
+                )
 
         if batch_role_arn:
             result = batch_restore_bucket(
@@ -287,7 +309,10 @@ def run_restore(
                 )
                 typer.echo(f"    Check progress: backup restore status --source {source}")
                 append_event(
-                    session, backup_bucket, "restore_submitted", source,
+                    session,
+                    backup_bucket,
+                    "restore_submitted",
+                    source,
                     details={
                         "bucket": dest_bucket,
                         "source_bucket": backup_bucket,
@@ -315,7 +340,10 @@ def run_restore(
                     f"{direct_result.objects_skipped} skipped"
                 )
                 append_event(
-                    session, backup_bucket, "restore_submitted", source,
+                    session,
+                    backup_bucket,
+                    "restore_submitted",
+                    source,
                     details={
                         "bucket": dest_bucket,
                         "source_bucket": backup_bucket,
@@ -337,8 +365,7 @@ def run_restore(
     # ------------------------------------------------------------------
     if effective_table_arns:
         restore_role_arn = (
-            source_config.source_account_restore_role_arn
-            or source_config.source_account_role_arn
+            source_config.source_account_restore_role_arn or source_config.source_account_role_arn
         )
         source_session = (
             get_cross_account_session(session, restore_role_arn)
@@ -373,15 +400,23 @@ def run_restore(
             )
 
             result = restore_dynamodb_table(
-                dynamodb_client, table_arn, dest_table, restore_point,
+                dynamodb_client,
+                table_arn,
+                dest_table,
+                restore_point,
             )
 
             if result.success:
                 typer.echo(f"  ✓ Restore submitted: {dest_table} ({result.restore_arn})")
-                event_bucket = _primary_backup_bucket(config, source, source_config, source_account_id)
+                event_bucket = _primary_backup_bucket(
+                    config, source, source_config, source_account_id
+                )
                 if event_bucket:
                     append_event(
-                        session, event_bucket, "restore_submitted", source,
+                        session,
+                        event_bucket,
+                        "restore_submitted",
+                        source,
                         details={
                             "table_arn": table_arn,
                             "dest_table": dest_table,
@@ -476,10 +511,7 @@ def restore_status(
     # ------------------------------------------------------------------
     # S3 Batch restore jobs
     # ------------------------------------------------------------------
-    effective_buckets = [
-        b for b in source_config.s3_buckets
-        if not buckets or b.label in buckets
-    ]
+    effective_buckets = [b for b in source_config.s3_buckets if not buckets or b.label in buckets]
     if effective_buckets:
         typer.echo("\n  S3 restore jobs:")
         s3control = session.client("s3control", region_name=region)
@@ -489,7 +521,9 @@ def restore_status(
             )
             try:
                 jobs = list_recent_batch_jobs(
-                    s3control, current_account, backup_bucket,
+                    s3control,
+                    current_account,
+                    backup_bucket,
                     limit=RESTORE_BATCH_JOB_LIMIT,
                 )
                 # Filter to restore jobs only (description starts with "nzshm-restore:")
@@ -526,13 +560,11 @@ def restore_status(
     # DynamoDB PITR restore status
     # ------------------------------------------------------------------
     effective_table_arns = [
-        arn for arn in source_config.dynamodb_tables
-        if not tables or arn.split("/")[-1] in tables
+        arn for arn in source_config.dynamodb_tables if not tables or arn.split("/")[-1] in tables
     ]
     if effective_table_arns:
         restore_role_arn = (
-            source_config.source_account_restore_role_arn
-            or source_config.source_account_role_arn
+            source_config.source_account_restore_role_arn or source_config.source_account_role_arn
         )
         source_session = (
             get_cross_account_session(session, restore_role_arn)
@@ -548,7 +580,8 @@ def restore_status(
             try:
                 status = describe_restore_status(dynamodb_client, restore_target)
                 display_status = (
-                    "RESTORED" if status.table_status == "ACTIVE" and not status.restore_in_progress
+                    "RESTORED"
+                    if status.table_status == "ACTIVE" and not status.restore_in_progress
                     else status.table_status
                 )
                 icon = RESTORE_STATUS_ICON.get(display_status, "?")

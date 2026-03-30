@@ -16,7 +16,7 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 | Phase 5        | ✅ Core done | Testing, validation, event audit log |
 | Phase 6        | 🔄 In progress | Parallel run, NSHM cutover (arkivalist done) |
 
-**Tests:** 48 passing · **Coverage:** 72% · **Lint:** ruff + black clean
+**Tests:** 200 passing · **Coverage:** 62% · **Lint:** ruff + black clean
 
 ---
 
@@ -39,8 +39,7 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 ## Installation
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"   # includes pytest, moto, ruff, black, mypy
+uv sync --all-extras      # installs all deps including dev and docs extras
 ```
 
 The `backup` command is registered as a console script and available immediately after install.
@@ -171,7 +170,7 @@ restore:
 
 ```bash
 npm install -g serverless
-pip install -e .
+uv sync --all-extras
 cp backup-config.example.yaml backup-config.yaml   # edit with real values
 ```
 
@@ -221,11 +220,13 @@ See [`backup-config.sandbox.yaml`](backup-config.sandbox.yaml) for the matching 
 ## Development
 
 ```bash
-pytest                    # All tests with coverage
-pytest tests/test_foo.py  # Single file
-ruff check src/ tests/    # Lint
-black src/ tests/         # Format
-mypy src/                 # Type check
+make test                 # All tests with coverage
+make lint                 # ruff + mypy
+make fmt                  # black + ruff --fix
+make check                # lint then test
+make upgrade              # upgrade deps (1-week safety margin)
+
+uv run pytest tests/test_foo.py   # single file
 ```
 
 ---

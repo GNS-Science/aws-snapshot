@@ -133,7 +133,8 @@ class SourceConfig(BaseModel):
         None,
         description="IAM role ARN in the source account to assume for cross-account restore "
         "operations (RestoreTableToPointInTime, PITR re-enable, tag management). "
-        "Required for cross-account DynamoDB restores. If None, falls back to source_account_role_arn.",
+        "Required for cross-account DynamoDB restores. "
+        "If None, falls back to source_account_role_arn.",
     )
     source_account_id: str | None = Field(
         None,
@@ -152,9 +153,7 @@ class SourceConfig(BaseModel):
         """Generate human-readable backup bucket name from source key and bucket label."""
         return f"bb-{source_key}-s3-{bucket_label}-{region}-{account_id}"
 
-    def get_dynamodb_backup_bucket_name(
-        self, source_key: str, region: str, account_id: str
-    ) -> str:
+    def get_dynamodb_backup_bucket_name(self, source_key: str, region: str, account_id: str) -> str:
         """Generate human-readable DynamoDB export bucket name."""
         return f"bb-{source_key}-dynamo-{region}-{account_id}"
 
@@ -200,7 +199,8 @@ class ConfigModel(BaseModel):
         for alias, source in self.sources.items():
             if source.source_account_role_arn and not source.source_account_id:
                 raise ValueError(
-                    f"sources.{alias}: source_account_id is required when source_account_role_arn is set"
+                    f"sources.{alias}: source_account_id is required"
+                    " when source_account_role_arn is set"
                 )
             if source.source_account_role_arn and source.source_account_id:
                 arn_account = source.source_account_role_arn.split(":")[4]
@@ -214,7 +214,8 @@ class ConfigModel(BaseModel):
                 if arn_account != source.source_account_id:
                     raise ValueError(
                         f"sources.{alias}: source_account_id {source.source_account_id!r} "
-                        f"does not match account in source_account_restore_role_arn ({arn_account!r})"
+                        f"does not match account in source_account_restore_role_arn"
+                        f" ({arn_account!r})"
                     )
             if source.source_account_id:
                 for table_arn in source.dynamodb_tables:

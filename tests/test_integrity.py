@@ -1,7 +1,6 @@
 """Tests for backup integrity checking using moto mocks."""
 
 import boto3
-import pytest
 from moto import mock_aws
 
 from nzshm_backup.integrity import IntegrityResult, ObjectDiff, check_bucket_integrity
@@ -100,7 +99,9 @@ def test_extra_backup_objects_not_flagged():
     s3.put_object(Bucket="source", Key="present.txt", Body=b"here")
     s3.put_object(Bucket="backup", Key="present.txt", Body=b"here")
     s3.copy_object(
-        CopySource={"Bucket": "backup", "Key": "present.txt"}, Bucket="backup", Key="deleted-at-source.txt"
+        CopySource={"Bucket": "backup", "Key": "present.txt"},
+        Bucket="backup",
+        Key="deleted-at-source.txt",
     )
 
     result = check_bucket_integrity(s3, "source", "backup")
@@ -137,12 +138,11 @@ def test_cross_account_client_used_for_source():
 def test_source_bucket_error_captured():
     """ClientError listing source → recorded in errors, result not clean."""
     from unittest.mock import MagicMock
+
     from botocore.exceptions import ClientError
 
     real_s3 = boto3.client("s3", region_name=REGION)
-    real_s3.create_bucket(
-        Bucket="backup", CreateBucketConfiguration={"LocationConstraint": REGION}
-    )
+    real_s3.create_bucket(Bucket="backup", CreateBucketConfiguration={"LocationConstraint": REGION})
 
     bad_s3 = MagicMock()
     bad_s3.get_paginator.side_effect = ClientError(
