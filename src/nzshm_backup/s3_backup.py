@@ -394,15 +394,16 @@ def ensure_backup_bucket_ready(
         apply_no_delete_policy(s3_client, backup_bucket_name)
     elif bucket_is_ours(s3_client, backup_bucket_name):
         logger.info(
-            f"Backup bucket {backup_bucket_name} already exists (managed by nzshm-backup), proceeding"
+            f"Backup bucket {backup_bucket_name} already exists"
+            " (managed by nzshm-backup), proceeding"
         )
     else:
-        logger.warning(
-            f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND"
+        msg = (
+            f"Backup bucket {backup_bucket_name} already exists"
+            " but is not managed by nzshm-backup - ABEND"
         )
-        raise ValueError(
-            f"Backup bucket {backup_bucket_name} already exists but is not managed by nzshm-backup - ABEND"
-        )
+        logger.warning(msg)
+        raise ValueError(msg)
 
 
 def backup_source(
