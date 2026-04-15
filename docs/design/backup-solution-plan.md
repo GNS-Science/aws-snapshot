@@ -12,13 +12,19 @@
 
 ## Data Sources
 
-| Source | Size | Storage Type | Backup Method |
-|--------|------|--------------|---------------|
-| ToshiAPI - FileTable | 2.3 GB | DynamoDB | Point-in-Time Export to S3 |
-| ToshiAPI - ThingTable | 16 GB | DynamoDB | Point-in-Time Export to S3 |
-| ToshiBucket | 8 TB | S3 | S3 Copy + Lifecycle Policies |
-| THS_dataset_prod | 1 TB | S3 | S3 Copy + Lifecycle Policies |
-| **Total** | **9 TB + 18.3 GB** | | |
+| Source alias | Resource | Size | Storage Type | Backup Method |
+|--------|------|------|--------------|---------------|
+| `toshi` | ToshiFileObject-PROD | 2.3 GB | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | ToshiIdentity-PROD | — | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | ToshiTableObject-PROD | — | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | ToshiThingObject-PROD | 16 GB | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | nzshm22-toshi-api-prod | 8 TB | S3 | S3 Batch Operations |
+| `ths` | ths-dataset-prod | 1 TB | S3 | S3 Batch Operations |
+| `static` | nzshm22-static-reports | 2.7 TB | S3 | S3 Batch Operations |
+| `weka` | nzshm22-weka-ui-prod | 80 MB | S3 | Incremental sync |
+| **Total** | | **~11.7 TB + 18.3 GB** | | |
+
+All sources are cross-account: source account `210987654321` → backup account `123456789012`.
 
 ---
 
@@ -114,8 +120,8 @@ For current storage tier pricing, monthly cost modelling, and AWS Backup compari
 ### Summary
 
 - **Current (AWS Backup):** $1,700 NZD/month ($20,400/year)
-- **Custom solution (steady-state, aged):** ~$29 NZD/month (~$344/year)
-- **Savings:** ~98% reduction once the 9 TB corpus has aged into Deep Archive
+- **Custom solution (steady-state, aged):** ~$47 NZD/month (~$552/year)
+- **Savings:** ~97% reduction once the 11.7 TB corpus has aged into Deep Archive
 
 ---
 
@@ -374,10 +380,15 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Cross-account session support (`get_cross_account_session`)
 - [x] IAM roles created in Arkivalist account (`nzshm-backup-reader`, `nzshm-backup-restore`)
 - [x] Full backup→restore→validate cycle verified on Arkivalist (S3 + DynamoDB)
-- [ ] Apply cross-account pattern to NSHM production (`210987654321`)
-- [ ] Parallel run with AWS Backup (2-3 months) — toshi + ths
+- [x] Apply cross-account pattern to NSHM production (`210987654321`) — all 4 sources configured
+- [x] IAM roles created in source account (`nzshm-backup-reader`, `nzshm-backup-restore`)
+- [x] Lambda deployed to backup account (`123456789012`), config pushed to SSM
+- [x] Pre-flight `backup check` command verified against all sources
+- [x] Weekly schedules live (weka/ths/static: Wednesday 20:15 NZST; toshi: Thursday 20:15 NZST)
+- [x] Weka smoke test confirmed end-to-end EventBridge → Lambda → S3 path
+- [ ] First full backup run — toshi, ths, static (scheduled this week)
 - [ ] Restore drill against NSHM production data
-- [ ] Cost verification
+- [ ] Cost verification after first month
 - [ ] Cutover planning + AWS Backup decommission
 
 ---
@@ -602,7 +613,7 @@ testing:
 
 ---
 
-**Document Version:** 1.3
-**Created:** 2026-03-09  **Last updated:** 2026-03-18
-**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress (Arkivalist validated; NSHM production pending).
+**Document Version:** 1.4
+**Created:** 2026-03-09  **Last updated:** 2026-04-15
+**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress (NSHM production deployed, weekly schedules live; first full backup run pending).
 **Owner:** NSHM DevOps Team
