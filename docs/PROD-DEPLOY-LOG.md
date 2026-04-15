@@ -303,18 +303,33 @@ BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --sta
 
 ---
 
-## Step 8 — Schedule and run large sources
+## Step 8 — Production schedules ✅ 2026-04-15
 
-Once weka scheduled run confirms the trigger path works:
+Weekly cadence chosen for all sources. DynamoDB exports (toshi) run weekly alongside S3
+rather than on a separate 28-day cycle — cost difference is ~$117 NZD/year, simplicity wins.
+PITR remains always-on for 35-day any-second recovery regardless of export frequency.
+
+`weka`, `ths`, `static` scheduled for Wednesday (tonight); `toshi` staggered to Thursday
+to avoid large S3 Batch and DynamoDB jobs competing with the others.
 
 ```bash
 eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
-BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source toshi --frequency daily --time "02:00 NZST"
-BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source ths --frequency daily --time "02:00 NZST"
-BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source static --frequency daily --time "02:00 NZST"
-BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source toshi
-BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source ths
-BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup status
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source weka --frequency weekly --time "2026-04-15 20:15 NZST"
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source ths --frequency weekly --time "2026-04-15 20:15 NZST"
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source static --frequency weekly --time "2026-04-15 20:15 NZST"
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source toshi --frequency weekly --time "2026-04-16 20:15 NZST"
 ```
 
-_Status: pending weka smoke-test result_
+Final schedule state:
+
+```
+Rule Name                                     State      Schedule                       Local time
+----------------------------------------------------------------------------------------------------
+nzshm-backup-pitr-watcher                     DISABLED   rate(5 minutes)
+nzshm-backup-static-weekly                    ENABLED    cron(15 8 ? * WED *)           → Wednesday 20:15 NZST locally
+nzshm-backup-ths-weekly                       ENABLED    cron(15 8 ? * WED *)           → Wednesday 20:15 NZST locally
+nzshm-backup-toshi-weekly                     ENABLED    cron(15 8 ? * THU *)           → Thursday 20:15 NZST locally
+nzshm-backup-weka-weekly                      ENABLED    cron(15 8 ? * WED *)           → Wednesday 20:15 NZST locally
+```
+
+_Status: weka/ths/static fire tonight 20:15 NZST; toshi fires tomorrow 20:15 NZST_
