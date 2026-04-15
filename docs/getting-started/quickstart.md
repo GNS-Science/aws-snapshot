@@ -20,17 +20,21 @@ backup status --source toshi
 backup status --output json
 ```
 
-## Run a backup (dry run first)
+## Pre-flight check
 
-Always preview before executing:
+Before running a backup for the first time, validate credentials and permissions:
 
 ```bash
-backup run --source toshi --dry-run
+backup check
+backup check --source toshi
 ```
 
-Output shows how many objects would be copied and their total size. No AWS writes occur.
+Fix any `FAIL` items before proceeding. `WARN` items (e.g. backup bucket doesn't exist yet)
+are expected on first run and will be resolved automatically.
 
-Once satisfied, run for real:
+## Run a backup
+
+Run for real:
 
 ```bash
 backup run --source toshi

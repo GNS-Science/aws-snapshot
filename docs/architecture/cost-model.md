@@ -50,30 +50,37 @@ No. The vault storage floor is fixed:
 
 ## Combined cost summary
 
-Steady-state costs once the 9 TB corpus has fully aged into Deep Archive:
+Steady-state costs once the full corpus has aged into Deep Archive.
+Production sources: `toshi` (8TB S3 + 18.3GB DynamoDB), `ths` (1TB), `static` (2.7TB), `weka` (80MB).
 
 | Component | Method | NZD/month | NZD/year |
 |-----------|--------|-----------|---------|
-| ToshiAPI DynamoDB (18.3 GB) | PITR (free) + monthly export | ~$3 | ~$39 |
-| ToshiAPI S3 (8 TB, aged) | Incremental sync + Deep Archive | ~$14 | ~$165 |
-| THS S3 (1 TB, aged) | Incremental sync + Deep Archive | ~$2 | ~$20 |
+| ToshiAPI DynamoDB (18.3 GB) | PITR (free) + weekly export | ~$13 | ~$156 |
+| ToshiAPI S3 (8 TB, aged) | S3 Batch + Deep Archive | ~$14 | ~$165 |
+| THS S3 (1 TB, aged) | S3 Batch + Deep Archive | ~$2 | ~$20 |
+| Static reports S3 (2.7 TB, aged) | S3 Batch + Deep Archive | ~$5 | ~$55 |
+| Weka S3 (80 MB, aged) | Incremental + Deep Archive | <$1 | <$1 |
+| S3 Batch operations (weekly, all sources) | — | ~$3 | ~$36 |
 | Lambda + EventBridge | — | ~$10 | ~$120 |
-| **Total (steady-state)** | | **~$29** | **~$344** |
+| **Total (steady-state)** | | **~$47** | **~$552** |
 
-> **Note:** During the initial sync period (first 3 months), the 9 TB corpus sits
-> in Standard and Glacier Instant tiers — monthly cost is closer to $588 NZD.
+> **Note:** During the initial sync period (first 3 months), 11.7 TB sits in Standard
+> and Glacier Instant tiers — monthly cost is significantly higher while the corpus ages.
 > See [Retention Strategy and Costs](../design/retention-strategy-and-costs.md)
 > for the full lifecycle cost breakdown and churn-rate sensitivity table.
+>
+> **`static` source** (`nzshm22-static-reports`, ~40M objects / 2.7TB) was not included
+> in the original cost model. At steady-state it adds ~$88 NZD/year (storage + S3 Batch).
+> First-run S3 Batch cost for 40M objects: ~$63 NZD one-time.
 
 ### Active Experiment Mode uplift
 
 During periods of active data churn (scientists running sensitivity analyses),
-switching to weekly or daily DynamoDB exports increases costs:
+switching to daily DynamoDB exports increases costs:
 
 | Cadence | DynamoDB export cost/year | Notes |
 |---------|--------------------------|-------|
-| Monthly (default) | ~$39 NZD | Recommended steady-state |
-| Weekly | ~$156 NZD | Active experiment periods |
+| Weekly (production default) | ~$156 NZD | Deployed cadence |
 | Daily | ~$1,095 NZD | High-frequency sensitivity analysis |
 
 S3 costs also rise during active churn — see the churn-rate table in
@@ -83,19 +90,20 @@ S3 costs also rise during active churn — see the churn-rate table in
 
 ## S3 Batch Operations cost impact
 
-For the ToshiBucket (~8 million objects), large initial syncs exceed Lambda's
-15-minute timeout using per-object `copy_object` calls. S3 Batch Operations
-submits an async job and exits:
+For large buckets, per-object `copy_object` calls would exceed Lambda's 15-minute timeout.
+S3 Batch Operations submits an async job and exits. Production sources using S3 Batch:
+`toshi` (~8M objects), `ths` (~4M objects), `static` (~40M objects).
 
 | Scenario | `copy_object` | S3 Batch |
 |----------|--------------|----------|
-| First run (8M objects) | ~$63 NZD (+ failed/incomplete) | ~$13 NZD |
-| Weekly incremental (~8K changed) | ~$0.06 NZD | ~$0.39 NZD |
+| First run — toshi (8M objects) | ~$63 NZD (+ failed/incomplete) | ~$13 NZD |
+| First run — ths (4M objects) | timeout | ~$7 NZD |
+| First run — static (40M objects) | timeout | ~$63 NZD |
+| Weekly incremental (~few K changed) | ~$0.06 NZD | ~$0.39 NZD/run |
 
-The $0.25 USD flat fee per Batch job dominates on small incremental runs (~$13 NZD/year
-for weekly toshi runs) — immaterial in the overall model. The first-run saving is
-significant, and per-object `copy_object` simply cannot complete at 8M objects within
-Lambda timeout.
+The $0.25 USD flat fee per Batch job dominates on small incremental runs (~$0.39 NZD/run).
+For all three Batch sources running weekly: ~$61 NZD/year in job fees — immaterial in the
+overall model.
 
 Full details: [S3 Batch Operations](s3-batch-operations.md).
 

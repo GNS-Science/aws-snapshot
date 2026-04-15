@@ -1,5 +1,18 @@
 # Backup Operations
 
+## Pre-flight check
+
+Before running a backup for the first time (or after config changes), run the pre-flight check:
+
+```bash
+backup check
+backup check --source toshi
+```
+
+This validates IAM credentials, cross-account role assumption, source bucket read access,
+backup bucket existence, S3 Batch role presence, and DynamoDB PITR status — without
+enumerating objects. Completes in seconds. Fix any `FAIL` items before proceeding.
+
 ## Running a backup
 
 ```bash
@@ -9,7 +22,7 @@ backup run --source toshi
 # Backup all configured sources
 backup run --source all
 
-# Dry run — shows what would be copied, no AWS writes
+# Dry run — performs an access check only, no AWS writes
 backup run --source toshi --dry-run
 
 # Force a full sync (ignores ETag matching)
@@ -46,8 +59,9 @@ lifecycle policy at `max_age_days` (default 365).
 
 For sources with `use_s3_batch: true`, the backup engine submits an S3 Batch
 Operations job instead of per-object `copy_object` calls. This is required for
-buckets with millions of objects (e.g. ToshiBucket with ~8M objects) where
-per-object copy would exceed Lambda's 15-minute timeout.
+buckets with millions of objects where per-object copy would exceed Lambda's
+15-minute timeout. Production sources using S3 Batch: `toshi` (~8M objects),
+`ths` (~4M objects), `static` (~40M objects).
 
 The CLI submits the job and returns immediately:
 
@@ -55,8 +69,11 @@ The CLI submits the job and returns immediately:
 Batch job submitted: job-12345 (8192 objects)
 ```
 
-Monitor progress in the AWS console (S3 → Batch Operations) or wait for the
-CloudWatch alarm to notify on completion.
+Monitor progress in the AWS console (S3 → Batch Operations) or check with `backup status`.
+
+**Dry run for S3 Batch sources:** performs a single `list_objects_v2(MaxKeys=1)` access
+check and returns immediately — it does not enumerate objects. `objects_in_manifest` is
+reported as `-1` (not enumerated).
 
 To enable S3 Batch for a source, set in your config:
 
