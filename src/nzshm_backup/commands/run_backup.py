@@ -73,7 +73,12 @@ def run(
                 logger.error(f"Backup failed for {r['bucket_name']}: {r['error']}")
             elif "batch_job_id" in r:
                 prefix = "[DRY RUN] " if state.dry_run else ""
-                if r["batch_status"] == "SKIPPED":
+                if state.dry_run:
+                    typer.echo(
+                        f"{prefix}Would submit S3 Batch job for {r['bucket_name']} "
+                        f"(object count not enumerated — use 'backup check' for access validation)"
+                    )
+                elif r["batch_status"] == "SKIPPED":
                     typer.echo(f"{prefix}Batch: nothing to copy for {r['bucket_name']}")
                 else:
                     typer.echo(

@@ -65,6 +65,7 @@ def main(
 
 
 # Import and register subcommand groups (must be after main() to avoid circular imports)
+from nzshm_backup.commands.check import app as check_app  # noqa: E402
 from nzshm_backup.commands.config import app as config_app  # noqa: E402
 from nzshm_backup.commands.costs import app as costs_app  # noqa: E402
 from nzshm_backup.commands.events import app as events_app  # noqa: E402
@@ -75,6 +76,7 @@ from nzshm_backup.commands.schedule import app as schedule_app  # noqa: E402
 from nzshm_backup.commands.status import app as status_app  # noqa: E402
 from nzshm_backup.commands.test import app as test_app  # noqa: E402
 
+app.add_typer(check_app, name="check", help="Pre-flight access and configuration checks.")
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")
 app.add_typer(run_app, name="run", help="Execute manual backup.")
 app.add_typer(restore_app, name="restore", help="Manage backup restores. (TODO)")
