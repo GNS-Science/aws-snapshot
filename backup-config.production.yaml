@@ -33,7 +33,7 @@ sources:
       label: dataset-prod
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
-    use_s3_batch: false
+    use_s3_batch: true
   static:
     display_name: "Static reports (production \u2014 account 461564345538)"
     source_account_id: '461564345538'
@@ -44,7 +44,7 @@ sources:
       label: static-reports
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
-    use_s3_batch: false
+    use_s3_batch: true
   weka:
     display_name: "Weka UI prod (production \u2014 account 461564345538)"
     source_account_id: '461564345538'
