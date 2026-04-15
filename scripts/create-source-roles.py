@@ -205,16 +205,16 @@ def build_restore_policy(
 
 
 def _create_or_update_role(iam, role_name: str, trust_policy: dict, permission_policy: dict,
-                            description: str, dry_run: bool) -> str:
+                            description: str, dry_run: bool, account_id: str = "") -> str:
     """Create or update an IAM role and its inline policy. Returns the role ARN."""
     if dry_run:
         print(f"\n[DRY RUN] Would create/update role: {role_name}")
         print(f"  Description: {description}")
         print(f"  Trust policy:\n{json.dumps(trust_policy, indent=4)}")
         print(f"  Permission policy:\n{json.dumps(permission_policy, indent=4)}")
-        # Return a plausible ARN for dry-run write-back previews
-        caller = boto3.client("sts").get_caller_identity()
-        return f"arn:aws:iam::{caller['Account']}:role/{role_name}"
+        # Return a plausible ARN for dry-run write-back previews.
+        # account_id is passed in so no extra STS call is needed.
+        return f"arn:aws:iam::{account_id}:role/{role_name}"
 
     try:
         resp = iam.create_role(
@@ -347,7 +347,12 @@ def write_back_role_arns(config_path: str, source_alias: str,
     print(f"    sources.{source_alias}.source_account_restore_role_arn = {restore_arn}")
 
 
-def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_override: str | None):
+def resolve_from_config(
+    config_path: str,
+    source_alias: str,
+    batch_role_arn_override: str | None,
+    backup_account_id_override: str | None = None,
+):
     """Load config and return (backup_account_id, region, s3_buckets, dynamodb_tables, batch_role_arn)."""
     with open(config_path) as f:
         data = yaml.safe_load(f)
@@ -362,16 +367,19 @@ def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_over
 
     source = sources[source_alias]
 
-    lambda_arn = general.get("lambda_arn", "")
-    parts = lambda_arn.split(":")
-    if len(parts) < 6 or not parts[4].isdigit():
-        print(
-            f"ERROR: cannot derive backup account ID from general.lambda_arn={lambda_arn!r}.\n"
-            "  Use --backup-account-id to provide it explicitly.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    backup_account_id = parts[4]
+    if backup_account_id_override:
+        backup_account_id = backup_account_id_override
+    else:
+        lambda_arn = general.get("lambda_arn") or ""
+        parts = lambda_arn.split(":")
+        if len(parts) < 6 or not parts[4].isdigit():
+            print(
+                f"ERROR: cannot derive backup account ID from general.lambda_arn={lambda_arn!r}.\n"
+                "  Use --backup-account-id to provide it explicitly.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        backup_account_id = parts[4]
     region = general.get("region", "ap-southeast-2")
 
     s3_buckets = [b["arn"].split(":::")[-1] for b in source.get("s3_buckets", [])]
@@ -409,16 +417,15 @@ def main():
     args = parser.parse_args()
 
     config_mode = args.config is not None and args.source is not None
-    explicit_mode = args.backup_account_id is not None
+    explicit_mode = args.backup_account_id is not None and not config_mode
 
-    if config_mode and explicit_mode:
-        parser.error("Use either --config/--source OR --backup-account-id, not both.")
     if not config_mode and not explicit_mode:
         parser.error("Provide either --config + --source, or --backup-account-id.")
 
     if config_mode:
         backup_account_id, region, s3_buckets, dynamodb_tables, batch_role_arn = resolve_from_config(
-            args.config, args.source, args.batch_role_arn
+            args.config, args.source, args.batch_role_arn,
+            backup_account_id_override=args.backup_account_id,
         )
     else:
         backup_account_id = args.backup_account_id
@@ -447,11 +454,13 @@ def main():
         iam, READER_ROLE_NAME, trust_policy, reader_policy,
         description="Read-only role assumed by nzshm-backup Lambda for S3 backup and DynamoDB exports",
         dry_run=args.dry_run,
+        account_id=account_id,
     )
     restore_arn = _create_or_update_role(
         iam, RESTORE_ROLE_NAME, trust_policy, restore_policy,
         description="Restore role assumed by nzshm-backup for DynamoDB PITR restore and PITR re-enable",
         dry_run=args.dry_run,
+        account_id=account_id,
     )
 
     if batch_role_arn and s3_buckets:
