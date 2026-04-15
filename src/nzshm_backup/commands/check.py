@@ -3,6 +3,7 @@
 import boto3
 import typer
 from botocore.exceptions import ClientError
+from pydantic import ValidationError
 
 from nzshm_backup.config import load_config
 from nzshm_backup.config.models import ConfigModel
@@ -35,6 +36,9 @@ def check(
         config = load_config()
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+    except ValidationError as e:
+        typer.echo(f"Error: invalid config — {e}", err=True)
         raise typer.Exit(1) from e
 
     if source == "all":
