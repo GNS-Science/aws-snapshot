@@ -190,10 +190,14 @@ def test_check_cross_account_role_pass(cross_account_batch_config, monkeypatch):
     }
 
     mock_session.client.side_effect = lambda svc, **kw: {
-        "sts": mock_sts, "s3": mock_s3, "iam": mock_iam
+        "sts": mock_sts,
+        "s3": mock_s3,
+        "iam": mock_iam,
     }.get(svc, MagicMock())
     mock_source_session.client.side_effect = lambda svc, **kw: {
-        "sts": mock_source_sts, "s3": mock_s3, "dynamodb": mock_dynamo
+        "sts": mock_source_sts,
+        "s3": mock_s3,
+        "dynamodb": mock_dynamo,
     }.get(svc, MagicMock())
 
     with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
@@ -253,6 +257,48 @@ def test_check_source_bucket_unreadable(same_account_s3_config, monkeypatch):
     assert "ths-dataset-prod" in result.output
 
 
+def test_check_backup_bucket_versioning_enabled_passes(same_account_s3_config, monkeypatch):
+    """Existing backup bucket with versioning enabled shows PASS."""
+    monkeypatch.chdir(same_account_s3_config)
+
+    mock_session = MagicMock()
+    mock_sts = MagicMock()
+    mock_sts.get_caller_identity.return_value = {"Account": ACCOUNT_ID, "Arn": "arn:backup"}
+    mock_s3 = MagicMock()
+    mock_s3.list_objects_v2.return_value = {}
+    mock_s3.head_bucket.return_value = {}
+    mock_s3.get_bucket_versioning.return_value = {"Status": "Enabled"}
+    mock_session.client.side_effect = lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
+
+    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+        result = runner.invoke(app, ["check", "--source", "ths"])
+
+    assert result.exit_code == 0
+    assert "Versioning" in result.output
+    assert "Enabled" in result.output
+
+
+def test_check_backup_bucket_versioning_disabled_fails(same_account_s3_config, monkeypatch):
+    """Existing backup bucket without versioning is a FAIL."""
+    monkeypatch.chdir(same_account_s3_config)
+
+    mock_session = MagicMock()
+    mock_sts = MagicMock()
+    mock_sts.get_caller_identity.return_value = {"Account": ACCOUNT_ID, "Arn": "arn:backup"}
+    mock_s3 = MagicMock()
+    mock_s3.list_objects_v2.return_value = {}
+    mock_s3.head_bucket.return_value = {}
+    mock_s3.get_bucket_versioning.return_value = {}
+    mock_session.client.side_effect = lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
+
+    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+        result = runner.invoke(app, ["check", "--source", "ths"])
+
+    assert result.exit_code == 1
+    assert "Versioning" in result.output
+    assert "status=Disabled" in result.output
+
+
 # ---------------------------------------------------------------------------
 # S3 Batch role missing
 # ---------------------------------------------------------------------------
@@ -281,7 +327,10 @@ def test_check_pitr_disabled_is_warn_not_fail(cross_account_batch_config, monkey
     mock_sts = MagicMock()
     mock_sts.get_caller_identity.return_value = {"Account": ACCOUNT_ID, "Arn": "arn:backup"}
     mock_source_sts = MagicMock()
-    mock_source_sts.get_caller_identity.return_value = {"Account": SOURCE_ACCOUNT_ID, "Arn": "arn:src"}
+    mock_source_sts.get_caller_identity.return_value = {
+        "Account": SOURCE_ACCOUNT_ID,
+        "Arn": "arn:src",
+    }
     mock_s3 = MagicMock()
     mock_s3.list_objects_v2.return_value = {}
     mock_s3.head_bucket.side_effect = _client_error("404")
@@ -295,10 +344,14 @@ def test_check_pitr_disabled_is_warn_not_fail(cross_account_batch_config, monkey
     }
 
     mock_session.client.side_effect = lambda svc, **kw: {
-        "sts": mock_sts, "s3": mock_s3, "iam": mock_iam
+        "sts": mock_sts,
+        "s3": mock_s3,
+        "iam": mock_iam,
     }.get(svc, MagicMock())
     mock_source_session.client.side_effect = lambda svc, **kw: {
-        "sts": mock_source_sts, "s3": mock_s3, "dynamodb": mock_dynamo
+        "sts": mock_source_sts,
+        "s3": mock_s3,
+        "dynamodb": mock_dynamo,
     }.get(svc, MagicMock())
 
     with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):

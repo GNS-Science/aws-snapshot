@@ -2,6 +2,7 @@
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from nzshm_backup.s3_backup import (
@@ -277,3 +278,28 @@ def test_ensure_backup_bucket_ready_enables_versioning(s3_client):
 
     resp = s3_client.get_bucket_versioning(Bucket=bucket_name)
     assert resp.get("Status") == "Enabled"
+
+
+def test_ensure_backup_bucket_ready_versioning_access_denied_has_remediation(s3_client):
+    """AccessDenied on PutBucketVersioning raises a remediation-focused error."""
+    from unittest.mock import patch
+
+    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+
+    bucket_name = "test-new-backup-bucket-perm"
+    session = boto3.Session(region_name="ap-southeast-2")
+    s3 = session.client("s3")
+    sts = session.client("sts")
+    err = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+        "PutBucketVersioning",
+    )
+
+    with patch.object(s3, "put_bucket_versioning", side_effect=err):
+        with patch.object(
+            session,
+            "client",
+            side_effect=lambda svc, **kw: sts if svc == "sts" else s3,
+        ):
+            with pytest.raises(RuntimeError, match="missing s3:PutBucketVersioning permission"):
+                ensure_backup_bucket_ready(session, bucket_name)

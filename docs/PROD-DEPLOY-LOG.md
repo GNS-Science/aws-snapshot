@@ -150,6 +150,126 @@ eval $(aws configure export-credentials --profile nshm-backup-admin --format env
 BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
 ```
 
+---
+
+## Step 10 — THS versioning incident response (guardrail-first) ⚠️ 2026-04-16
+
+Created isolation branch for incident work and guardrails:
+
+```bash
+git checkout -b fix/ths-versioning-guardrails
+```
+
+### Code fixes completed
+
+- Added backup-bucket versioning guardrail to `backup check`:
+  - existing bucket + versioning enabled => `PASS`
+  - existing bucket + versioning disabled/missing => `FAIL`
+- Added remediation-focused error on first-run bucket bootstrap when
+  `s3:PutBucketVersioning` is denied.
+- Updated Lambda IAM template permissions in `serverless.yml`:
+  - `s3:GetBucketVersioning`
+  - `s3:PutBucketVersioning`
+- Added tests for:
+  - check-command versioning pass/fail behavior
+  - AccessDenied regression path for versioning enable during bootstrap
+
+Validation in repo:
+
+```bash
+uv run pytest tests/test_check_command.py tests/test_s3_backup.py
+uv run ruff check src/nzshm_backup/commands/check.py src/nzshm_backup/s3_backup.py tests/test_check_command.py tests/test_s3_backup.py
+```
+
+### Guardrail validation in production (before remediation)
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup check --source ths
+```
+
+```text
+Source: ths
+  [PASS] Backup account credentials  737696831915
+  [PASS] Assume role nzshm-backup-reader  arn:aws:sts::461564345538:assumed-role/nzshm-backup-reader/nzshm-backup
+  [PASS] Read ths-dataset-prod
+  [PASS] Backup bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  exists
+  [FAIL] Versioning bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  status=Disabled — enable before backup
+  [PASS] S3 Batch role nzshm-backup-batch-role
+
+One or more checks FAILED — review errors above before running backup.
+```
+
+Interpretation: guardrail worked as intended and blocked THS backup readiness while
+object versioning protection was disabled.
+
+### Remediation executed
+
+Enabled versioning on the existing THS backup bucket:
+
+```bash
+aws s3api put-bucket-versioning \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538 \
+  --versioning-configuration Status=Enabled
+```
+
+Verification:
+
+```bash
+aws s3api get-bucket-versioning \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538 \
+  --query 'Status' --output text
+```
+
+Output: `Enabled`
+
+Re-ran guardrail check:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup check --source ths
+```
+
+```text
+Source: ths
+  [PASS] Backup account credentials  737696831915
+  [PASS] Assume role nzshm-backup-reader  arn:aws:sts::461564345538:assumed-role/nzshm-backup-reader/nzshm-backup
+  [PASS] Read ths-dataset-prod
+  [PASS] Backup bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  exists
+  [PASS] Versioning bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  Enabled
+  [PASS] S3 Batch role nzshm-backup-batch-role
+
+All checks passed.
+```
+
+### Verification schedule (short-interval)
+
+Added a temporary THS daily schedule to validate the fix path quickly:
+
+```bash
+run_time=$(TZ=Pacific/Auckland date -v+5M "+%Y-%m-%d %H:%M %Z")
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source ths --frequency daily --time "$run_time"
+```
+
+Result:
+
+```text
+Rule 'nzshm-backup-ths-daily' created/updated: cron(36 22 * * ? *)  → 10:36 NZST locally
+Target registered: arn:aws:lambda:ap-southeast-2:737696831915:function:nzshm-backup-service-prod-backup
+```
+
+`backup schedule show` confirms both rules are enabled:
+- `nzshm-backup-ths-weekly` (normal production cadence)
+- `nzshm-backup-ths-daily` (temporary verification rule)
+
+### THS re-run note
+
+Started `backup run --source ths` manually, but cancelled interactive execution because
+listing/manifest generation for this source is too large for a live interactive run.
+Full completion verification is deferred to scheduled run + log/S3 Batch status review.
+
 Config pushed to SSM parameter: `/nzshm-backup/prod/config`
 
 Dry runs (still running at time of writing — large buckets):

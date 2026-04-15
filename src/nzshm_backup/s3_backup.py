@@ -260,11 +260,25 @@ def enable_versioning(s3_client, bucket_name: str) -> None:
         s3_client:   boto3 S3 client
         bucket_name: Name of bucket to enable versioning on
     """
-    s3_client.put_bucket_versioning(
-        Bucket=bucket_name,
-        VersioningConfiguration={"Status": "Enabled"},
-    )
-    logger.info(f"Enabled versioning on {bucket_name}")
+    try:
+        s3_client.put_bucket_versioning(
+            Bucket=bucket_name,
+            VersioningConfiguration={"Status": "Enabled"},
+        )
+        logger.info(f"Enabled versioning on {bucket_name}")
+    except ClientError as e:
+        code = e.response["Error"].get("Code", "Unknown")
+        if code == "AccessDenied":
+            raise RuntimeError(
+                "Failed to enable versioning on backup bucket "
+                f"{bucket_name}: missing s3:PutBucketVersioning permission. "
+                "Grant this permission to the backup execution role, then run: "
+                f"aws s3api put-bucket-versioning --bucket {bucket_name} "
+                "--versioning-configuration Status=Enabled"
+            ) from e
+        raise RuntimeError(
+            f"Failed to enable versioning on backup bucket {bucket_name}: {code}"
+        ) from e
 
 
 def sync_bucket(
