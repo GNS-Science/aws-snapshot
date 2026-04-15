@@ -87,22 +87,8 @@ functions:
   backup:
     handler: nzshm_backup.lambda_handler.handler
     description: Backup orchestration for NSHM datasets
-    events:
-      - eventBridge:
-          enabled: false
-          schedule: rate(7 days)
-          description: Weekly backup trigger
-          input:
-            source: "all"
-            trigger_type: "scheduled"
-      - eventBridge:
-          enabled: false
-          schedule: rate(1 day)
-          description: Daily backup for active experiment mode
-          input:
-            source: "all"
-            trigger_type: "scheduled"
-            full_sync: false
+    # No default EventBridge triggers — schedules are managed per-source via
+    # `backup schedule add` which creates named rules targeting this Lambda.
 
 custom:
   pythonRequirements:
