@@ -237,13 +237,84 @@ That source was killed mid-dry-run; will be scheduled separately.
 
 ---
 
-## Step 7 — First live backup run (large sources)
+## Step 7 — Schedule weka as EventBridge smoke test ✅ 2026-04-15
+
+Before scheduling the large sources, added a daily schedule for `weka` to verify the
+EventBridge → Lambda trigger path end-to-end. Scheduled to fire at 14:21 NZST (02:21 UTC)
+— approximately 5 minutes after the rule was created.
 
 ```bash
 eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add \
+    --source weka \
+    --frequency daily \
+    --time "14:21 NZST"
+```
+
+Output:
+```
+Rule 'nzshm-backup-weka-daily' created/updated: cron(21 2 * * ? *)  → 14:21 NZST locally
+Target registered: arn:aws:lambda:ap-southeast-2:737696831915:function:nzshm-backup-service-prod-backup
+```
+
+Two disabled stub rules (`nzshm-backup-service-prod-backup-rule-1/2`) are leftover from
+Serverless Framework deployment — not a concern.
+
+```bash
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule show
+```
+
+```
+Rule Name                                     State      Schedule                       Local time
+----------------------------------------------------------------------------------------------------
+nzshm-backup-pitr-watcher                     DISABLED   rate(5 minutes)
+nzshm-backup-service-prod-backup-rule-1       DISABLED   rate(7 days)
+nzshm-backup-service-prod-backup-rule-2       DISABLED   rate(1 day)
+nzshm-backup-weka-daily                       ENABLED    cron(21 2 * * ? *)             → 14:21 NZST locally
+```
+
+**14:21 NZST trigger — FAILED.** Lambda fired correctly but errored: `Unknown source alias: weka`.
+Root cause: config in SSM (`/nzshm-backup/prod/config`) was stale — `weka` source had not been
+pushed after being added to `backup-config.production.yaml`.
+
+Fix — push updated config to SSM:
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
+```
+
+Rule updated to fire 3 minutes later (14:34 NZST) as a re-test:
+
+```bash
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add \
+    --source weka \
+    --frequency daily \
+    --time "14:34 NZST"
+```
+
+**14:34 NZST trigger — SUCCESS.** 1 object copied (incremental — only the event log was new
+since the earlier manual run). EventBridge → Lambda → SSM config → S3 path confirmed working.
+
+**Lesson:** always push config to SSM after modifying `backup-config.production.yaml`:
+```bash
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
+```
+
+---
+
+## Step 8 — Schedule and run large sources
+
+Once weka scheduled run confirms the trigger path works:
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source toshi --frequency daily --time "02:00 NZST"
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source ths --frequency daily --time "02:00 NZST"
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source static --frequency daily --time "02:00 NZST"
 BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source toshi
 BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source ths
 BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup status
 ```
 
-_Status: pending_
+_Status: pending weka smoke-test result_
