@@ -26,9 +26,11 @@ provider:
             - s3:CopyObject
             - s3:CreateBucket
             - s3:GetBucketTagging
+            - s3:GetBucketVersioning
             - s3:PutLifecycleConfiguration
             - s3:PutBucketPolicy
             - s3:PutBucketTagging
+            - s3:PutBucketVersioning
           Resource:
             - "*"
         - Effect: Allow
