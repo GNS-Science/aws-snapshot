@@ -24,15 +24,35 @@ sources:
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
   ths:
-    display_name: "THS + static reports (production \u2014 account 461564345538)"
+    display_name: "THS dataset (production \u2014 account 461564345538)"
     source_account_id: '461564345538'
     source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
     source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
     s3_buckets:
     - arn: arn:aws:s3:::ths-dataset-prod
       label: dataset-prod
+    dynamodb_tables: []
+    dynamodb_export_format: DYNAMODB_JSON
+    use_s3_batch: false
+  static:
+    display_name: "Static reports (production \u2014 account 461564345538)"
+    source_account_id: '461564345538'
+    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    s3_buckets:
     - arn: arn:aws:s3:::nzshm22-static-reports
       label: static-reports
+    dynamodb_tables: []
+    dynamodb_export_format: DYNAMODB_JSON
+    use_s3_batch: false
+  weka:
+    display_name: "Weka UI prod (production \u2014 account 461564345538)"
+    source_account_id: '461564345538'
+    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    s3_buckets:
+    - arn: arn:aws:s3:::nzshm22-weka-ui-prod
+      label: weka-ui-prod
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: false

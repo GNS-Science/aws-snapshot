@@ -81,29 +81,33 @@ Inline policy `nzshm-backup-batch-permissions` attached.
 
 **Run as:** source account `461564345538` (`nshm-admin` profile)
 
+Initial attempt ran per-source, which caused the second run (`ths`) to overwrite the reader
+role policy set by the first (`toshi`), losing toshi bucket permissions. Corrected by running
+once in explicit mode covering all buckets and tables across both sources.
+
 ```bash
 uv run python scripts/create-source-roles.py \
-    --config backup-config.production.yaml --source toshi \
-    --backup-account-id 737696831915 --profile nshm-admin
-
-uv run python scripts/create-source-roles.py \
-    --config backup-config.production.yaml --source ths \
-    --backup-account-id 737696831915 --profile nshm-admin
+    --backup-account-id 737696831915 \
+    --s3-buckets nzshm22-toshi-api-prod ths-dataset-prod nzshm22-static-reports \
+    --dynamodb-tables ToshiFileObject-PROD ToshiIdentity-PROD ToshiTableObject-PROD ToshiThingObject-PROD \
+    --batch-role-arn arn:aws:iam::737696831915:role/nzshm-backup-batch-role \
+    --profile nshm-admin
 ```
 
 Note: `--backup-account-id` is required because `general.lambda_arn` is not yet set (Lambda
 not yet deployed). Script was patched to accept this flag alongside `--config/--source`.
 
 Roles created/updated in `461564345538`:
-- `arn:aws:iam::461564345538:role/nzshm-backup-reader` — reader + DynamoDB export permissions
+- `arn:aws:iam::461564345538:role/nzshm-backup-reader` — read all 3 source buckets + 4 DynamoDB tables
 - `arn:aws:iam::461564345538:role/nzshm-backup-restore` — PITR restore + tag management
 
-Both role ARNs written back to `backup-config.production.yaml` for `toshi` and `ths`.
-
-S3 bucket policies applied to `nzshm22-toshi-api-prod` allowing `nzshm-backup-batch-role`
+S3 bucket policies applied to all 3 source buckets allowing `nzshm-backup-batch-role`
 read (backup direction) and write (restore direction).
-Note: `nzshm22-toshi-api-prod-restore` does not exist yet — write policy will be applied at
-restore time.
+Restore target buckets (`*-restore`) skipped — don't exist yet, policy applied at restore time.
+
+**Known limitation:** running `create-source-roles.py` per-source for the same account
+overwrites the shared role's inline policy. Always use explicit mode (all buckets/tables in
+one invocation) when multiple sources share an account, or re-run for the last source last.
 
 ---
 
@@ -133,24 +137,113 @@ Notes:
 
 ---
 
-## Step 5 — Push config to SSM and run dry-run
+## Step 5 — Push config to SSM and run dry-run ✅ 2026-04-15
+
+**Run as:** backup account `737696831915`
+
+`BACKUP_CONFIG_PATH` must be set — the `backup config` subcommands had a bug where they
+ignored this env var (fixed in this session, `commands/config.py`). `--stage prod` is also
+required; the default stage is `dev`.
 
 ```bash
-backup config push
-backup run --source toshi --dry-run
-backup run --source ths --dry-run
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
 ```
 
-_Status: pending_
+Config pushed to SSM parameter: `/nzshm-backup/prod/config`
+
+Dry runs (still running at time of writing — large buckets):
+
+```bash
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source toshi --dry-run
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source ths --dry-run
+```
+
+Note: dry-run for `toshi` does a full local object listing (~8M objects, ~80k S3 API pages)
+even though the real run uses S3 Batch. Expect this to take 10–20 minutes. The actual backup
+run submits a Batch job and returns immediately.
+
+Dry-run approach abandoned — for S3 Batch sources, listing 8M objects locally is slow and
+unrepresentative. Fixed: `batch_backup_source` dry-run now does a single access-check call
+instead. Added `backup check` pre-flight command (see Step 5b).
+
+### Step 5b — Pre-flight check ✅ 2026-04-15
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup check
+```
+
+Results:
+- All IAM role assumptions: PASS
+- All source bucket reads: PASS
+- Backup buckets: WARN (don't exist yet — created on first run, expected)
+- S3 Batch role: PASS
+- DynamoDB PITR: WARN (all 4 Toshi tables disabled — fixed in Step 5c)
+
+### Step 5c — Enable PITR on Toshi DynamoDB tables ✅ 2026-04-15
+
+**Run as:** source account `461564345538`
+
+```bash
+eval $(aws configure export-credentials --profile nshm-admin --format env)
+uv run python scripts/enable-pitr.py \
+    --tables ToshiFileObject-PROD ToshiIdentity-PROD ToshiTableObject-PROD ToshiThingObject-PROD
+```
+
+All 4 tables: PITR ENABLED. Allow a few minutes before running first DynamoDB export.
 
 ---
 
-## Step 6 — First live backup run
+## Step 6 — Add weka source and smoke-test ✅ 2026-04-15
+
+Added `nzshm22-weka-ui-prod` as a `weka` source (80MB, ~64 objects) in
+`backup-config.production.yaml`. Used as a minimal smoke test before running the large sources.
+
+S3 bucket policy update required in source account (bucket wasn't covered by initial
+`create-source-roles.py` run):
 
 ```bash
-backup run --source toshi
-backup run --source ths
-backup status
+eval $(aws configure export-credentials --profile nshm-admin --format env)
+uv run python scripts/create-source-roles.py \
+    --backup-account-id 737696831915 \
+    --s3-buckets nzshm22-toshi-api-prod ths-dataset-prod nzshm22-static-reports nzshm22-weka-ui-prod \
+    --dynamodb-tables ToshiFileObject-PROD ToshiIdentity-PROD ToshiTableObject-PROD ToshiThingObject-PROD \
+    --batch-role-arn arn:aws:iam::737696831915:role/nzshm-backup-batch-role \
+    --profile nshm-admin
+```
+
+Pre-flight check:
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup check --source weka
+```
+
+All checks passed (backup bucket WARN — doesn't exist yet, expected).
+
+First live backup run (smoke test):
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env) && \
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source weka
+```
+
+Result: **SUCCESS** — 64 objects, ~80MB copied in ~7 seconds. Backup bucket created automatically.
+
+Note: `nzshm22-static-reports` was initially included in the `ths` source but turned out to be
+~40M objects / 2.7TB — not a small bucket. Separated into its own `static` source in the config.
+That source was killed mid-dry-run; will be scheduled separately.
+
+---
+
+## Step 7 — First live backup run (large sources)
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source toshi
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source ths
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup status
 ```
 
 _Status: pending_
