@@ -333,3 +333,23 @@ nzshm-backup-weka-weekly                      ENABLED    cron(15 8 ? * WED *)   
 ```
 
 _Status: weka/ths/static fire tonight 20:15 NZST; toshi fires tomorrow 20:15 NZST_
+
+---
+
+## Step 9 — Enable S3 Batch for ths and static ✅ 2026-04-15
+
+`ths` (~4M objects) and `static` (~40M objects) were incorrectly set to `use_s3_batch: false` —
+direct incremental listing at that scale would page through millions of S3 API calls.
+Updated config and pushed to SSM.
+
+| Source | Objects | Size   | S3 Batch |
+|--------|---------|--------|----------|
+| toshi  | ~8M     | ~8TB   | true     |
+| ths    | ~4M     | ~1TB   | true     |
+| static | ~40M    | ~2.7TB | true     |
+| weka   | ~64     | ~80MB  | false    |
+
+```bash
+eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
+```
