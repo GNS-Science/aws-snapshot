@@ -258,6 +258,27 @@ def test_status_s3_batch_no_jobs(s3_batch_config, monkeypatch):
     assert "no batch jobs found" in result.output
 
 
+def test_status_s3_batch_running_without_job_shows_preparing_message(s3_batch_config, monkeypatch):
+    """If a run has started but batch job is not submitted yet, show a clear running message."""
+    monkeypatch.chdir(s3_batch_config)
+
+    running_state = {
+        "checked_at": "2026-03-18T10:00:00",
+        "status": "running",
+        "batch_job_id": None,
+        "objects_in_manifest": 0,
+    }
+
+    with patch("nzshm_backup.commands.status.read_run_state", return_value=running_state):
+        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[]):
+                with patch("nzshm_backup.commands.status.boto3.Session"):
+                    result = runner.invoke(app, ["status", "--source", "arkivalist"])
+
+    assert result.exit_code == 0
+    assert "running (preparing manifest; batch job not submitted yet)" in result.output
+
+
 # ---------------------------------------------------------------------------
 # JSON output
 # ---------------------------------------------------------------------------
@@ -275,3 +296,106 @@ def test_status_json_output_structure(dynamo_config, monkeypatch):
     data = json.loads(result.output)
     assert "toshi" in data
     assert "dynamodb_tables" in data["toshi"]
+
+
+def test_status_json_output_includes_s3_batch_jobs(s3_batch_config, monkeypatch):
+    """Batch-mode sources include recent S3 Batch jobs in JSON output."""
+    monkeypatch.chdir(s3_batch_config)
+
+    mock_job = {
+        "JobId": "abcd1234-5678-abcd-efgh-1234567890ab",
+        "Status": "Active",
+        "Description": "source-bucket backup",
+        "CreationTime": TS,
+        "ProgressSummary": {
+            "TotalNumberOfTasks": 20,
+            "NumberOfTasksFailed": 2,
+            "NumberOfTasksSucceeded": 8,
+        },
+    }
+
+    mock_session = MagicMock()
+    mock_session.client.return_value = MagicMock()
+    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
+        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
+                with patch(
+                    "nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[mock_job]
+                ):
+                    result = runner.invoke(
+                        app, ["status", "--source", "arkivalist", "--output", "json"]
+                    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "arkivalist" in data
+    batches = data["arkivalist"]["s3_batches"]
+    assert len(batches) == 1
+    assert batches[0]["source_bucket"] == "source-bucket"
+    assert "last_run" in batches[0]
+    recent = batches[0]["recent_jobs"]
+    assert recent[0]["job_id"] == "abcd1234-5678-abcd-efgh-1234567890ab"
+    assert recent[0]["status"] == "Active"
+    assert recent[0]["total_tasks"] == 20
+    assert recent[0]["tasks_succeeded"] == 8
+    assert recent[0]["tasks_failed"] == 2
+
+
+def test_status_job_id_requires_source_alias(s3_batch_config, monkeypatch):
+    """--job-id without --source should fail fast."""
+    monkeypatch.chdir(s3_batch_config)
+    result = runner.invoke(app, ["status", "--job-id", "abcd1234"])
+    assert result.exit_code == 1
+    assert "requires --source" in result.output
+
+
+def test_status_job_id_with_non_batch_source_fails(s3_incremental_config, monkeypatch):
+    """--job-id for non-batch source should fail with clear error."""
+    monkeypatch.chdir(s3_incremental_config)
+    result = runner.invoke(app, ["status", "--source", "ths", "--job-id", "abcd1234"])
+    assert result.exit_code == 1
+    assert "not configured for S3 Batch" in result.output
+
+
+def test_status_text_with_job_id_prints_selected_job(s3_batch_config, monkeypatch):
+    """--job-id prints selected job details in text output."""
+    monkeypatch.chdir(s3_batch_config)
+
+    selected_job = {
+        "JobId": "abcd1234-5678-abcd-efgh-1234567890ab",
+        "Status": "Active",
+        "Description": "source-bucket backup",
+        "CreationTime": TS,
+        "ProgressSummary": {
+            "TotalNumberOfTasks": 20,
+            "NumberOfTasksFailed": 2,
+            "NumberOfTasksSucceeded": 8,
+        },
+    }
+
+    mock_s3control = MagicMock()
+    mock_s3control.describe_job.return_value = {"Job": selected_job}
+    mock_session = MagicMock()
+    mock_session.client.side_effect = lambda svc, **kw: (
+        mock_s3control if svc == "s3control" else MagicMock()
+    )
+
+    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
+        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
+                with patch("nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[]):
+                    result = runner.invoke(
+                        app,
+                        [
+                            "status",
+                            "--source",
+                            "arkivalist",
+                            "--job-id",
+                            "abcd1234-5678-abcd-efgh-1234567890ab",
+                        ],
+                    )
+
+    assert result.exit_code == 0
+    assert "Selected S3 Batch job" in result.output
+    assert "job/abcd1234-5678-abcd-efgh-1234567890ab" in result.output
+    assert "50.0% done" in result.output
