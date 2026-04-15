@@ -4,6 +4,22 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Added
+
+- `backup check [--source SOURCE]` — fast pre-flight command that validates IAM credentials,
+  cross-account role assumption, S3 bucket read access, backup bucket existence, S3 Batch
+  role presence, and DynamoDB PITR status. No object enumeration — completes in seconds.
+
+### Fixed
+
+- `batch_backup_source()` dry-run no longer enumerates all source objects. Previously a
+  dry-run on an 8M-object bucket would paginate through ~80k ListObjectsV2 pages (10–20 min)
+  even though the real run delegates listing to AWS S3 Batch. The dry-run fast-path now does
+  a single `list_objects_v2(MaxKeys=1)` access check and returns immediately.
+  `objects_in_manifest` is set to `-1` (not enumerated) instead of a count.
+- `run_backup.py`: dry-run output for Batch sources now says "Would submit S3 Batch job"
+  rather than displaying a stale manifest count.
+
 ### Fixed
 
 - `backup config` subcommands (`show`, `push`, `pull`, `validate`) now honour the

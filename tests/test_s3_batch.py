@@ -143,7 +143,7 @@ def test_write_manifest_empty(s3_client):
 
 
 def test_batch_backup_dry_run(aws_session, s3_client):
-    """Dry run counts objects without writing manifest or submitting job."""
+    """Dry run skips full object enumeration — just validates access and returns SKIPPED."""
     _create_bucket(s3_client, "src")
     _put_object(s3_client, "src", "file1.txt")
     _put_object(s3_client, "src", "file2.txt")
@@ -159,17 +159,16 @@ def test_batch_backup_dry_run(aws_session, s3_client):
 
     assert result.status == "SKIPPED"
     assert result.dry_run is True
-    assert result.objects_in_manifest == 2
+    assert result.objects_in_manifest == -1  # not enumerated in dry-run fast-path
     assert result.job_id is None
 
 
 def test_batch_backup_dry_run_nothing_to_copy(aws_session, s3_client):
-    """Dry run with identical source and backup reports 0 objects."""
+    """Dry run fast-path returns -1 regardless of source/backup state."""
     _create_bucket(s3_client, "src2")
     _put_object(s3_client, "src2", "unchanged.txt", b"data")
     backup_name = "src2-backup-ap-southeast-2-123456789012"
     _create_bucket(s3_client, backup_name)
-    # Copy to backup so ETags match
     s3_client.copy_object(
         CopySource={"Bucket": "src2", "Key": "unchanged.txt"},
         Bucket=backup_name,
@@ -185,7 +184,9 @@ def test_batch_backup_dry_run_nothing_to_copy(aws_session, s3_client):
         dry_run=True,
     )
 
-    assert result.objects_in_manifest == 0
+    assert result.status == "SKIPPED"
+    assert result.dry_run is True
+    assert result.objects_in_manifest == -1
 
 
 # ---------------------------------------------------------------------------

@@ -177,8 +177,27 @@ def batch_backup_source(
     src_s3_client = source_session.client("s3") if source_session is not None else s3_client
     manifest_key = f"_manifests/{source_bucket}-{uuid.uuid4()}.csv"
 
-    if not dry_run:
-        ensure_backup_bucket_ready(session, backup_bucket)
+    if dry_run:
+        # Skip full object enumeration for dry-run — listing millions of objects just to
+        # count them is slow and not representative of the real run (which delegates listing
+        # to AWS S3 Batch). Instead, confirm read access with a single list page.
+        logger.info(f"[DRY RUN] Would submit S3 Batch job: {source_bucket} → {backup_bucket}")
+        try:
+            src_s3_client.list_objects_v2(Bucket=source_bucket, MaxKeys=1)
+            logger.info(f"[DRY RUN] Access check passed: {source_bucket} is readable")
+        except ClientError as e:
+            logger.error(f"[DRY RUN] Access check failed for {source_bucket}: {e}")
+        return BatchJobResult(
+            source_bucket=source_bucket,
+            dest_bucket=backup_bucket,
+            job_id=None,
+            manifest_key=manifest_key,
+            objects_in_manifest=-1,  # -1 = not enumerated in dry-run
+            status="SKIPPED",
+            dry_run=True,
+        )
+
+    ensure_backup_bucket_ready(session, backup_bucket)
 
     logger.info(f"Listing source objects in {source_bucket}")
     source_objects = _list_bucket(src_s3_client, source_bucket)
@@ -195,20 +214,6 @@ def batch_backup_source(
             raise
 
     rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
-
-    if dry_run:
-        # Count rows without writing to S3
-        row_count = sum(1 for _ in rows)
-        logger.info(f"[DRY RUN] Manifest would contain {row_count} objects")
-        return BatchJobResult(
-            source_bucket=source_bucket,
-            dest_bucket=backup_bucket,
-            job_id=None,
-            manifest_key=manifest_key,
-            objects_in_manifest=row_count,
-            status="SKIPPED",
-            dry_run=True,
-        )
 
     logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
     manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
