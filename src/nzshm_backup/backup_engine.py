@@ -36,6 +36,7 @@ def run_backup_source(
     source_alias: str,
     dry_run: bool = False,
     full_sync: bool = False,
+    prepare_only: bool = False,
 ) -> SourceBackupResult:
     """Execute backup for a single named source.
 
@@ -103,6 +104,7 @@ def run_backup_source(
                     dry_run=dry_run,
                     full_sync=full_sync,
                     source_session=source_session,
+                    prepare_only=prepare_only,
                 )
                 result.s3_results.append(
                     {
@@ -117,7 +119,9 @@ def run_backup_source(
                 )
                 if not dry_run:
                     _run_status = cast(
-                        Literal["running", "submitted", "skipped", "completed", "failed"],
+                        Literal[
+                            "running", "prepared", "submitted", "skipped", "completed", "failed"
+                        ],
                         batch_result.status.lower(),
                     )
                     write_run_state(

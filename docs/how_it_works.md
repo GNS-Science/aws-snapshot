@@ -80,6 +80,18 @@ asynchronously, following the same pattern as DynamoDB PITR exports. See
 
 ## How backup data accumulates
 
+### Backup model vs replication model
+
+This tool implements **backup semantics**, not continuous replication semantics.
+
+- Backups run on explicit schedule checkpoints (weekly/daily/manual)
+- Source deletes do not remove backup objects
+- Source mutations create new backup versions (with version retention) rather than
+  erasing the previous recoverable state
+
+The design goal is recoverability under human error and poisoning scenarios, even
+when that differs from source-mirror behaviour.
+
 Each backup run is **incremental and additive** — no existing backup data is
 ever overwritten or deleted by the tool:
 

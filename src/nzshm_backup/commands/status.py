@@ -184,6 +184,12 @@ def _print_source_status(
                             f"{checked} — running "
                             "(preparing manifest; batch job not submitted yet)"
                         )
+                    elif st == "prepared":
+                        typer.echo(
+                            "    last run: "
+                            f"{checked} — prepared "
+                            "(manifest ready; batch job intentionally not submitted)"
+                        )
                     else:
                         typer.echo(f"    last run: {checked} — {st}")
 

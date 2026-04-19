@@ -29,7 +29,7 @@ def write_run_state(
     session: boto3.Session,
     backup_bucket: str,
     source_bucket: str,
-    status: Literal["running", "submitted", "skipped", "completed", "failed"],
+    status: Literal["running", "prepared", "submitted", "skipped", "completed", "failed"],
     objects_copied: int = 0,
     bytes_transferred: int = 0,
     batch_job_id: str | None = None,

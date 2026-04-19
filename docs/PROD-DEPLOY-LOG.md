@@ -270,6 +270,108 @@ Started `backup run --source ths` manually, but cancelled interactive execution 
 listing/manifest generation for this source is too large for a live interactive run.
 Full completion verification is deferred to scheduled run + log/S3 Batch status review.
 
+---
+
+## Step 11 — Manifest bottleneck matrix at max Lambda memory ⚠️ 2026-04-16
+
+Objective: verify whether increasing Lambda resources alone can make inline
+manifest preparation reliable for large batch sources.
+
+Agreed protocol:
+- Set backup Lambda to max memory (`10240 MB`, timeout unchanged at `900s`)
+- Scan `ths`, `toshi`, `static`
+- Capture pass/fail + duration + max memory + whether batch job submission occurs
+- Abort early if max-memory gate fails
+
+### Runtime configuration changes
+
+```bash
+aws lambda update-function-configuration \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --function-name nzshm-backup-service-prod-backup \
+  --memory-size 10240 \
+  --timeout 900
+```
+
+After experiment, restored baseline:
+
+```bash
+aws lambda update-function-configuration \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --function-name nzshm-backup-service-prod-backup \
+  --memory-size 1024 \
+  --timeout 900
+```
+
+### Results
+
+| Source | Result | Duration | Max memory | Notes |
+|--------|--------|----------|------------|-------|
+| `ths` | **FAIL** | `900000 ms` | `4126 MB` | Timed out while listing source objects; no batch job created |
+| `toshi` | FAIL (different blocker) | `6315.40 ms` | `127 MB` | `AccessDenied` on `s3:PutBucketVersioning` for `bb-toshi-s3-api-prod-ap-southeast-2-461564345538` |
+| `static` | not run | n/a | n/a | max-memory gate already failed; matrix aborted early |
+
+Representative THS report:
+
+```text
+REPORT RequestId: 73dfbd1b-c3b3-4813-b29d-85b5adf8d88e  Duration: 900000.00 ms
+Billed Duration: 901231 ms  Memory Size: 10240 MB  Max Memory Used: 4126 MB  Status: timeout
+```
+
+Conclusion:
+- Memory scaling alone does not make inline manifest prep reliable for THS.
+- Design change is required for large sources (manifest generation outside Lambda).
+- THS is acting as the canary failure. Based on source scales (`static` ~40M objects,
+  `toshi` ~8M, `ths` ~4M), `static` remains the largest expected S3 manifest-prep blocker.
+
+Operational cleanup:
+- Disabled temporary daily THS verification rule to avoid repeated timeout loops.
+
+```bash
+aws events disable-rule \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --name nzshm-backup-ths-daily
+```
+
+Detailed design + matrix notes captured in:
+`docs/design/S3_MANIFEST_BOTTLENECK.md`
+
+---
+
+## Step 12 — THS canary CodeBuild matrix (compute sizing) ⚠️ 2026-04-16
+
+Objective: test whether moving manifest prep to CodeBuild can finish THS within
+the Lambda-equivalent 15-minute target.
+
+Method:
+- Temporary CodeBuild project (`nzshm-backup-manifest-benchmark`) using source zip
+  from S3 and `backup run --source ths --prepare-only`.
+- Compute tiers tested big -> small:
+  `BUILD_GENERAL1_2XLARGE`, `LARGE`, `MEDIUM`, `SMALL`.
+
+Results:
+
+| Compute | Result | Manifest runtime | Notes |
+|---------|--------|------------------|-------|
+| `2XLARGE` | SUCCESS | `3283s` (~54m43s) | manifest created (`3,886,583` rows) |
+| `LARGE` | SUCCESS | `3585s` (~59m45s) | manifest created (`3,886,583` rows) |
+| `MEDIUM` | SUCCESS | `3086s` (~51m26s) | manifest created (`3,886,583` rows) |
+| `SMALL` | FAILED | n/a (killed) | process exited `137` (~21m40s), likely OOM while listing source objects |
+
+Conclusion:
+- THS manifest prep in CodeBuild is reliable enough to complete on medium+ sizes,
+  but **not** within 15 minutes.
+- Best observed runtime is still ~51 minutes, so this does not meet the
+  15-minute target even off Lambda.
+
+Implication:
+- Compute scaling alone does not solve the runtime target. We need a design change
+  (precomputed manifests / inventory-driven / workflow split) if 15-minute windows
+  are a hard requirement.
+
 Config pushed to SSM parameter: `/nzshm-backup/prod/config`
 
 Dry runs (still running at time of writing — large buckets):

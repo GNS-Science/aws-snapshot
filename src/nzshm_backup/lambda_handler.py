@@ -60,7 +60,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "body": json.dumps({"error": f"Invalid event format: {str(e)}"}),
         }
 
-    logger.info(f"Starting backup task: source={task.source}, dry_run={task.dry_run}")
+    logger.info(
+        "Starting backup task: "
+        f"source={task.source}, dry_run={task.dry_run}, prepare_only={task.prepare_only}"
+    )
 
     try:
         config = get_config()
@@ -80,7 +83,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 continue
 
             source_result = run_backup_source(
-                session, config, source_alias, dry_run=task.dry_run, full_sync=task.full_sync
+                session,
+                config,
+                source_alias,
+                dry_run=task.dry_run,
+                full_sync=task.full_sync,
+                prepare_only=task.prepare_only,
             )
 
             for r in source_result.s3_results:
