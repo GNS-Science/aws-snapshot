@@ -124,11 +124,33 @@ def _check_source(session: boto3.Session, config: ConfigModel, alias: str) -> bo
         try:
             backup_s3.head_bucket(Bucket=backup_bucket)
             _row(f"Backup bucket {backup_bucket}", _PASS, "exists")
+
+            # Guardrail: existing backup buckets must have versioning enabled.
+            try:
+                versioning = backup_s3.get_bucket_versioning(Bucket=backup_bucket)
+                status = versioning.get("Status")
+                if status == "Enabled":
+                    _row(f"Versioning {backup_bucket}", _PASS, "Enabled")
+                else:
+                    observed = status or "Disabled"
+                    _row(
+                        f"Versioning {backup_bucket}",
+                        _FAIL,
+                        f"status={observed} — enable before backup",
+                    )
+                    failed = True
+            except ClientError as e:
+                code = e.response["Error"]["Code"]
+                _row(f"Versioning {backup_bucket}", _FAIL, code)
+                failed = True
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("404", "NoSuchBucket"):
-                _row(f"Backup bucket {backup_bucket}", _WARN,
-                     "does not exist yet (will be created on first run)")
+                _row(
+                    f"Backup bucket {backup_bucket}",
+                    _WARN,
+                    "does not exist yet (will be created on first run)",
+                )
             else:
                 _row(f"Backup bucket {backup_bucket}", _FAIL, code)
                 failed = True
@@ -161,8 +183,9 @@ def _check_source(session: boto3.Session, config: ConfigModel, alias: str) -> bo
                 if status == "ENABLED":
                     _row(f"PITR {table_name}", _PASS)
                 else:
-                    _row(f"PITR {table_name}", _WARN,
-                         f"status={status} — enable PITR before backup")
+                    _row(
+                        f"PITR {table_name}", _WARN, f"status={status} — enable PITR before backup"
+                    )
             except ClientError as e:
                 _row(f"PITR {table_name}", _FAIL, e.response["Error"]["Code"])
                 failed = True

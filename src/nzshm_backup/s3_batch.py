@@ -32,7 +32,7 @@ class BatchJobResult:
     job_id: str | None
     manifest_key: str
     objects_in_manifest: int
-    status: Literal["SUBMITTED", "SKIPPED", "FAILED"]
+    status: Literal["SUBMITTED", "PREPARED", "SKIPPED", "FAILED"]
     errors: list[dict] = field(default_factory=list)
     dry_run: bool = False
 
@@ -157,6 +157,7 @@ def batch_backup_source(
     dry_run: bool = False,
     full_sync: bool = False,
     source_session: boto3.Session | None = None,
+    prepare_only: bool = False,
 ) -> BatchJobResult:
     """Submit an S3 Batch Operations job to copy new/changed objects.
 
@@ -228,6 +229,21 @@ def batch_backup_source(
             manifest_key=manifest_key,
             objects_in_manifest=0,
             status="SKIPPED",
+            dry_run=False,
+        )
+
+    if prepare_only:
+        logger.info(
+            f"Prepare-only mode: manifest ready at s3://{backup_bucket}/{manifest_key} "
+            f"({row_count} objects), skipping S3 Batch submission"
+        )
+        return BatchJobResult(
+            source_bucket=source_bucket,
+            dest_bucket=backup_bucket,
+            job_id=None,
+            manifest_key=manifest_key,
+            objects_in_manifest=row_count,
+            status="PREPARED",
             dry_run=False,
         )
 

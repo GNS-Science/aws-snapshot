@@ -224,6 +224,33 @@ def test_batch_backup_skipped_when_nothing_to_copy(aws_session, s3_client):
     assert result.job_id is None
 
 
+def test_batch_backup_prepare_only_writes_manifest_without_submitting(aws_session, s3_client):
+    """Prepare-only mode writes manifest and returns PREPARED without job submission."""
+    _create_bucket(s3_client, "src4")
+    _put_object(s3_client, "src4", "new.txt", b"data")
+    backup_name = "src4-backup-ap-southeast-2-123456789012"
+
+    from nzshm_backup.s3_backup import create_backup_bucket
+
+    create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
+
+    result = batch_backup_source(
+        session=aws_session,
+        source_bucket="src4",
+        backup_bucket=backup_name,
+        batch_role_arn="arn:aws:iam::123456789012:role/nzshm-backup-batch-role",
+        account_id="123456789012",
+        dry_run=False,
+        prepare_only=True,
+    )
+
+    assert result.status == "PREPARED"
+    assert result.job_id is None
+    assert result.objects_in_manifest == 1
+    manifest = s3_client.get_object(Bucket=backup_name, Key=result.manifest_key)
+    assert manifest["Body"].read().decode().strip() == "src4,new.txt"
+
+
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------

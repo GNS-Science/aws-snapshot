@@ -90,6 +90,29 @@ All sources are cross-account: source account `461564345538` → backup account 
 
 ## Backup Methods
 
+### Backup semantics (explicitly not replication)
+
+This project is intentionally designed as a **backup system**, not a source-mirroring
+replication system.
+
+Core semantics:
+
+1. **Explicit run cadence** (weekly by default, optionally daily during active periods)
+   creates discrete, auditable recovery checkpoints.
+2. **No delete propagation** from source to backup. Source deletions remain recoverable
+   from backup buckets until lifecycle expiry.
+3. **Anti-poisoning posture**: backup buckets use versioning + non-current retention,
+   so source mutations do not irreversibly destroy the last known-good backup copy.
+
+Why this matters:
+
+- A pure replication model prioritizes source parity, which can propagate bad changes
+  quickly (corruption, accidental overwrite, or malicious mutation).
+- This project prioritizes recoverability and controlled retention over mirror fidelity.
+
+Cross-region replication may still be used as a storage/DR transport mechanism in future,
+but it is not the primary backup model for NSHM data protection.
+
 ### S3 Backup (ToshiBucket + THS_dataset_prod)
 
 **Recommended:** Same-region backup with S3 Lifecycle policies

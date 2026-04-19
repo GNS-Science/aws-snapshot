@@ -150,6 +150,228 @@ eval $(aws configure export-credentials --profile nshm-backup-admin --format env
 BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
 ```
 
+---
+
+## Step 10 — THS versioning incident response (guardrail-first) ⚠️ 2026-04-16
+
+Created isolation branch for incident work and guardrails:
+
+```bash
+git checkout -b fix/ths-versioning-guardrails
+```
+
+### Code fixes completed
+
+- Added backup-bucket versioning guardrail to `backup check`:
+  - existing bucket + versioning enabled => `PASS`
+  - existing bucket + versioning disabled/missing => `FAIL`
+- Added remediation-focused error on first-run bucket bootstrap when
+  `s3:PutBucketVersioning` is denied.
+- Updated Lambda IAM template permissions in `serverless.yml`:
+  - `s3:GetBucketVersioning`
+  - `s3:PutBucketVersioning`
+- Added tests for:
+  - check-command versioning pass/fail behavior
+  - AccessDenied regression path for versioning enable during bootstrap
+
+Validation in repo:
+
+```bash
+uv run pytest tests/test_check_command.py tests/test_s3_backup.py
+uv run ruff check src/nzshm_backup/commands/check.py src/nzshm_backup/s3_backup.py tests/test_check_command.py tests/test_s3_backup.py
+```
+
+### Guardrail validation in production (before remediation)
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup check --source ths
+```
+
+```text
+Source: ths
+  [PASS] Backup account credentials  737696831915
+  [PASS] Assume role nzshm-backup-reader  arn:aws:sts::461564345538:assumed-role/nzshm-backup-reader/nzshm-backup
+  [PASS] Read ths-dataset-prod
+  [PASS] Backup bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  exists
+  [FAIL] Versioning bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  status=Disabled — enable before backup
+  [PASS] S3 Batch role nzshm-backup-batch-role
+
+One or more checks FAILED — review errors above before running backup.
+```
+
+Interpretation: guardrail worked as intended and blocked THS backup readiness while
+object versioning protection was disabled.
+
+### Remediation executed
+
+Enabled versioning on the existing THS backup bucket:
+
+```bash
+aws s3api put-bucket-versioning \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538 \
+  --versioning-configuration Status=Enabled
+```
+
+Verification:
+
+```bash
+aws s3api get-bucket-versioning \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538 \
+  --query 'Status' --output text
+```
+
+Output: `Enabled`
+
+Re-ran guardrail check:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup check --source ths
+```
+
+```text
+Source: ths
+  [PASS] Backup account credentials  737696831915
+  [PASS] Assume role nzshm-backup-reader  arn:aws:sts::461564345538:assumed-role/nzshm-backup-reader/nzshm-backup
+  [PASS] Read ths-dataset-prod
+  [PASS] Backup bucket bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  exists
+  [PASS] Versioning bb-ths-s3-dataset-prod-ap-southeast-2-461564345538  Enabled
+  [PASS] S3 Batch role nzshm-backup-batch-role
+
+All checks passed.
+```
+
+### Verification schedule (short-interval)
+
+Added a temporary THS daily schedule to validate the fix path quickly:
+
+```bash
+run_time=$(TZ=Pacific/Auckland date -v+5M "+%Y-%m-%d %H:%M %Z")
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup schedule add --source ths --frequency daily --time "$run_time"
+```
+
+Result:
+
+```text
+Rule 'nzshm-backup-ths-daily' created/updated: cron(36 22 * * ? *)  → 10:36 NZST locally
+Target registered: arn:aws:lambda:ap-southeast-2:737696831915:function:nzshm-backup-service-prod-backup
+```
+
+`backup schedule show` confirms both rules are enabled:
+- `nzshm-backup-ths-weekly` (normal production cadence)
+- `nzshm-backup-ths-daily` (temporary verification rule)
+
+### THS re-run note
+
+Started `backup run --source ths` manually, but cancelled interactive execution because
+listing/manifest generation for this source is too large for a live interactive run.
+Full completion verification is deferred to scheduled run + log/S3 Batch status review.
+
+---
+
+## Step 11 — Manifest bottleneck matrix at max Lambda memory ⚠️ 2026-04-16
+
+Objective: verify whether increasing Lambda resources alone can make inline
+manifest preparation reliable for large batch sources.
+
+Agreed protocol:
+- Set backup Lambda to max memory (`10240 MB`, timeout unchanged at `900s`)
+- Scan `ths`, `toshi`, `static`
+- Capture pass/fail + duration + max memory + whether batch job submission occurs
+- Abort early if max-memory gate fails
+
+### Runtime configuration changes
+
+```bash
+aws lambda update-function-configuration \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --function-name nzshm-backup-service-prod-backup \
+  --memory-size 10240 \
+  --timeout 900
+```
+
+After experiment, restored baseline:
+
+```bash
+aws lambda update-function-configuration \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --function-name nzshm-backup-service-prod-backup \
+  --memory-size 1024 \
+  --timeout 900
+```
+
+### Results
+
+| Source | Result | Duration | Max memory | Notes |
+|--------|--------|----------|------------|-------|
+| `ths` | **FAIL** | `900000 ms` | `4126 MB` | Timed out while listing source objects; no batch job created |
+| `toshi` | FAIL (different blocker) | `6315.40 ms` | `127 MB` | `AccessDenied` on `s3:PutBucketVersioning` for `bb-toshi-s3-api-prod-ap-southeast-2-461564345538` |
+| `static` | not run | n/a | n/a | max-memory gate already failed; matrix aborted early |
+
+Representative THS report:
+
+```text
+REPORT RequestId: 73dfbd1b-c3b3-4813-b29d-85b5adf8d88e  Duration: 900000.00 ms
+Billed Duration: 901231 ms  Memory Size: 10240 MB  Max Memory Used: 4126 MB  Status: timeout
+```
+
+Conclusion:
+- Memory scaling alone does not make inline manifest prep reliable for THS.
+- Design change is required for large sources (manifest generation outside Lambda).
+- THS is acting as the canary failure. Based on source scales (`static` ~40M objects,
+  `toshi` ~8M, `ths` ~4M), `static` remains the largest expected S3 manifest-prep blocker.
+
+Operational cleanup:
+- Disabled temporary daily THS verification rule to avoid repeated timeout loops.
+
+```bash
+aws events disable-rule \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --name nzshm-backup-ths-daily
+```
+
+Detailed design + matrix notes captured in:
+`docs/design/S3_MANIFEST_BOTTLENECK.md`
+
+---
+
+## Step 12 — THS canary CodeBuild matrix (compute sizing) ⚠️ 2026-04-16
+
+Objective: test whether moving manifest prep to CodeBuild can finish THS within
+the Lambda-equivalent 15-minute target.
+
+Method:
+- Temporary CodeBuild project (`nzshm-backup-manifest-benchmark`) using source zip
+  from S3 and `backup run --source ths --prepare-only`.
+- Compute tiers tested big -> small:
+  `BUILD_GENERAL1_2XLARGE`, `LARGE`, `MEDIUM`, `SMALL`.
+
+Results:
+
+| Compute | Result | Manifest runtime | Notes |
+|---------|--------|------------------|-------|
+| `2XLARGE` | SUCCESS | `3283s` (~54m43s) | manifest created (`3,886,583` rows) |
+| `LARGE` | SUCCESS | `3585s` (~59m45s) | manifest created (`3,886,583` rows) |
+| `MEDIUM` | SUCCESS | `3086s` (~51m26s) | manifest created (`3,886,583` rows) |
+| `SMALL` | FAILED | n/a (killed) | process exited `137` (~21m40s), likely OOM while listing source objects |
+
+Conclusion:
+- THS manifest prep in CodeBuild is reliable enough to complete on medium+ sizes,
+  but **not** within 15 minutes.
+- Best observed runtime is still ~51 minutes, so this does not meet the
+  15-minute target even off Lambda.
+
+Implication:
+- Compute scaling alone does not solve the runtime target. We need a design change
+  (precomputed manifests / inventory-driven / workflow split) if 15-minute windows
+  are a hard requirement.
+
 Config pushed to SSM parameter: `/nzshm-backup/prod/config`
 
 Dry runs (still running at time of writing — large buckets):
