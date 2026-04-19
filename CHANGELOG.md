@@ -6,9 +6,26 @@ All notable changes to this project will be documented here.
 
 ### Added
 
+- `backup schedule add` now supports `--target codebuild` for EventBridge -> CodeBuild
+  schedules. This mode requires `--codebuild-project-arn` and `--target-role-arn`.
 - `backup check [--source SOURCE]` — fast pre-flight command that validates IAM credentials,
   cross-account role assumption, S3 bucket read access, backup bucket existence, S3 Batch
   role presence, and DynamoDB PITR status. No object enumeration — completes in seconds.
+
+### Changed
+
+- `backup schedule add` now replaces existing EventBridge rule targets before
+  registering a new target, preventing dual Lambda+CodeBuild triggering.
+- `backup schedule remove` now removes all rule targets (not only `backup-lambda`)
+  before deleting the rule.
+- `backup schedule show` now displays rule target mode/details (`lambda`,
+  `codebuild`, `mixed`, `none`) and JSON output includes enriched target metadata
+  (`backup --output json schedule show`).
+
+### Docs
+
+- Updated scheduling docs with CodeBuild-target examples and a mixed-target
+  release checklist for Lambda + CodeBuild operations.
 
 ### Fixed
 
