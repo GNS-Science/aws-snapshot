@@ -372,6 +372,90 @@ Implication:
   (precomputed manifests / inventory-driven / workflow split) if 15-minute windows
   are a hard requirement.
 
+---
+
+## Step 13 — THS CodeBuild cutover prep (issue #9) 🚧 2026-04-20
+
+Started implementation for THS interim schedule cutover to CodeBuild.
+
+Code changes:
+- `backup schedule add` now supports explicit target selection:
+  - `--target lambda` (default, existing behavior)
+  - `--target codebuild` (new)
+- Added required parameters for CodeBuild targeting:
+  - `--codebuild-project-arn`
+  - `--target-role-arn` (EventBridge invoke role)
+- `backup schedule remove` now removes all rule targets (Lambda and/or CodeBuild)
+  before deleting the rule.
+
+Validation:
+
+```bash
+uv run pytest tests/test_schedule.py
+uv run ruff check src/nzshm_backup/commands/schedule.py tests/test_schedule.py
+```
+
+Result: tests and lint pass.
+
+This is the CLI/platform plumbing required before switching the live THS weekly
+rule from Lambda to CodeBuild.
+
+### Live THS schedule cutover executed
+
+Created EventBridge invoke role for CodeBuild target:
+
+```bash
+aws iam create-role \
+  --profile nshm-backup-admin \
+  --role-name nzshm-backup-events-codebuild \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"events.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+
+aws iam put-role-policy \
+  --profile nshm-backup-admin \
+  --role-name nzshm-backup-events-codebuild \
+  --policy-name start-ths-codebuild \
+  --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["codebuild:StartBuild"],"Resource":"arn:aws:codebuild:ap-southeast-2:737696831915:project/nzshm-backup-ths-backup"}]}'
+```
+
+Created THS CodeBuild project:
+
+- Name: `nzshm-backup-ths-backup`
+- Source: `s3://nzshm-backup-codebuild-src-737696831915/nzshm-backup-codebuild-ths-cutover.zip`
+- Compute: `BUILD_GENERAL1_MEDIUM`
+- Timeout: `70 minutes`
+- Service role: `arn:aws:iam::737696831915:role/nzshm-backup-codebuild-manifest-test-role`
+- Logs: `/aws/codebuild/nzshm-backup-ths-backup`
+- Build command: `BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup run --source ths`
+- Includes overlap guard (skip if another build for this project is already queued/running)
+
+Cut over weekly THS rule target from Lambda -> CodeBuild:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup schedule add \
+    --source ths \
+    --frequency weekly \
+    --time "2026-04-15 20:15 NZST" \
+    --target codebuild \
+    --codebuild-project-arn arn:aws:codebuild:ap-southeast-2:737696831915:project/nzshm-backup-ths-backup \
+    --target-role-arn arn:aws:iam::737696831915:role/nzshm-backup-events-codebuild
+```
+
+Verification:
+
+- Rule `nzshm-backup-ths-weekly` is now `ENABLED` with `cron(15 8 ? * WED *)`
+- Rule has single target:
+  - `Id=backup-codebuild`
+  - `Arn=arn:aws:codebuild:ap-southeast-2:737696831915:project/nzshm-backup-ths-backup`
+  - `RoleArn=arn:aws:iam::737696831915:role/nzshm-backup-events-codebuild`
+- Lambda target removed from the THS weekly rule
+
+Follow-up improvements:
+- `backup schedule show` now reports target mode/details (`lambda` vs `codebuild`)
+  so mixed-target operations are visible from CLI output.
+- Added mixed-target release checklist to `docs/user-guide/scheduling.md` to keep
+  Lambda deploys, CodeBuild artifacts, config pushes, and schedule wiring in sync.
+
 Config pushed to SSM parameter: `/nzshm-backup/prod/config`
 
 Dry runs (still running at time of writing — large buckets):
