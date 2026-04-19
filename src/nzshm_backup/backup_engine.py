@@ -36,6 +36,7 @@ def run_backup_source(
     source_alias: str,
     dry_run: bool = False,
     full_sync: bool = False,
+    prepare_only: bool = False,
 ) -> SourceBackupResult:
     """Execute backup for a single named source.
 
@@ -84,6 +85,14 @@ def run_backup_source(
         logger.info(f"Backing up {bucket_name} → {backup_bucket_name}")
 
         try:
+            if not dry_run:
+                write_run_state(
+                    session,
+                    backup_bucket_name,
+                    bucket_name,
+                    status="running",
+                )
+
             if source_config.use_s3_batch:
                 assert config.general.s3_batch_role_arn  # required; validated by ConfigModel
                 batch_result = batch_backup_source(
@@ -95,6 +104,7 @@ def run_backup_source(
                     dry_run=dry_run,
                     full_sync=full_sync,
                     source_session=source_session,
+                    prepare_only=prepare_only,
                 )
                 result.s3_results.append(
                     {
@@ -109,7 +119,9 @@ def run_backup_source(
                 )
                 if not dry_run:
                     _run_status = cast(
-                        Literal["submitted", "skipped", "completed", "failed"],
+                        Literal[
+                            "running", "prepared", "submitted", "skipped", "completed", "failed"
+                        ],
                         batch_result.status.lower(),
                     )
                     write_run_state(
