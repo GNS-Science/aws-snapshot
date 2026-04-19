@@ -140,6 +140,58 @@ explicit cadence, no delete propagation, and recoverability-first behavior.
 - Temporary verification rule `nzshm-backup-ths-daily` was disabled to avoid repeated timeout loops
   while redesign work proceeds.
 
+## Compatibility contract (interim -> future)
+
+To keep live backup buckets compatible while moving from the interim CodeBuild approach to a
+precomputed/inventory-based architecture, keep the following invariants stable.
+
+### Must remain stable
+
+1. **Backup bucket identity**
+   - Keep existing naming/tagging conventions (`bb-{source}-...`, `ManagedBy=nzshm-backup`).
+   - Do not require bucket renames or data migrations.
+
+2. **Data-plane object semantics**
+   - User data objects in backup buckets remain plain S3 objects under original keys.
+   - Keep no-delete propagation and version-retention behavior unchanged.
+
+3. **Batch submission contract**
+   - Continue submitting S3 Batch jobs with CSV manifests + ETag.
+   - Preserve description format so `backup status` can discover recent jobs reliably.
+
+4. **Operational prefix behavior**
+   - Keep operational metadata under reserved prefixes only.
+   - Ensure restore/integrity tooling excludes all operational prefixes.
+
+### Preferred direction: centralized system state
+
+Current run state is stored per backup bucket at `_state/last-run.json`. For the next architecture,
+prefer a centralized state store (e.g. DynamoDB table in backup account, optionally with S3 archive)
+for workflow/run metadata.
+
+Benefits:
+
+- Avoids coupling status/workflow logic to any single backup bucket.
+- Makes multi-step workflows (prepare, submit, monitor, finalize) easier to coordinate.
+- Enables consistent querying/reporting across all sources and runs.
+- Reduces risk when introducing new prep methods (CodeBuild, inventory, Step Functions).
+
+Recommended state model (minimum):
+
+- `run_id` (partition key)
+- `source_alias`, `source_bucket`, `backup_bucket`
+- `mode` (`inline`, `prepare_only`, `precomputed`, `inventory`)
+- `phase` (`running`, `prepared`, `submitted`, `active`, `completed`, `failed`)
+- `manifest_key`, `manifest_etag`, `objects_in_manifest`
+- `batch_job_id`, `started_at`, `updated_at`, `completed_at`
+- `error_code`, `error_message` (if failed)
+
+Compatibility note:
+
+- Keep writing `_state/last-run.json` during transition for backward compatibility with existing
+  `backup status` behavior.
+- Once centralized status is fully adopted, deprecate bucket-local state via a staged migration.
+
 ## Recommended next steps
 
 1. Move large-source manifest generation out of Lambda runtime.
