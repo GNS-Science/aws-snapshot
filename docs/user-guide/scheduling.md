@@ -27,6 +27,18 @@ Lambda or CodeBuild and which function/project is wired.
 - `target_type`: `lambda`, `codebuild`, `mixed`, or `none`
 - `targets`: raw EventBridge target objects
 
+## Check scheduler health for a source
+
+```bash
+backup schedule health --source ths --frequency weekly
+backup --output json schedule health --source ths
+```
+
+`backup schedule health` combines three signals in one view:
+- EventBridge rule state/schedule/target wiring
+- EventBridge invocation + failed-invocation counts over a lookback window
+- latest CodeBuild build status when the target type is `codebuild`
+
 ## Add a schedule
 
 ```bash
