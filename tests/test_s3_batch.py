@@ -101,11 +101,25 @@ def test_manifest_full_sync_copies_all():
 
 
 def test_manifest_key_with_quotes():
-    """Keys containing double quotes are escaped per CSV rules."""
+    """Keys containing quotes are URL-encoded for S3 Batch manifests."""
     source_objs = {'say "hello".txt': {"Key": 'say "hello".txt', "ETag": '"e"', "Size": 1}}
     rows = list(build_manifest_csv(source_objs, {}, "src"))
     assert len(rows) == 1
-    assert '""hello""' in rows[0]
+    assert "say%20%22hello%22.txt" in rows[0]
+
+
+def test_manifest_url_encodes_reserved_key_chars():
+    """Reserved URL characters in keys are encoded (path separators preserved)."""
+    source_objs = {
+        "NZSHM22_AGG_RAW/vs30=1000/imt=SA(0.15)/_metadata.csv": {
+            "Key": "NZSHM22_AGG_RAW/vs30=1000/imt=SA(0.15)/_metadata.csv",
+            "ETag": '"e"',
+            "Size": 1,
+        }
+    }
+    rows = list(build_manifest_csv(source_objs, {}, "src"))
+    assert len(rows) == 1
+    assert "vs30%3D1000/imt%3DSA%280.15%29" in rows[0]
 
 
 # ---------------------------------------------------------------------------

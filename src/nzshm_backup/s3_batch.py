@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Literal
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -62,8 +63,8 @@ def build_manifest_csv(
                 source_obj["ETag"] != dest_obj["ETag"] or source_obj["Size"] != dest_obj["Size"]
             )
         if should_copy:
-            # Escape key for CSV: wrap in quotes, double any internal quotes
-            safe_key = key.replace('"', '""')
+            # S3 Batch CSV manifests require URL-encoded keys. Keep path separators.
+            safe_key = quote(key, safe="/")
             yield f"{source_bucket},{safe_key}\n"
 
 
@@ -329,7 +330,7 @@ def _build_restore_manifest_rows(
             key = obj["Key"]
             if any(key.startswith(p) for p in OPERATIONAL_PREFIXES):
                 continue
-            safe_key = key.replace('"', '""')
+            safe_key = quote(key, safe="/")
             yield f"{backup_bucket},{safe_key}\n"
 
 
