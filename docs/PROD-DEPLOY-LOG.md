@@ -152,6 +152,33 @@ BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --sta
 
 ---
 
+## Step 14 — Current production backup status snapshot ✅ 2026-04-20
+
+Captured current status after THS CodeBuild cutover + manifest/policy fixes.
+
+Command:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup status
+```
+
+Summary:
+
+- **ths** (CodeBuild + S3 Batch): latest job `34fbef5d-b74c-4fb0-8b6d-53567dcc3d49`
+  completed successfully with `3,878,278/3,878,278` objects and `0` failures.
+- **toshi**: DynamoDB export status checks now succeed (all four PROD tables show
+  latest `COMPLETED`; previous `dynamodb:ListExports` IAM errors resolved).
+- **static**: no batch jobs submitted yet.
+- **weka**: incremental backup last run remains successful.
+
+Notes:
+
+- Historical failed THS jobs remain visible in status output (expected for audit history).
+- THS weekly scheduler target remains CodeBuild (`project/nzshm-backup-ths-backup`).
+
+---
+
 ## Step 10 — THS versioning incident response (guardrail-first) ⚠️ 2026-04-16
 
 Created isolation branch for incident work and guardrails:
