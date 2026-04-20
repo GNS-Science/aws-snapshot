@@ -26,13 +26,13 @@ Cross-account restore setup:
     allowing this role to PutObject. Run create-source-roles.py in the SOURCE account to
     apply both the read policy (backup direction) and write policy (restore direction):
 
-        python scripts/create-source-roles.py --config backup-config.sandbox.yaml --source arkivalist
+        python scripts/create-source-roles.py --config backup-config.sandbox.yaml \
+            --source arkivalist
 """
 
 import argparse
 import json
 import sys
-from pathlib import Path
 
 import boto3
 import yaml
@@ -48,6 +48,7 @@ def make_restore_bucket_name(bucket: str) -> str:
     """Return the canonical restore-target name: {bucket}-restore, truncated to 63 chars."""
     max_base = _MAX_BUCKET_NAME_LEN - len(_RESTORE_SUFFIX)
     return bucket[:max_base] + _RESTORE_SUFFIX
+
 
 TRUST_POLICY = {
     "Version": "2012-10-17",
@@ -77,7 +78,14 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
             {
                 "Sid": "ReadSource",
                 "Effect": "Allow",
-                "Action": ["s3:GetObject", "s3:GetObjectTagging"],
+                "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectAcl",
+                    "s3:GetObjectTagging",
+                    "s3:GetObjectVersion",
+                    "s3:GetObjectVersionTagging",
+                    "s3:GetBucketLocation",
+                ],
                 "Resource": read_source_resources,
             },
             {
@@ -85,7 +93,9 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
                 "Effect": "Allow",
                 "Action": [
                     "s3:PutObject",
+                    "s3:PutObjectAcl",
                     "s3:PutObjectTagging",
+                    "s3:PutObjectVersionTagging",
                     "s3:GetBucketLocation",
                 ],
                 "Resource": [
@@ -96,7 +106,14 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
             {
                 "Sid": "ReadBackup",
                 "Effect": "Allow",
-                "Action": ["s3:GetObject", "s3:GetObjectTagging"],
+                "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectAcl",
+                    "s3:GetObjectTagging",
+                    "s3:GetObjectVersion",
+                    "s3:GetObjectVersionTagging",
+                    "s3:GetBucketLocation",
+                ],
                 "Resource": [f"arn:aws:s3:::bb-*-{region}-*/*"],
             },
             {
@@ -111,9 +128,11 @@ def build_permission_policy(account_id: str, region: str, source_buckets: list[s
                 # make_restore_bucket_name() target (safe testing, default). Truncation is applied
                 # consistently so IAM and bucket policy names always align.
                 "Resource": (
-                    [f"arn:aws:s3:::{b}/*" for b in source_buckets] +
-                    [f"arn:aws:s3:::{make_restore_bucket_name(b)}/*" for b in source_buckets]
-                ) if source_buckets else ["arn:aws:s3:::*/*"],
+                    [f"arn:aws:s3:::{b}/*" for b in source_buckets]
+                    + [f"arn:aws:s3:::{make_restore_bucket_name(b)}/*" for b in source_buckets]
+                )
+                if source_buckets
+                else ["arn:aws:s3:::*/*"],
             },
             {
                 "Sid": "WriteReport",
@@ -132,7 +151,7 @@ def resolve_from_config(config_path: str) -> tuple[str, list[str]]:
 
     region = data.get("general", {}).get("region", "ap-southeast-2")
     source_buckets = []
-    for alias, source in data.get("sources", {}).items():
+    for _alias, source in data.get("sources", {}).items():
         if source.get("use_s3_batch"):
             for b in source.get("s3_buckets", []):
                 bucket_name = b["arn"].split(":::")[-1]
@@ -154,13 +173,21 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--config", default=None, help="Path to backup config YAML (config-driven mode)")
     parser.add_argument(
-        "--source-buckets", nargs="*", default=[],
+        "--config", default=None, help="Path to backup config YAML (config-driven mode)"
+    )
+    parser.add_argument(
+        "--source-buckets",
+        nargs="*",
+        default=[],
         help="Explicit source bucket names (not ARNs). Ignored when --config is used.",
     )
-    parser.add_argument("--region", default="ap-southeast-2", help="AWS region (explicit mode only)")
-    parser.add_argument("--dry-run", action="store_true", help="Print what would be created without API calls")
+    parser.add_argument(
+        "--region", default="ap-southeast-2", help="AWS region (explicit mode only)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print what would be created without API calls"
+    )
     args = parser.parse_args()
 
     config_mode = args.config is not None
@@ -225,12 +252,12 @@ def main():
     print(f"Attached inline policy: {policy_name}")
 
     if config_mode:
-        print(f"\nWriting role ARN back to config:")
+        print("\nWriting role ARN back to config:")
         write_back_role_arn(args.config, role_arn)
     else:
-        print(f"\nAdd to backup-config.yaml:")
-        print(f"  general:")
-        print(f"    s3_batch_role_arn: \"{role_arn}\"")
+        print("\nAdd to backup-config.yaml:")
+        print("  general:")
+        print(f'    s3_batch_role_arn: "{role_arn}"')
 
 
 if __name__ == "__main__":

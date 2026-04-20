@@ -166,3 +166,61 @@ use this checklist to avoid drift:
 7. **Rollback readiness**
    - Lambda rollback: redeploy previous artifact and restore lambda target
    - CodeBuild rollback: point project to previous source artifact and restore prior target mode
+
+## THS CodeBuild run-now and progress monitoring
+
+For THS, the scheduled production path is EventBridge -> CodeBuild project
+`nzshm-backup-ths-backup`.
+
+### Trigger a production-equivalent THS run now
+
+```bash
+AWS_PROFILE=nshm-backup-admin aws codebuild start-build \
+  --region ap-southeast-2 \
+  --project-name nzshm-backup-ths-backup
+```
+
+### Monitor progress during manifest preparation (~50-60 minutes typical)
+
+1) Poll build status:
+
+```bash
+AWS_PROFILE=nshm-backup-admin aws codebuild list-builds-for-project \
+  --region ap-southeast-2 \
+  --project-name nzshm-backup-ths-backup \
+  --sort-order DESCENDING \
+  --max-items 1
+
+AWS_PROFILE=nshm-backup-admin aws codebuild batch-get-builds \
+  --region ap-southeast-2 \
+  --ids <BUILD_ID> \
+  --query 'builds[0].{Status:buildStatus,Start:startTime,End:endTime,Log:logs.deepLink}'
+```
+
+2) Follow build logs (best visibility during manifest phase):
+
+```bash
+AWS_PROFILE=nshm-backup-admin aws logs tail \
+  "/aws/codebuild/nzshm-backup-ths-backup" \
+  --region ap-southeast-2 \
+  --follow
+```
+
+### Switch to S3 Batch progress after job submission
+
+S3 Batch progress is only available after `CreateJob` succeeds. During manifest prep,
+`backup status` may show no batch jobs yet.
+
+```bash
+AWS_PROFILE=nshm-backup-admin \
+BACKUP_CONFIG_PATH=backup-config.production.yaml \
+uv run backup status --source ths --output json
+```
+
+When a `job_id` appears, monitor that job directly:
+
+```bash
+AWS_PROFILE=nshm-backup-admin \
+BACKUP_CONFIG_PATH=backup-config.production.yaml \
+uv run backup status --source ths --job-id <JOB_ID>
+```

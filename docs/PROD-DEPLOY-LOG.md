@@ -456,6 +456,39 @@ Follow-up improvements:
 - Added mixed-target release checklist to `docs/user-guide/scheduling.md` to keep
   Lambda deploys, CodeBuild artifacts, config pushes, and schedule wiring in sync.
 
+### First THS CodeBuild trial result + remediation
+
+Manual run was triggered via CodeBuild project `nzshm-backup-ths-backup`.
+
+- Manifest preparation completed and job was submitted:
+  - `job_id=443d8d28-2519-4556-b2c5-660a3f4156f5`
+  - `objects_in_manifest=3,886,583`
+- CodeBuild build completed `SUCCEEDED`.
+
+However, the submitted batch job immediately entered `Failing` with 100% task
+failures (`FailureThresholdReached`).
+
+Root cause:
+- `nzshm-backup-batch-role` inline policy `ReadSource` only allowed
+  `arn:aws:s3:::nzshm22-toshi-api-prod/*` and did not include THS/static source
+  buckets.
+
+Fix applied:
+
+```bash
+AWS_PROFILE=nshm-backup-admin uv run python scripts/create-backup-roles.py \
+  --config backup-config.production.yaml
+```
+
+Verified `ReadSource` now includes:
+- `arn:aws:s3:::nzshm22-toshi-api-prod/*`
+- `arn:aws:s3:::ths-dataset-prod/*`
+- `arn:aws:s3:::nzshm22-static-reports/*`
+
+Validation rerun started:
+- `nzshm-backup-ths-backup:b7eabcc9-effd-4964-8273-5964ac343f46`
+- monitoring in progress for successful submission + task success progression.
+
 Config pushed to SSM parameter: `/nzshm-backup/prod/config`
 
 Dry runs (still running at time of writing — large buckets):

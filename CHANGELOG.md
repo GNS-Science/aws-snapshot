@@ -21,6 +21,9 @@ All notable changes to this project will be documented here.
 - `backup schedule show` now displays rule target mode/details (`lambda`,
   `codebuild`, `mixed`, `none`) and JSON output includes enriched target metadata
   (`backup --output json schedule show`).
+- S3 Batch role/source policy helper scripts now grant the full read/write action
+  set required by copy jobs on large sources (`GetObject*`/version-tag variants,
+  plus backup write ACL/tagging actions).
 
 ### Docs
 
@@ -29,6 +32,10 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 
+- S3 Batch manifest keys are now URL-encoded when generated, matching S3 Batch
+  CSV requirements for object keys containing reserved characters (`=`, `(`, `)` etc.).
+  This fixes THS copy failures that previously returned `403 AccessDenied` for encoded-key
+  rows even when bucket policies were present.
 - `batch_backup_source()` dry-run no longer enumerates all source objects. Previously a
   dry-run on an 8M-object bucket would paginate through ~80k ListObjectsV2 pages (10–20 min)
   even though the real run delegates listing to AWS S3 Batch. The dry-run fast-path now does
