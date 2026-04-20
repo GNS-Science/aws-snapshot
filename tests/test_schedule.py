@@ -1,7 +1,8 @@
 """Tests for schedule management commands (EventBridge)."""
 
 import json
-from unittest.mock import patch
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -100,6 +101,79 @@ def test_show_json_includes_target_metadata(events_client):
     assert row["target_type"] == "codebuild"
     assert len(row["targets"]) == 1
     assert row["targets"][0]["Id"] == "backup-codebuild"
+
+
+def test_health_reports_missing_rule(events_client):
+    """health should report not found rules cleanly."""
+    result = runner.invoke(app, ["health", "--source", "ths", "--frequency", "daily"])
+    assert result.exit_code == 0
+    assert "nzshm-backup-ths-daily: not found" in result.output
+
+
+def test_health_reports_codebuild_target_and_latest_build():
+    """health should include target and latest CodeBuild build info."""
+    now = datetime.now(timezone.utc)
+
+    events = MagicMock()
+    events.describe_rule.return_value = {
+        "Name": "nzshm-backup-ths-weekly",
+        "State": "ENABLED",
+        "ScheduleExpression": "cron(15 8 ? * WED *)",
+    }
+    events.list_targets_by_rule.return_value = {
+        "Targets": [
+            {
+                "Id": "backup-codebuild",
+                "Arn": (
+                    "arn:aws:codebuild:ap-southeast-2:123456789012:project/nzshm-backup-ths-backup"
+                ),
+                "RoleArn": "arn:aws:iam::123456789012:role/nzshm-backup-events-codebuild",
+            }
+        ]
+    }
+
+    cloudwatch = MagicMock()
+
+    def metric_stats(**kwargs):
+        metric = kwargs["MetricName"]
+        if metric == "Invocations":
+            return {"Datapoints": [{"Timestamp": now, "Sum": 2.0}]}
+        return {"Datapoints": []}
+
+    cloudwatch.get_metric_statistics.side_effect = metric_stats
+
+    codebuild = MagicMock()
+    codebuild.list_builds_for_project.return_value = {"ids": ["nzshm-backup-ths-backup:abc12345"]}
+    codebuild.batch_get_builds.return_value = {
+        "builds": [
+            {
+                "id": "nzshm-backup-ths-backup:abc12345",
+                "buildStatus": "IN_PROGRESS",
+                "currentPhase": "BUILD",
+                "startTime": now,
+            }
+        ]
+    }
+
+    session = MagicMock()
+
+    def client(service, **_kwargs):
+        if service == "events":
+            return events
+        if service == "cloudwatch":
+            return cloudwatch
+        if service == "codebuild":
+            return codebuild
+        raise AssertionError(f"unexpected service {service}")
+
+    session.client.side_effect = client
+
+    with patch("nzshm_backup.commands.schedule.boto3.Session", return_value=session):
+        result = runner.invoke(app, ["health", "--source", "ths", "--frequency", "weekly"])
+
+    assert result.exit_code == 0
+    assert "target=codebuild" in result.output
+    assert "latest build=abc12345 status=IN_PROGRESS" in result.output
 
 
 def test_add_creates_weekly_rule(events_client):

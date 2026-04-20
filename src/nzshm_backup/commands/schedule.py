@@ -24,6 +24,13 @@ _EB_WEEKDAY = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT", 7: "S
 _EB_TO_ISO = {v: k for k, v in _EB_WEEKDAY.items()}
 
 
+def _fmt_dt(dt: datetime | str) -> str:
+    """Format datetime (or ISO string) in local timezone."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+
+
 def _schedule_expr_local_desc(expr: str) -> str:
     """Parse an EventBridge schedule expression and return a localised description.
 
@@ -117,6 +124,45 @@ def _target_summary(targets: list[dict]) -> str:
     return ",".join(names)
 
 
+def _metric_window_summary(
+    cloudwatch,
+    rule_name: str,
+    metric_name: str,
+    window_minutes: int,
+) -> tuple[float, datetime | None]:
+    """Return (sum, latest_nonzero_timestamp) for an EventBridge rule metric window."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(minutes=window_minutes)
+    resp = cloudwatch.get_metric_statistics(
+        Namespace="AWS/Events",
+        MetricName=metric_name,
+        Dimensions=[{"Name": "RuleName", "Value": rule_name}],
+        StartTime=start,
+        EndTime=end,
+        Period=60,
+        Statistics=["Sum"],
+    )
+    points = resp.get("Datapoints", [])
+    total = float(sum(float(p.get("Sum", 0) or 0) for p in points))
+    nonzero = [p for p in points if float(p.get("Sum", 0) or 0) > 0]
+    latest = max((p["Timestamp"] for p in nonzero), default=None)
+    return total, latest
+
+
+def _latest_codebuild_build(codebuild, project_arn: str) -> dict | None:
+    """Fetch latest CodeBuild build metadata for a project ARN."""
+    project_name = project_arn.split(":project/")[-1]
+    listed = codebuild.list_builds_for_project(
+        projectName=project_name,
+        sortOrder="DESCENDING",
+    )
+    ids = listed.get("ids", [])
+    if not ids:
+        return None
+    builds = codebuild.batch_get_builds(ids=[ids[0]]).get("builds", [])
+    return builds[0] if builds else None
+
+
 def _parse_schedule_time(time_str: str) -> tuple[int, int, str | None]:
     """Parse a time string and return (hour_utc, minute_utc, eb_weekday_or_none).
 
@@ -203,6 +249,106 @@ def show():
             f"{rule['Name']:<45} {rule.get('State', 'UNKNOWN'):<10} {expr:<22} "
             f"{rule.get('target_type', 'none'):<10} {rule.get('target_summary', '-'):<35} {local}"
         )
+
+
+@app.command("health")
+def health(
+    source: str = typer.Option(..., help="Data source"),
+    frequency: Literal["daily", "weekly", "hourly", "minutely"] | None = typer.Option(
+        None,
+        help="Frequency to inspect. Defaults to all schedule rules for source.",
+    ),
+    window_minutes: int = typer.Option(
+        120,
+        min=5,
+        help="CloudWatch metric lookback window (minutes)",
+    ),
+):
+    """Show scheduler health (rule/target/invocation) for a source."""
+    state = get_state()
+    session = boto3.Session()
+    events = session.client("events")
+    cloudwatch = session.client("cloudwatch")
+    codebuild = session.client("codebuild")
+
+    frequencies = [frequency] if frequency else ["daily", "weekly", "hourly", "minutely"]
+    rows: list[dict] = []
+    for freq in frequencies:
+        rule_name = _rule_name(source, freq)
+        try:
+            rule = events.describe_rule(Name=rule_name)
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("ResourceNotFoundException", "ValidationException"):
+                rows.append({"rule_name": rule_name, "exists": False})
+                continue
+            raise
+
+        targets = events.list_targets_by_rule(Rule=rule_name).get("Targets", [])
+        target_type = _target_type(targets)
+        target_summary = _target_summary(targets)
+        inv_sum, inv_last = _metric_window_summary(
+            cloudwatch, rule_name, "Invocations", window_minutes
+        )
+        fail_sum, fail_last = _metric_window_summary(
+            cloudwatch, rule_name, "FailedInvocations", window_minutes
+        )
+
+        row: dict = {
+            "rule_name": rule_name,
+            "exists": True,
+            "state": rule.get("State"),
+            "schedule": rule.get("ScheduleExpression"),
+            "target_type": target_type,
+            "target_summary": target_summary,
+            "invocations_window": inv_sum,
+            "invocations_last": inv_last,
+            "failed_invocations_window": fail_sum,
+            "failed_invocations_last": fail_last,
+        }
+
+        if target_type == "codebuild" and targets:
+            build = _latest_codebuild_build(codebuild, targets[0].get("Arn", ""))
+            if build:
+                row["latest_codebuild"] = {
+                    "id": build.get("id"),
+                    "status": build.get("buildStatus"),
+                    "phase": build.get("currentPhase"),
+                    "start_time": build.get("startTime"),
+                    "end_time": build.get("endTime"),
+                }
+        rows.append(row)
+
+    if state.output == "json":
+        typer.echo(json.dumps(rows, indent=2, default=str))
+        return
+
+    typer.echo(f"Scheduler health for source '{source}' (last {window_minutes}m)")
+    for row in rows:
+        if not row.get("exists"):
+            typer.echo(f"- {row['rule_name']}: not found")
+            continue
+        typer.echo(
+            f"- {row['rule_name']}: {row['state']}  {row['schedule']}  "
+            f"target={row['target_type']} ({row['target_summary']})"
+        )
+        inv_last = _fmt_dt(row["invocations_last"]) if row.get("invocations_last") else "none"
+        fail_last = (
+            _fmt_dt(row["failed_invocations_last"])
+            if row.get("failed_invocations_last")
+            else "none"
+        )
+        typer.echo(
+            f"  invocations={int(row['invocations_window'])} (last: {inv_last})  "
+            f"failed={int(row['failed_invocations_window'])} (last: {fail_last})"
+        )
+        latest = row.get("latest_codebuild")
+        if latest:
+            build_id = str(latest.get("id", "")).split(":")[-1]
+            start = _fmt_dt(latest["start_time"]) if latest.get("start_time") else "unknown"
+            typer.echo(
+                f"  latest build={build_id} status={latest.get('status')} "
+                f"phase={latest.get('phase')} start={start}"
+            )
 
 
 @app.command("add")
