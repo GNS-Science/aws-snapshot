@@ -399,7 +399,13 @@ def resolve_from_config(
     batch_role_arn_override: str | None,
     backup_account_id_override: str | None = None,
 ):
-    """Load config and return account, region, sources, and batch role ARN."""
+    """Load config and return account, region, sources, and batch role ARN.
+
+    Note: reader/restore roles are account-wide (`nzshm-backup-reader` and
+    `nzshm-backup-restore`). To avoid clobbering permissions when multiple
+    config sources share the same source account, aggregate S3/DynamoDB
+    resources across all matching sources in that account.
+    """
     with open(config_path) as f:
         data = yaml.safe_load(f)
 
@@ -412,6 +418,7 @@ def resolve_from_config(
         sys.exit(1)
 
     source = sources[source_alias]
+    selected_source_account_id = source.get("source_account_id")
 
     if backup_account_id_override:
         backup_account_id = backup_account_id_override
@@ -428,8 +435,22 @@ def resolve_from_config(
         backup_account_id = parts[4]
     region = general.get("region", "ap-southeast-2")
 
-    s3_buckets = [b["arn"].split(":::")[-1] for b in source.get("s3_buckets", [])]
-    dynamodb_tables = [arn.split("/")[-1] for arn in source.get("dynamodb_tables", [])]
+    matching_sources = []
+    if selected_source_account_id:
+        matching_sources = [
+            s for s in sources.values() if s.get("source_account_id") == selected_source_account_id
+        ]
+    if not matching_sources:
+        matching_sources = [source]
+
+    s3_buckets_set: set[str] = set()
+    dynamodb_tables_set: set[str] = set()
+    for src in matching_sources:
+        s3_buckets_set.update(b["arn"].split(":::")[-1] for b in src.get("s3_buckets", []))
+        dynamodb_tables_set.update(arn.split("/")[-1] for arn in src.get("dynamodb_tables", []))
+
+    s3_buckets = sorted(s3_buckets_set)
+    dynamodb_tables = sorted(dynamodb_tables_set)
 
     batch_role_arn = batch_role_arn_override
     if batch_role_arn is None and source.get("use_s3_batch"):
