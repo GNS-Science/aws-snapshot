@@ -186,6 +186,37 @@ Note:
 - `backup check --source <alias>` now reports inventory config readiness and
   snapshot presence/effective data timestamp when artifacts are available.
 
+Inventory readiness snapshot (2026-04-22, via `backup check --source <alias>`):
+- `ths`: inventory configs enabled on source+backup; snapshots not yet present; effective data time pending.
+- `toshi`: inventory configs enabled on source+backup; snapshots not yet present; effective data time pending.
+- `weka`: inventory configs enabled on source+backup; snapshots not yet present; effective data time pending.
+- `static`: inventory configs enabled on source+backup; snapshots not yet present; effective data time pending.
+
+Operational note (resolved 2026-04-22):
+- `toshi` backup bucket versioning was enabled manually:
+
+```bash
+aws s3api put-bucket-versioning \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --bucket bb-toshi-s3-api-prod-ap-southeast-2-461564345538 \
+  --versioning-configuration Status=Enabled
+```
+
+- Verification:
+
+```bash
+aws s3api get-bucket-versioning \
+  --profile nshm-backup-admin \
+  --region ap-southeast-2 \
+  --bucket bb-toshi-s3-api-prod-ap-southeast-2-461564345538 \
+  --query 'Status' --output text
+```
+
+Output: `Enabled`
+
+- Post-fix check: `backup check --source toshi` now passes (inventory snapshot warnings remain expected until first artifact delivery).
+
 ---
 
 ## Step 14 — Current production backup status snapshot ✅ 2026-04-20
