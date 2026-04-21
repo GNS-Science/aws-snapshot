@@ -71,6 +71,7 @@ backup costs report --period last-month
 ### Design Documents
 - [Backup Solution Plan](design/backup-solution-plan.md)
 - [S3 Manifest Bottleneck](design/S3_MANIFEST_BOTTLENECK.md)
+- [Architecture Decision Records](design/adr/README.md)
 - [CLI-First Rationale](design/CLI_FIRST_RATIONALE.md)
 - [Typer Framework Decision](design/TYPER_RATIONALE.md)
 
