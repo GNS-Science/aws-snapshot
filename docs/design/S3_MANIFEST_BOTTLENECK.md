@@ -192,6 +192,42 @@ This is the planned implementation path for inventory-based manifests.
    - During transition: keep `_state/last-run.json` compatibility.
    - Preferred target: centralized run-state store (see compatibility contract).
 
+### Per-run flow (prepare -> submit)
+
+For inventory mode, every scheduled backup run still performs both steps:
+
+1. **prepare**
+   - read latest source/backup inventory snapshots
+   - compute diff set
+   - write manifest CSV + capture ETag
+2. **submit**
+   - call `s3control:CreateJob` with manifest location + ETag
+
+What changes from the current inline path is not the existence of `prepare`, but
+its implementation:
+
+- **Current inline prepare:** live `ListObjectsV2` on source + backup, in-process diff.
+- **Inventory prepare (target):** snapshot-driven query diff (Athena) and manifest export.
+
+Both approaches then use the same S3 Batch submission contract.
+
+### State model (useful operational phases)
+
+Recommended run phase model for visibility and troubleshooting:
+
+- `running` — run has started
+- `preparing_manifest` — inventory diff + manifest export in progress
+- `prepared` — manifest key + ETag ready
+- `submitted` — S3 Batch job created (`batch_job_id` known)
+- `active` — S3 Batch job running
+- terminal: `completed`, `failed`, `skipped`
+
+Implementation note:
+
+- Current `_state/last-run.json` already records `running`, `prepared`,
+  `submitted`, `completed`, `failed`, `skipped`.
+- `active` can be derived from `DescribeJob` once `batch_job_id` exists.
+
 ### Delivery phases
 
 - **Phase A (Inventory v1, fast path):**

@@ -184,6 +184,20 @@ use this checklist to avoid drift:
 For THS, the scheduled production path is EventBridge -> CodeBuild project
 `nzshm-backup-ths-backup`.
 
+### How a scheduled THS run executes
+
+When the schedule fires, the runtime path is:
+
+```text
+EventBridge -> CodeBuild -> backup run --source ths
+                         -> prepare (build manifest)
+                         -> submit (CreateJob)
+```
+
+The `prepare` step happens on every run. The long-term inventory design keeps
+the same `prepare -> submit` structure but replaces live source/backup listing
+with inventory-snapshot diffing.
+
 ### Trigger a production-equivalent THS run now
 
 ```bash
@@ -222,6 +236,9 @@ AWS_PROFILE=nshm-backup-admin aws logs tail \
 
 S3 Batch progress is only available after `CreateJob` succeeds. During manifest prep,
 `backup status` may show no batch jobs yet.
+
+Use `backup schedule health` to confirm scheduler/build-side progress while still
+in pre-submit phases.
 
 ```bash
 AWS_PROFILE=nshm-backup-admin \
