@@ -2,6 +2,25 @@
 
 This guide walks through the most common operations after [installation](installation.md).
 
+## Command map
+
+Top-level command groups:
+
+```text
+backup check      # pre-flight readiness checks
+backup schedule   # EventBridge schedule management
+backup setup      # infrastructure/bootstrap helpers
+backup run        # trigger manual backup run
+backup restore    # restore operations
+backup test       # integrity/restore testing helpers
+backup status     # latest backup status view
+backup events     # event log view
+backup config     # config view/push/pull/validate
+```
+
+For the full command tree and all options, see
+[CLI Reference](../cli-reference.md).
+
 ## Prerequisites
 
 - `backup-config.yaml` present in your working directory (or `BACKUP_CONFIG_PATH` set)
