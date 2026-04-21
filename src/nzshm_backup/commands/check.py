@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from nzshm_backup.config import load_config
 from nzshm_backup.config.models import ConfigModel
+from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
 from nzshm_backup.s3_backup import get_cross_account_session
 
 app = typer.Typer()
@@ -154,6 +155,56 @@ def _check_source(session: boto3.Session, config: ConfigModel, alias: str) -> bo
             else:
                 _row(f"Backup bucket {backup_bucket}", _FAIL, code)
                 failed = True
+
+        # Inventory readiness signals (non-fatal, informational)
+        try:
+            inv = inventory_health_for_bucket_pair(
+                session,
+                source_session or session,
+                alias,
+                bucket,
+                backup_bucket,
+            )
+            if inv["source_configured"]:
+                _row(f"Inventory config {bucket}", _PASS, "enabled")
+            else:
+                _row(f"Inventory config {bucket}", _WARN, "not configured")
+
+            if inv["backup_configured"]:
+                _row(f"Inventory config {backup_bucket}", _PASS, "enabled")
+            else:
+                _row(f"Inventory config {backup_bucket}", _WARN, "not configured")
+
+            src_ts = inv.get("source_latest")
+            bkp_ts = inv.get("backup_latest")
+            eff_ts = inv.get("effective_data_ts")
+            if src_ts:
+                _row(
+                    f"Inventory snapshot {bucket}",
+                    _PASS,
+                    src_ts.astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+                )
+            else:
+                _row(f"Inventory snapshot {bucket}", _WARN, "no artifacts yet")
+            if bkp_ts:
+                _row(
+                    f"Inventory snapshot {backup_bucket}",
+                    _PASS,
+                    bkp_ts.astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+                )
+            else:
+                _row(f"Inventory snapshot {backup_bucket}", _WARN, "no artifacts yet")
+
+            if eff_ts:
+                _row(
+                    "Inventory effective data time",
+                    _PASS,
+                    eff_ts.astimezone().strftime("%Y-%m-%d %H:%M %Z"),
+                )
+            else:
+                _row("Inventory effective data time", _WARN, "not yet available")
+        except Exception:
+            _row("Inventory readiness", _WARN, "unable to evaluate")
 
     # --- S3 Batch role ---
     if source_cfg.use_s3_batch:

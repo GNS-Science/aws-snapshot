@@ -83,7 +83,7 @@ def build_reader_policy(
             {
                 "Sid": "ListSourceBuckets",
                 "Effect": "Allow",
-                "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+                "Action": ["s3:ListBucket", "s3:GetBucketLocation", "s3:GetInventoryConfiguration"],
                 "Resource": [f"arn:aws:s3:::{b}" for b in s3_buckets],
                 "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
             }

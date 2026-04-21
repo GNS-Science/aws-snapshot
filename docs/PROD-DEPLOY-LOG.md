@@ -152,6 +152,42 @@ BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --sta
 
 ---
 
+## Step 15 — Inventory producers enabled for all sources ✅ 2026-04-22
+
+Set up daily Parquet S3 Inventory for source + backup bucket pairs using the
+new helper script `scripts/setup-inventory.py`.
+
+Control bucket (backup account):
+- `nzshm-backup-inventory-737696831915`
+
+Configured sources:
+- `ths`
+- `toshi`
+- `weka`
+- `static`
+
+Command pattern used:
+
+```bash
+uv run python scripts/setup-inventory.py \
+  --config backup-config.production.yaml \
+  --source <alias> \
+  --source-profile nshm-admin \
+  --backup-profile nshm-backup-admin
+```
+
+Verified for each source and backup bucket:
+- inventory configuration exists and is enabled
+- destination format is `Parquet`
+- destination prefixes follow `inventory/<source>/{source|backup}/...`
+
+Note:
+- First inventory artifacts may take up to 24-48h to appear.
+- `backup check --source <alias>` now reports inventory config readiness and
+  snapshot presence/effective data timestamp when artifacts are available.
+
+---
+
 ## Step 14 — Current production backup status snapshot ✅ 2026-04-20
 
 Captured current status after THS CodeBuild cutover + manifest/policy fixes.
