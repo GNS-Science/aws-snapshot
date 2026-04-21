@@ -8,6 +8,10 @@ All notable changes to this project will be documented here.
 
 - `backup schedule add` now supports `--target codebuild` for EventBridge -> CodeBuild
   schedules. This mode requires `--codebuild-project-arn` and `--target-role-arn`.
+- New `backup setup` command group for provisioning workflows:
+  - `backup setup inventory ...`
+  - `backup setup iam source-roles ...`
+  - `backup setup iam backup-batch-role ...`
 - `backup check [--source SOURCE]` — fast pre-flight command that validates IAM credentials,
   cross-account role assumption, S3 bucket read access, backup bucket existence, S3 Batch
   role presence, and DynamoDB PITR status. No object enumeration — completes in seconds.
@@ -21,6 +25,10 @@ All notable changes to this project will be documented here.
 - `backup schedule show` now displays rule target mode/details (`lambda`,
   `codebuild`, `mixed`, `none`) and JSON output includes enriched target metadata
   (`backup --output json schedule show`).
+- `backup check` now reports inventory readiness signals (source/backup inventory
+  config state and latest snapshot timestamps).
+- `backup status` now includes inventory snapshot metadata in JSON output for
+  S3 Batch sources.
 - S3 Batch role/source policy helper scripts now grant the full read/write action
   set required by copy jobs on large sources (`GetObject*`/version-tag variants,
   plus backup write ACL/tagging actions).
@@ -60,6 +68,8 @@ All notable changes to this project will be documented here.
 
 ### Scripts
 
+- Added `scripts/setup-inventory.py` to configure daily Parquet S3 inventory for
+  source + backup buckets, with output to a dedicated control bucket.
 - `scripts/create-source-roles.py`: `--backup-account-id` can now be passed alongside
   `--config/--source` to override the backup account ID when `general.lambda_arn` is not
   yet set (e.g. before first Lambda deploy).

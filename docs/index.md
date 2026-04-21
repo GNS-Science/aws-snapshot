@@ -43,6 +43,9 @@ backup restore preview --date 2026-02-15 --source toshi
 # Show schedule
 backup schedule show
 
+# Provision inventory for a source
+backup setup inventory --source ths --source-profile nshm-admin --backup-profile <aws-profile>
+
 # Generate cost report
 backup costs report --period last-month
 ```

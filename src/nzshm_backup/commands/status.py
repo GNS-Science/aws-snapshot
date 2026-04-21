@@ -8,6 +8,7 @@ import boto3
 import typer
 
 from nzshm_backup.config import load_config
+from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
 from nzshm_backup.run_state import read_run_state
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import list_recent_batch_jobs
@@ -193,6 +194,22 @@ def _print_source_status(
                     else:
                         typer.echo(f"    last run: {checked} — {st}")
 
+                inv = inventory_health_for_bucket_pair(
+                    session,
+                    source_session,
+                    source_alias,
+                    source_bucket,
+                    backup_bucket,
+                )
+                src_ts = inv.get("source_latest")
+                bkp_ts = inv.get("backup_latest")
+                eff_ts = inv.get("effective_data_ts")
+                if src_ts or bkp_ts:
+                    src_s = _fmt_dt(src_ts) if src_ts else "none"
+                    bkp_s = _fmt_dt(bkp_ts) if bkp_ts else "none"
+                    eff_s = _fmt_dt(eff_ts) if eff_ts else "none"
+                    typer.echo(f"    inventory: source={src_s}  backup={bkp_s}  effective={eff_s}")
+
                 jobs = _get_recent_batch_jobs(s3control, account_id, source_bucket)
                 if not jobs:
                     typer.echo(f"    {source_bucket}: no batch jobs found")
@@ -340,12 +357,26 @@ def _print_json_status(
                 )
                 try:
                     state = read_run_state(session, backup_bucket)
+                    inv = inventory_health_for_bucket_pair(
+                        session,
+                        source_session,
+                        alias,
+                        source_bucket,
+                        backup_bucket,
+                    )
                     jobs = _get_recent_batch_jobs(s3control, account_id, source_bucket)
                     s3_batches.append(
                         {
                             "source_bucket": source_bucket,
                             "backup_bucket": backup_bucket,
                             "last_run": state,
+                            "inventory": {
+                                "source_latest": str(inv.get("source_latest") or ""),
+                                "backup_latest": str(inv.get("backup_latest") or ""),
+                                "effective_data_ts": str(inv.get("effective_data_ts") or ""),
+                                "source_configured": inv.get("source_configured", False),
+                                "backup_configured": inv.get("backup_configured", False),
+                            },
                             "recent_jobs": [_job_json(j) for j in jobs],
                         }
                     )
