@@ -64,7 +64,7 @@ backup costs report --period last-month
 - [Cost Management](user-guide/costs.md)
 
 ### CLI Reference
-- [Complete CLI Documentation](cli-reference.md) (auto-generated)
+- [Complete CLI Documentation](cli-reference.md) (includes quick command tree + auto-generated details)
 
 ### Architecture
 - [Overview](architecture/overview.md)
