@@ -105,6 +105,8 @@ def run_backup_source(
                     full_sync=full_sync,
                     source_session=source_session,
                     prepare_only=prepare_only,
+                    source_alias=source_alias,
+                    manifest_mode=source_config.batch_manifest_mode,
                 )
                 result.s3_results.append(
                     {

@@ -4,7 +4,9 @@ Uses s3control:CreateJob to copy objects asynchronously, avoiding Lambda
 timeout on first-run syncs of multi-million-object buckets.
 """
 
+import csv
 import logging
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -15,6 +17,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES
+from nzshm_backup.inventory_state import _expected_prefix
 from nzshm_backup.s3_backup import ensure_backup_bucket_ready, get_region
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Multipart upload threshold: 8 MB
 _MULTIPART_THRESHOLD = 8 * 1024 * 1024
 _MULTIPART_CHUNK = 8 * 1024 * 1024
+_INVENTORY_DT_RE = re.compile(r"/hive/dt=([^/]+)/")
 
 
 @dataclass
@@ -149,6 +153,120 @@ def _list_bucket(s3_client, bucket: str) -> dict:
     return objects
 
 
+def _normalize_etag(value: str) -> str:
+    return value.strip().strip('"')
+
+
+def _latest_inventory_parquet_keys(
+    s3_client,
+    control_bucket: str,
+    inventory_prefix: str,
+) -> tuple[str, list[str]]:
+    snapshots: dict[str, list[str]] = {}
+    paginator = s3_client.get_paginator("list_objects_v2")
+    prefix = f"{inventory_prefix.rstrip('/')}/hive/"
+    for page in paginator.paginate(Bucket=control_bucket, Prefix=prefix):
+        for obj in page.get("Contents", []) or []:
+            key = obj.get("Key", "")
+            if not key.endswith(".parquet"):
+                continue
+            match = _INVENTORY_DT_RE.search(key)
+            if not match:
+                continue
+            snapshots.setdefault(match.group(1), []).append(key)
+
+    if not snapshots:
+        raise ValueError(f"No inventory parquet data found under s3://{control_bucket}/{prefix}")
+
+    latest_dt = max(snapshots.keys())
+    return latest_dt, sorted(snapshots[latest_dt])
+
+
+def _iter_inventory_rows(
+    s3_client,
+    control_bucket: str,
+    parquet_keys: list[str],
+) -> Iterator[tuple[str, int, str]]:
+    expression = 'SELECT s."key", s."size", s."e_tag" FROM S3Object s'
+    for parquet_key in parquet_keys:
+        response = s3_client.select_object_content(
+            Bucket=control_bucket,
+            Key=parquet_key,
+            ExpressionType="SQL",
+            Expression=expression,
+            InputSerialization={"Parquet": {}},
+            OutputSerialization={"CSV": {}},
+        )
+
+        pending = ""
+        for event in response["Payload"]:
+            records = event.get("Records")
+            if not records:
+                continue
+            pending += records["Payload"].decode("utf-8")
+            lines = pending.splitlines(keepends=False)
+            if pending and not pending.endswith("\n"):
+                pending = lines.pop() if lines else pending
+            else:
+                pending = ""
+            for line in lines:
+                if not line:
+                    continue
+                cols = next(csv.reader([line]))
+                if len(cols) < 3:
+                    continue
+                key = cols[0]
+                size = int(cols[1]) if cols[1] else 0
+                etag = _normalize_etag(cols[2])
+                yield key, size, etag
+
+        if pending:
+            cols = next(csv.reader([pending]))
+            if len(cols) >= 3:
+                key = cols[0]
+                size = int(cols[1]) if cols[1] else 0
+                etag = _normalize_etag(cols[2])
+                yield key, size, etag
+
+
+def _build_manifest_rows_from_inventory(
+    session: boto3.Session,
+    source_alias: str,
+    source_bucket: str,
+    backup_bucket: str,
+    full_sync: bool,
+) -> tuple[Iterator[str], str, str]:
+    backup_s3 = session.client("s3")
+    account_id = session.client("sts").get_caller_identity()["Account"]
+    control_bucket = f"nzshm-backup-inventory-{account_id}"
+
+    src_prefix = _expected_prefix(source_alias, "source", source_bucket)
+    bkp_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
+
+    src_dt, src_keys = _latest_inventory_parquet_keys(backup_s3, control_bucket, src_prefix)
+    bkp_dt, bkp_keys = _latest_inventory_parquet_keys(backup_s3, control_bucket, bkp_prefix)
+
+    backup_objects: dict[str, tuple[str, int]] = {}
+    if not full_sync:
+        for key, size, etag in _iter_inventory_rows(backup_s3, control_bucket, bkp_keys):
+            if any(key.startswith(p) for p in OPERATIONAL_PREFIXES):
+                continue
+            backup_objects[key] = (etag, size)
+
+    def _rows() -> Iterator[str]:
+        for key, size, etag in _iter_inventory_rows(backup_s3, control_bucket, src_keys):
+            current = backup_objects.get(key)
+            if full_sync or current is None or current[0] != etag or current[1] != size:
+                safe_key = quote(key, safe="/")
+                yield f"{source_bucket},{safe_key}\n"
+
+    logger.info(
+        f"Using inventory snapshots source={src_dt} backup={bkp_dt} "
+        f"from s3://{control_bucket}/{src_prefix} and s3://{control_bucket}/{bkp_prefix}"
+    )
+    return _rows(), src_dt, bkp_dt
+
+
 def batch_backup_source(
     session: boto3.Session,
     source_bucket: str,
@@ -159,6 +277,8 @@ def batch_backup_source(
     full_sync: bool = False,
     source_session: boto3.Session | None = None,
     prepare_only: bool = False,
+    source_alias: str | None = None,
+    manifest_mode: Literal["inline", "inventory"] = "inline",
 ) -> BatchJobResult:
     """Submit an S3 Batch Operations job to copy new/changed objects.
 
@@ -174,6 +294,8 @@ def batch_backup_source(
         account_id:      AWS account ID (for s3control API call)
         dry_run:         if True, build manifest but skip CreateJob
         full_sync:       if True, include all objects regardless of ETag
+        source_alias:    source key in config (required for inventory mode)
+        manifest_mode:   'inline' (live list/diff) or 'inventory' (latest inventory snapshot diff)
     """
     s3_client = session.client("s3")
     src_s3_client = source_session.client("s3") if source_session is not None else s3_client
@@ -201,21 +323,33 @@ def batch_backup_source(
 
     ensure_backup_bucket_ready(session, backup_bucket)
 
-    logger.info(f"Listing source objects in {source_bucket}")
-    source_objects = _list_bucket(src_s3_client, source_bucket)
-    logger.info(f"Found {len(source_objects)} source objects")
+    if manifest_mode == "inventory":
+        if not source_alias:
+            raise ValueError("source_alias is required when manifest_mode='inventory'")
+        rows, src_dt, bkp_dt = _build_manifest_rows_from_inventory(
+            session,
+            source_alias,
+            source_bucket,
+            backup_bucket,
+            full_sync,
+        )
+        logger.info(f"Inventory diff snapshots selected: source={src_dt}, backup={bkp_dt}")
+    else:
+        logger.info(f"Listing source objects in {source_bucket}")
+        source_objects = _list_bucket(src_s3_client, source_bucket)
+        logger.info(f"Found {len(source_objects)} source objects")
 
-    dest_objects: dict = {}
-    try:
-        dest_objects = _list_bucket(s3_client, backup_bucket)
-        logger.info(f"Found {len(dest_objects)} existing backup objects")
-    except ClientError as e:
-        if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
-            logger.info("Backup bucket does not yet exist — all objects will be copied")
-        else:
-            raise
+        dest_objects: dict = {}
+        try:
+            dest_objects = _list_bucket(s3_client, backup_bucket)
+            logger.info(f"Found {len(dest_objects)} existing backup objects")
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
+                logger.info("Backup bucket does not yet exist — all objects will be copied")
+            else:
+                raise
 
-    rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
+        rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
 
     logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
     manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)

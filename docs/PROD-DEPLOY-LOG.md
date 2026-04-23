@@ -152,6 +152,58 @@ BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --sta
 
 ---
 
+## Step 17 — Inventory manifest implementation landed in codebase ✅ 2026-04-23
+
+Implemented inventory-based S3 Batch manifest preparation path behind per-source
+config, while keeping the external run command unchanged.
+
+Code changes:
+- Added `sources.<alias>.batch_manifest_mode` (`inline` | `inventory`, default `inline`)
+  in config model.
+- Updated backup engine to pass `source_alias` and `batch_manifest_mode` into
+  `batch_backup_source(...)`.
+- Added inventory-manifest diff path in `s3_batch.py`:
+  - discovers latest inventory snapshots under `inventory/<alias>/{source|backup}/...`
+  - reads Parquet inventory objects via S3 Select
+  - diffs source vs backup key/etag/size (excluding operational prefixes on backup side)
+  - emits standard URL-encoded S3 Batch CSV manifest rows.
+
+Validation in repo:
+
+```bash
+uv run ruff check src/nzshm_backup/config/models.py src/nzshm_backup/backup_engine.py src/nzshm_backup/s3_batch.py tests/test_s3_batch.py
+uv run pytest tests/test_s3_batch.py tests/test_backup_engine.py tests/test_check_command.py tests/test_status_command.py tests/test_setup_command.py
+```
+
+Status:
+- Implementation merged locally and tested; production config not yet switched to
+  `batch_manifest_mode: inventory` for any source in this step.
+
+---
+
+## Step 16 — Inventory readiness confirmed across all sources ✅ 2026-04-23
+
+Re-ran production preflight checks after SSO refresh and toshi versioning remediation.
+
+Command pattern used:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup check --source <alias>
+```
+
+Result summary:
+- `ths`: all checks passed; inventory snapshots present; effective data time `2026-04-23 06:52 NZST`.
+- `toshi`: all checks passed (including versioning + PITR); inventory snapshots present; effective data time `2026-04-23 06:52 NZST`.
+- `weka`: all checks passed; inventory snapshots present; effective data time `2026-04-23 06:52 NZST`.
+- `static`: all checks passed; inventory snapshots present; effective data time `2026-04-23 06:52 NZST`.
+
+Outcome:
+- Inventory producers are now both configured and actively delivering artifacts for all four production sources.
+- Environment is ready to begin inventory-based manifest generation implementation.
+
+---
+
 ## Step 15 — Inventory producers enabled for all sources ✅ 2026-04-22
 
 Set up daily Parquet S3 Inventory for source + backup bucket pairs using the
