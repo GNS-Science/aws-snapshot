@@ -218,6 +218,100 @@ Note:
 
 ---
 
+## Step 20 — Deployed Athena THS runtime artifact to CodeBuild ✅ 2026-04-23
+
+Published runtime artifact from commit `6fb7128` to the THS CodeBuild source key:
+
+```bash
+git archive --format=zip --output /tmp/nzshm-backup-codebuild-ths-cutover.zip HEAD
+AWS_PROFILE=nshm-backup-admin aws s3 cp \
+  /tmp/nzshm-backup-codebuild-ths-cutover.zip \
+  s3://nzshm-backup-codebuild-src-737696831915/nzshm-backup-codebuild-ths-cutover.zip \
+  --region ap-southeast-2
+```
+
+Triggered production-equivalent THS build smoke:
+
+```bash
+AWS_PROFILE=nshm-backup-admin aws codebuild start-build \
+  --region ap-southeast-2 \
+  --project-name nzshm-backup-ths-backup
+```
+
+Build result:
+- Build ID: `nzshm-backup-ths-backup:4c0cf859-1972-4029-b113-a11d730bf11f`
+- Status: `SUCCEEDED`
+- Runtime: ~49s total (`INSTALL` ~21s, `BUILD` ~20s)
+
+Post-deploy status check:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup status --source ths
+```
+
+Observed:
+- `last run: ... — skipped`
+- inventory freshness line present (`source`, `backup`, `effective`)
+- no new S3 Batch job submitted (expected when diff is empty)
+
+Notes:
+- Production config with `sources.ths.batch_manifest_mode: inventory` has already
+  been pushed to SSM (`/nzshm-backup/prod/config`).
+- THS scheduler remains EventBridge -> CodeBuild (no target-mode change in this step).
+
+---
+
+## Step 21 — Weka switched to S3 Batch inventory mode and validated ✅ 2026-04-23
+
+Updated production config for `weka`:
+
+- `sources.weka.use_s3_batch: true`
+- `sources.weka.batch_manifest_mode: inventory`
+
+Pushed config to SSM:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup config push --stage prod
+```
+
+Preflight check:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup check --source weka
+```
+
+Result: all checks passed (including S3 Batch role, inventory config, and inventory snapshots).
+
+Live run:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup run --source weka
+```
+
+Observed run output:
+- Athena inventory diff query succeeded (`query_id=54baacc6-ddde-4e29-a76b-97d29349d963`)
+- Selected snapshots: `source_dt=2026-04-22-01-00`, `backup_dt=2026-04-22-01-00`
+- Manifest row count: `0`
+- Run terminal state: `SKIPPED` (no differences to copy)
+
+Status follow-up:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup status --source weka
+```
+
+Shows:
+- `last run: ... — skipped`
+- inventory freshness line with source/backup/effective timestamps
+- `no batch jobs found` (expected because no job is submitted when manifest is empty)
+
+---
+
 ## Step 18 — S3 Select blocker confirmed; pivot to Athena design ✅ 2026-04-23
 
 Attempted a THS `prepare-only` smoke run after enabling inventory mode:

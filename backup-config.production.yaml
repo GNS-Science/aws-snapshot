@@ -56,7 +56,8 @@ sources:
       label: weka-ui-prod
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
-    use_s3_batch: false
+    use_s3_batch: true
+    batch_manifest_mode: inventory
 retention:
   hot_days: 30
   warm_days: 120
