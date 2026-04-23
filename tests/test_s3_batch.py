@@ -265,6 +265,64 @@ def test_batch_backup_prepare_only_writes_manifest_without_submitting(aws_sessio
     assert manifest["Body"].read().decode().strip() == "src4,new.txt"
 
 
+def test_batch_backup_inventory_mode_uses_inventory_builder(aws_session, s3_client):
+    """Inventory mode uses inventory diff builder and avoids live bucket listing."""
+    _create_bucket(s3_client, "src5")
+    backup_name = "src5-backup-ap-southeast-2-123456789012"
+
+    from nzshm_backup.s3_backup import create_backup_bucket
+
+    create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "nzshm_backup.s3_batch._build_manifest_rows_from_inventory",
+            lambda *a, **k: (iter(["src5,abc.txt\n"]), "2026-04-23-00-00", "2026-04-23-00-00"),
+        )
+        mp.setattr(
+            "nzshm_backup.s3_batch._list_bucket",
+            lambda *a, **k: (
+                _ for _ in ()
+            ).throw(AssertionError("_list_bucket should not be used")),
+        )
+
+        result = batch_backup_source(
+            session=aws_session,
+            source_bucket="src5",
+            backup_bucket=backup_name,
+            batch_role_arn="arn:aws:iam::123456789012:role/nzshm-backup-batch-role",
+            account_id="123456789012",
+            dry_run=False,
+            prepare_only=True,
+            source_alias="ths",
+            manifest_mode="inventory",
+        )
+
+    assert result.status == "PREPARED"
+    assert result.objects_in_manifest == 1
+
+
+def test_batch_backup_inventory_mode_requires_source_alias(aws_session, s3_client):
+    """Inventory mode requires source alias for inventory prefix resolution."""
+    _create_bucket(s3_client, "src6")
+    backup_name = "src6-backup-ap-southeast-2-123456789012"
+
+    from nzshm_backup.s3_backup import create_backup_bucket
+
+    create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
+
+    with pytest.raises(ValueError, match="source_alias"):
+        batch_backup_source(
+            session=aws_session,
+            source_bucket="src6",
+            backup_bucket=backup_name,
+            batch_role_arn="arn:aws:iam::123456789012:role/nzshm-backup-batch-role",
+            account_id="123456789012",
+            dry_run=False,
+            manifest_mode="inventory",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------

@@ -29,6 +29,11 @@ All notable changes to this project will be documented here.
   config state and latest snapshot timestamps).
 - `backup status` now includes inventory snapshot metadata in JSON output for
   S3 Batch sources.
+- S3 Batch manifest preparation now supports per-source mode selection via
+  `sources.<alias>.batch_manifest_mode`:
+  - `inline` (default): live source+backup listing diff
+  - `inventory`: diff from latest source/backup S3 Inventory snapshots in the
+    control bucket
 - S3 Batch role/source policy helper scripts now grant the full read/write action
   set required by copy jobs on large sources (`GetObject*`/version-tag variants,
   plus backup write ACL/tagging actions).
@@ -44,6 +49,9 @@ All notable changes to this project will be documented here.
   CSV requirements for object keys containing reserved characters (`=`, `(`, `)` etc.).
   This fixes THS copy failures that previously returned `403 AccessDenied` for encoded-key
   rows even when bucket policies were present.
+- `backup run` now passes source alias and configured batch manifest mode into
+  S3 Batch manifest prep, enabling inventory-mode manifests without changing
+  the operator/scheduler command surface.
 - `batch_backup_source()` dry-run no longer enumerates all source objects. Previously a
   dry-run on an 8M-object bucket would paginate through ~80k ListObjectsV2 pages (10–20 min)
   even though the real run delegates listing to AWS S3 Batch. The dry-run fast-path now does
