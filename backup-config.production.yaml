@@ -23,6 +23,7 @@ sources:
     - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiThingObject-PROD
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
+    batch_manifest_mode: inventory
   ths:
     display_name: "THS dataset (production \u2014 account 461564345538)"
     source_account_id: '461564345538'

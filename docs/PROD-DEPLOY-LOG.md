@@ -218,6 +218,59 @@ Note:
 
 ---
 
+## Step 22 — Toshi scheduled t+5 Athena inventory test (CodeBuild) ✅ 2026-04-23
+
+Goal: validate `toshi` on inventory-mode manifest generation using a scheduled
+run (not direct/manual trigger).
+
+Config changes applied:
+- `sources.toshi.batch_manifest_mode: inventory`
+- production config pushed to `/nzshm-backup/prod/config`
+
+Created CodeBuild scheduler test path:
+- Project: `nzshm-backup-toshi-backup`
+- EventBridge target mode for temporary daily rule: `codebuild`
+
+Scheduled temporary test run at `t+5`:
+
+```bash
+run_time=$(TZ=Pacific/Auckland date -v+5M "+%Y-%m-%d %H:%M %Z")
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup schedule add \
+    --source toshi \
+    --frequency daily \
+    --time "$run_time" \
+    --target codebuild \
+    --codebuild-project-arn arn:aws:codebuild:ap-southeast-2:737696831915:project/nzshm-backup-toshi-backup \
+    --target-role-arn arn:aws:iam::737696831915:role/nzshm-backup-events-codebuild
+```
+
+Execution evidence:
+- Scheduler health showed invocation at `14:16 NZST` and latest build
+  `d564bfe4-6f9c-42c2-a73e-3c262913e949` `SUCCEEDED`.
+- CodeBuild logs confirm inventory path:
+  - `Athena inventory diff complete for toshi/nzshm22-toshi-api-prod`
+  - `source_dt=2026-04-22-01-00, backup_dt=2026-04-22-01-00`
+  - manifest row count `0` and S3 path `_manifests/...`
+  - `Nothing to copy — manifest is empty, skipping job submission`
+- DynamoDB exports were initiated for all four Toshi tables.
+
+Status follow-up:
+- `backup status --source toshi` shows S3 `last run ... skipped` with inventory
+  freshness line; no S3 Batch job (expected for empty manifest).
+
+Cleanup:
+- Removed temporary scheduler rule:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup schedule remove --source toshi --frequency daily
+```
+
+- Confirmed `nzshm-backup-toshi-daily` no longer appears in `backup schedule show`.
+
+---
+
 ## Step 20 — Deployed Athena THS runtime artifact to CodeBuild ✅ 2026-04-23
 
 Published runtime artifact from commit `6fb7128` to the THS CodeBuild source key:
