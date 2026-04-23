@@ -34,6 +34,7 @@ sources:
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
+    batch_manifest_mode: inventory
   static:
     display_name: "Static reports (production \u2014 account 461564345538)"
     source_account_id: '461564345538'

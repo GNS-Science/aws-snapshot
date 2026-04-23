@@ -181,6 +181,78 @@ Status:
 
 ---
 
+## Step 19 — Athena inventory prepare-only smoke succeeded (THS) ✅ 2026-04-23
+
+Implemented Athena-backed inventory diff path and validated THS `prepare-only`
+manifests in production auth context.
+
+Smoke command:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup run --source ths --prepare-only
+```
+
+Observed output highlights:
+- Athena query completed successfully for inventory diff
+  (`query_id=4f1fbc63-5d3e-49b1-814f-ebe40278948e`).
+- Selected snapshots: `source_dt=2026-04-22-01-00`, `backup_dt=2026-04-22-01-00`.
+- Manifest write completed and run reached `SKIPPED` (0 rows to copy in this
+  snapshot pair), as expected when source/backup inventories are in sync.
+
+Status follow-up:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup status --source ths
+```
+
+Shows:
+- `last run: ... — skipped`
+- inventory freshness line with source/backup/effective timestamps.
+
+Note:
+- This was validated using local `backup-config.production.yaml` with
+  `sources.ths.batch_manifest_mode: inventory`.
+- Config has not been pushed to SSM in this step.
+
+---
+
+## Step 18 — S3 Select blocker confirmed; pivot to Athena design ✅ 2026-04-23
+
+Attempted a THS `prepare-only` smoke run after enabling inventory mode:
+
+```bash
+AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
+  uv run backup run --source ths --prepare-only
+```
+
+Observed blocker:
+- Inventory manifest prep failed with `MethodNotAllowed` on
+  `SelectObjectContent` against inventory Parquet objects.
+- Reproduced with direct AWS CLI call on a known THS inventory Parquet object:
+
+```bash
+AWS_PROFILE=nshm-backup-admin aws s3api select-object-content \
+  --bucket nzshm-backup-inventory-737696831915 \
+  --key inventory/ths/source/ths-dataset-prod/.../data/<uuid>.parquet \
+  --expression "SELECT s.key, s.size, s.e_tag FROM S3Object s LIMIT 1" \
+  --expression-type SQL \
+  --input-serialization '{"Parquet":{}}' \
+  --output-serialization '{"CSV":{}}' /tmp/ths-select.out
+```
+
+Result: same `MethodNotAllowed` error.
+
+Interpretation:
+- S3 Select is not a viable implementation path in this account/runtime context.
+- Pivot implementation path to Athena-backed inventory diff (as per ADR-002).
+
+Operational decision:
+- Keep production THS scheduler on CodeBuild path until Athena manifest prep is implemented and validated.
+
+---
+
 ## Step 16 — Inventory readiness confirmed across all sources ✅ 2026-04-23
 
 Re-ran production preflight checks after SSO refresh and toshi versioning remediation.

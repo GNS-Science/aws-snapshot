@@ -317,6 +317,10 @@ Manifest export shape for S3 Batch:
   bootstrap for its S3 backup bucket).
 - Temporary verification rule `nzshm-backup-ths-daily` was disabled to avoid repeated timeout loops
   while redesign work proceeds.
+- S3 Select against inventory Parquet (`SelectObjectContent`) returned `MethodNotAllowed` in
+  production validation; implementation path pivots to Athena-backed diff queries.
+
+Athena design reference: `docs/design/ATHENA_MANIFEST_PIPELINE.md`.
 
 ## Compatibility contract (interim -> future)
 

@@ -156,4 +156,5 @@ per run, materially below long CodeBuild full-listing prep runs.
 - Epic: https://github.com/GNS-Science/nzshm-backup/issues/8
 - Inventory pilot: https://github.com/GNS-Science/nzshm-backup/issues/12
 - Manifest bottleneck doc: ../S3_MANIFEST_BOTTLENECK.md
+- Athena implementation design: ../ATHENA_MANIFEST_PIPELINE.md
 - Cost model: ../../architecture/cost-model.md

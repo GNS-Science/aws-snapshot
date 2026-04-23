@@ -32,8 +32,8 @@ All notable changes to this project will be documented here.
 - S3 Batch manifest preparation now supports per-source mode selection via
   `sources.<alias>.batch_manifest_mode`:
   - `inline` (default): live source+backup listing diff
-  - `inventory`: diff from latest source/backup S3 Inventory snapshots in the
-    control bucket
+  - `inventory`: diff from latest source/backup S3 Inventory snapshots via
+    Athena queries in the control bucket
 - S3 Batch role/source policy helper scripts now grant the full read/write action
   set required by copy jobs on large sources (`GetObject*`/version-tag variants,
   plus backup write ACL/tagging actions).
@@ -42,6 +42,9 @@ All notable changes to this project will be documented here.
 
 - Updated scheduling docs with CodeBuild-target examples and a mixed-target
   release checklist for Lambda + CodeBuild operations.
+- Added Athena manifest pipeline design doc and documented production finding
+  that S3 Select on inventory Parquet returns `MethodNotAllowed`, so inventory
+  diff implementation pivots to Athena.
 
 ### Fixed
 
