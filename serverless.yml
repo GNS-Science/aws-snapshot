@@ -25,12 +25,14 @@ provider:
             - s3:PutObject
             - s3:CopyObject
             - s3:CreateBucket
+            - s3:GetBucketLocation
             - s3:GetBucketTagging
             - s3:GetBucketVersioning
             - s3:PutLifecycleConfiguration
             - s3:PutBucketPolicy
             - s3:PutBucketTagging
             - s3:PutBucketVersioning
+            - s3:GetBucketAcl
           Resource:
             - "*"
         - Effect: Allow
@@ -69,6 +71,33 @@ provider:
             - ssm:GetParameter
             - ssm:PutParameter
           Resource: "arn:aws:ssm:ap-southeast-2:*:parameter/nzshm-backup/*"
+        - Effect: Allow
+          Action:
+            - athena:StartQueryExecution
+            - athena:GetQueryExecution
+            - athena:GetQueryResults
+            - athena:ListDatabases
+            - athena:ListTables
+            - athena:GetDatabase
+            - athena:GetTableMetadata
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - glue:GetDatabase
+            - glue:CreateDatabase
+            - glue:GetTable
+            - glue:GetTables
+            - glue:CreateTable
+            - glue:UpdateTable
+            - glue:DeleteTable
+            - glue:GetPartition
+            - glue:GetPartitions
+            - glue:CreatePartition
+            - glue:BatchCreatePartition
+            - glue:DeletePartition
+            - glue:UpdatePartition
+            - glue:BatchDeletePartition
+          Resource: "*"
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:
