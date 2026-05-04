@@ -5,6 +5,7 @@ timeout on first-run syncs of multi-million-object buckets.
 """
 
 import logging
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -74,6 +75,7 @@ def write_manifest_to_s3(
     rows: Iterator[str],
     backup_bucket: str,
     manifest_key: str,
+    result_bytes: int = 0,
 ) -> tuple[str, int]:
     """Stream manifest rows to S3 via multipart upload.
 
@@ -82,6 +84,7 @@ def write_manifest_to_s3(
         rows:           iterator of CSV row strings
         backup_bucket:  destination bucket for the manifest
         manifest_key:   S3 key under which to store the manifest
+        result_bytes:   Athena result file size in bytes (for progress estimation)
 
     Returns:
         (etag, row_count) — ETag required by s3control:CreateJob
@@ -97,10 +100,31 @@ def write_manifest_to_s3(
     buffer = b""
     row_count = 0
 
+    _PROGRESS_INTERVAL = 100_000
+    t0 = time.monotonic()
+    bytes_written = 0
+
     try:
         for row in rows:
-            buffer += row.encode()
+            encoded = row.encode()
+            buffer += encoded
+            bytes_written += len(encoded)
             row_count += 1
+            if row_count % _PROGRESS_INTERVAL == 0:
+                elapsed = time.monotonic() - t0
+                pct_timeout = elapsed / 900.0 * 100.0
+                if result_bytes > 0 and row_count > 0:
+                    avg_row_bytes = bytes_written / row_count
+                    est_total = int(result_bytes / avg_row_bytes)
+                    pct_rows = row_count / est_total * 100.0
+                    rows_str = f"~{pct_rows:.0f}% of ~{est_total:,} est. rows"
+                else:
+                    rows_str = "total unknown"
+                logger.info(
+                    "Manifest progress: %s rows written (%s), %s parts uploaded, "
+                    "%.0fs elapsed (%.0f%% of 15m Lambda timeout)",
+                    f"{row_count:,}", rows_str, part_number - 1, elapsed, pct_timeout,
+                )
             if len(buffer) >= _MULTIPART_CHUNK:
                 resp = s3_client.upload_part(
                     Bucket=backup_bucket,
@@ -156,15 +180,15 @@ def _build_manifest_rows_from_inventory(
     source_bucket: str,
     backup_bucket: str,
     full_sync: bool,
-) -> tuple[Iterator[str], str, str]:
-    rows, src_dt, bkp_dt = build_inventory_manifest_rows_via_athena(
+) -> tuple[Iterator[str], str, str, int]:
+    rows, src_dt, bkp_dt, result_bytes = build_inventory_manifest_rows_via_athena(
         session,
         source_alias,
         source_bucket,
         backup_bucket,
         full_sync,
     )
-    return rows, src_dt, bkp_dt
+    return rows, src_dt, bkp_dt, result_bytes
 
 
 def batch_backup_source(
@@ -223,10 +247,11 @@ def batch_backup_source(
 
     ensure_backup_bucket_ready(session, backup_bucket)
 
+    result_bytes = 0
     if manifest_mode == "inventory":
         if not source_alias:
             raise ValueError("source_alias is required when manifest_mode='inventory'")
-        rows, src_dt, bkp_dt = _build_manifest_rows_from_inventory(
+        rows, src_dt, bkp_dt, result_bytes = _build_manifest_rows_from_inventory(
             session,
             source_alias,
             source_bucket,
@@ -252,7 +277,9 @@ def batch_backup_source(
         rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
 
     logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
-    manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
+    manifest_etag, row_count = write_manifest_to_s3(
+        s3_client, rows, backup_bucket, manifest_key, result_bytes=result_bytes,
+    )
     logger.info(f"Manifest written: {row_count} objects, ETag={manifest_etag}")
 
     if row_count == 0:

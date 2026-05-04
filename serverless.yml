@@ -50,10 +50,13 @@ provider:
           Resource: "*"
         - Effect: Allow
           Action:
+            - s3:CreateJob
+            - s3:DescribeJob
+            - s3:ListJobs
             - s3control:CreateJob
             - s3control:DescribeJob
             - s3control:ListJobs
-          Resource: "*"  # s3control does not support resource-level ARN scoping
+          Resource: "*"  # S3 Batch Operations does not support resource-level ARN scoping
         - Effect: Allow
           Action:
             - iam:PassRole

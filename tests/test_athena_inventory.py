@@ -38,9 +38,9 @@ def test_latest_inventory_partition_detects_latest_dt_and_hive_root():
 
 def test_build_inventory_manifest_rows_via_athena_returns_encoded_manifest_rows():
     s3 = MagicMock()
-    s3.get_object.return_value = {
-        "Body": MagicMock(read=MagicMock(return_value=b"key\nfolder/file 1.txt\nplain.txt\n"))
-    }
+    body_mock = MagicMock()
+    body_mock.iter_lines.return_value = iter([b"key", b"folder/file 1.txt", b"plain.txt"])
+    s3.get_object.return_value = {"Body": body_mock}
     athena = MagicMock()
     athena.get_query_execution.return_value = {
         "QueryExecution": {
@@ -72,12 +72,14 @@ def test_build_inventory_manifest_rows_via_athena_returns_encoded_manifest_rows(
             with patch.object(ai, "_ensure_partition"):
                 with patch.object(ai, "_run_athena_query", run_query):
                     with patch.object(ai, "_wait_for_athena_query"):
-                        rows, source_dt, backup_dt = ai.build_inventory_manifest_rows_via_athena(
-                            session,
-                            "ths",
-                            "ths-dataset-prod",
-                            "bb-ths-s3-dataset-prod-ap-southeast-2-461564345538",
-                            full_sync=False,
+                        rows, source_dt, backup_dt, result_bytes = (
+                            ai.build_inventory_manifest_rows_via_athena(
+                                session,
+                                "ths",
+                                "ths-dataset-prod",
+                                "bb-ths-s3-dataset-prod-ap-southeast-2-461564345538",
+                                full_sync=False,
+                            )
                         )
 
     assert source_dt == "2026-04-23-01-00"

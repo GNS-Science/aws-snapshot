@@ -158,18 +158,18 @@ def _ensure_partition(
 def _iter_query_result_keys(s3_client, result_location: str) -> Iterator[str]:
     bucket, key = _parse_s3_uri(result_location)
     body = s3_client.get_object(Bucket=bucket, Key=key)["Body"]
-    payload = body.read().decode("utf-8").splitlines()
-    reader = csv.reader(payload)
+    # Stream line-by-line to avoid loading the entire result into memory.
     first = True
-    for row in reader:
+    for raw_line in body.iter_lines():
+        line = raw_line.decode("utf-8").strip()
+        if not line:
+            continue
         if first:
             first = False
             continue
-        if not row:
-            continue
-        candidate = row[0]
-        if candidate:
-            yield candidate
+        row = next(csv.reader([line]))
+        if row and row[0]:
+            yield row[0]
 
 
 def build_inventory_manifest_rows_via_athena(
@@ -178,7 +178,7 @@ def build_inventory_manifest_rows_via_athena(
     source_bucket: str,
     backup_bucket: str,
     full_sync: bool = False,
-) -> tuple[Iterator[str], str, str]:
+) -> tuple[Iterator[str], str, str, int]:
     s3_client = session.client("s3")
     athena_client = session.client("athena")
     account_id = session.client("sts").get_caller_identity()["Account"]
@@ -192,11 +192,22 @@ def build_inventory_manifest_rows_via_athena(
         control_bucket,
         source_prefix,
     )
-    backup_dt, backup_hive_root = _latest_inventory_partition(
-        s3_client,
-        control_bucket,
-        backup_prefix,
-    )
+
+    try:
+        backup_dt, backup_hive_root = _latest_inventory_partition(
+            s3_client,
+            control_bucket,
+            backup_prefix,
+        )
+    except ValueError:
+        # Backup bucket is empty (first-ever backup) — no inventory partitions.
+        # Fall back to source-only query (copies everything).
+        logger.info(
+            "No backup inventory partitions for %s — treating as full sync (first backup)",
+            backup_bucket,
+        )
+        backup_dt = None
+        backup_hive_root = None
 
     database = "nzshm_backup_inventory"
     source_table = _table_name(source_alias, "source", source_bucket)
@@ -211,14 +222,15 @@ def build_inventory_manifest_rows_via_athena(
         control_bucket,
         source_hive_root,
     )
-    _ensure_inventory_table(
-        athena_client,
-        output_location,
-        database,
-        backup_table,
-        control_bucket,
-        backup_hive_root,
-    )
+    if backup_hive_root is not None:
+        _ensure_inventory_table(
+            athena_client,
+            output_location,
+            database,
+            backup_table,
+            control_bucket,
+            backup_hive_root,
+        )
     _ensure_partition(
         athena_client,
         output_location,
@@ -228,42 +240,51 @@ def build_inventory_manifest_rows_via_athena(
         source_hive_root,
         source_dt,
     )
-    _ensure_partition(
-        athena_client,
-        output_location,
-        database,
-        backup_table,
-        control_bucket,
-        backup_hive_root,
-        backup_dt,
-    )
+    if backup_dt is not None:
+        _ensure_partition(
+            athena_client,
+            output_location,
+            database,
+            backup_table,
+            control_bucket,
+            backup_hive_root,
+            backup_dt,
+        )
 
-    if full_sync:
+    # Non-versioned buckets have NULL is_latest/is_delete_marker in inventory,
+    # so accept both true and NULL for is_latest, and both false and NULL for
+    # is_delete_marker.
+    _src_filter = (
+        f"dt = '{source_dt}'"
+        " AND (is_latest = true OR is_latest IS NULL)"
+        " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
+    )
+    _dst_filter = (
+        f"dt = '{backup_dt}'"
+        " AND (is_latest = true OR is_latest IS NULL)"
+        " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
+        " AND key NOT LIKE '_manifests/%'"
+        " AND key NOT LIKE '_batch-reports/%'"
+        " AND key NOT LIKE '_state/%'"
+    ) if backup_dt else ""
+
+    if full_sync or backup_dt is None:
         query = f"""
 SELECT key
 FROM {source_table}
-WHERE dt = '{source_dt}'
-  AND is_latest = true
-  AND is_delete_marker = false
+WHERE {_src_filter}
 """.strip()
     else:
         query = f"""
 WITH src AS (
   SELECT key, size, e_tag
   FROM {source_table}
-  WHERE dt = '{source_dt}'
-    AND is_latest = true
-    AND is_delete_marker = false
+  WHERE {_src_filter}
 ),
 dst AS (
   SELECT key, size, e_tag
   FROM {backup_table}
-  WHERE dt = '{backup_dt}'
-    AND is_latest = true
-    AND is_delete_marker = false
-    AND key NOT LIKE '_manifests/%'
-    AND key NOT LIKE '_batch-reports/%'
-    AND key NOT LIKE '_state/%'
+  WHERE {_dst_filter}
 )
 SELECT s.key
 FROM src s
@@ -278,12 +299,22 @@ WHERE d.key IS NULL
     query_execution = athena_client.get_query_execution(QueryExecutionId=query_id)
     result_location = query_execution["QueryExecution"]["ResultConfiguration"]["OutputLocation"]
 
+    # Get result file size for progress estimation
+    result_bucket, result_key = _parse_s3_uri(result_location)
+    try:
+        head = s3_client.head_object(Bucket=result_bucket, Key=result_key)
+        result_bytes = head.get("ContentLength", 0)
+    except Exception:
+        result_bytes = 0
+
     def _rows() -> Iterator[str]:
         for key in _iter_query_result_keys(s3_client, result_location):
             yield f"{source_bucket},{quote(key, safe='/')}\n"
 
+    backup_dt_str = backup_dt or "none (first backup)"
     logger.info(
-        f"Athena inventory diff complete for {source_alias}/{source_bucket}: "
-        f"source_dt={source_dt}, backup_dt={backup_dt}, query_id={query_id}"
+        "Athena inventory diff complete for %s/%s: "
+        "source_dt=%s, backup_dt=%s, query_id=%s, result_size=%s bytes",
+        source_alias, source_bucket, source_dt, backup_dt_str, query_id, result_bytes,
     )
-    return _rows(), source_dt, backup_dt
+    return _rows(), source_dt, backup_dt or "none", result_bytes

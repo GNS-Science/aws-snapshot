@@ -48,6 +48,14 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 
+- Lambda role in `serverless.yml` now has full Glue Data Catalog permissions
+  (database, table, and partition CRUD) required by Athena inventory-diff queries.
+  Previously only read actions (`GetDatabase`, `GetTable`, `GetTables`) were granted,
+  causing scheduled toshi Lambda runs to fail with `AccessDeniedException` on
+  `glue:CreateDatabase`, `glue:BatchCreatePartition`, and `glue:GetPartition`.
+- Backup engine now writes `status="failed"` when S3 backup throws an exception.
+  Previously the run state was left permanently stuck at `"running"` because the
+  exception handler logged the error but never updated the state record.
 - S3 Batch manifest keys are now URL-encoded when generated, matching S3 Batch
   CSV requirements for object keys containing reserved characters (`=`, `(`, `)` etc.).
   This fixes THS copy failures that previously returned `403 AccessDenied` for encoded-key

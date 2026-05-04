@@ -277,7 +277,7 @@ def test_batch_backup_inventory_mode_uses_inventory_builder(aws_session, s3_clie
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             "nzshm_backup.s3_batch._build_manifest_rows_from_inventory",
-            lambda *a, **k: (iter(["src5,abc.txt\n"]), "2026-04-23-00-00", "2026-04-23-00-00"),
+            lambda *a, **k: (iter(["src5,abc.txt\n"]), "2026-04-23-00-00", "2026-04-23-00-00", 0),
         )
         mp.setattr(
             "nzshm_backup.s3_batch._list_bucket",
