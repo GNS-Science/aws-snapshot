@@ -150,9 +150,15 @@ def _ensure_inventory_table(
     qid = _run_athena_query(athena_client, create_db, output_location)
     _wait_for_athena_query(athena_client, qid)
 
+    # Drop and recreate table to pick up schema changes (e.g. new columns).
+    # Partitions are re-added per run anyway.
+    drop = f"DROP TABLE IF EXISTS {table_name}"
+    qid = _run_athena_query(athena_client, drop, output_location, database=database)
+    _wait_for_athena_query(athena_client, qid)
+
     location = f"s3://{control_bucket}/{hive_root}"
     create_table = f"""
-CREATE EXTERNAL TABLE IF NOT EXISTS {table_name} (
+CREATE EXTERNAL TABLE {table_name} (
   bucket string,
   key string,
   version_id string,
@@ -161,7 +167,8 @@ CREATE EXTERNAL TABLE IF NOT EXISTS {table_name} (
   size bigint,
   last_modified_date timestamp,
   e_tag string,
-  storage_class string
+  storage_class string,
+  checksum_algorithm string
 )
 PARTITIONED BY (dt string)
 ROW FORMAT SERDE 'org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe'
@@ -221,6 +228,25 @@ def url_encode_via_replace(value: str) -> str:
 # UNLOAD query builders
 # ---------------------------------------------------------------------------
 
+# Diff condition for incremental queries.  Used by both UNLOAD and COUNT.
+# Smart ETag comparison: only compare ETags when both are single-part
+# (no '-N' suffix), since multipart ETags depend on upload chunk size and
+# are not content-deterministic.  Falls back to size-only when either side
+# is multipart.  When checksum_algorithm is available on both sides, a
+# future extension can compare content checksums instead.
+# Multipart ETags contain a hyphen (e.g. "abc123-2"), single-part do not.
+# strpos() returns 0 when not found in Athena/Presto.
+_DIFF_WHERE = """
+WHERE d.key IS NULL
+   OR s.size <> d.size
+   OR (
+       strpos(s.e_tag, '-') = 0
+       AND strpos(d.e_tag, '-') = 0
+       AND s.e_tag <> d.e_tag
+   )
+""".rstrip()
+
+
 def _build_unload_query(
     source_bucket: str,
     source_table: str,
@@ -248,9 +274,7 @@ SELECT '{source_bucket}' AS bucket,
        {encoded_key} AS key
 FROM src s
 LEFT JOIN dst d ON s.key = d.key
-WHERE d.key IS NULL
-   OR s.size <> d.size
-   OR s.e_tag <> d.e_tag
+{_DIFF_WHERE}
 """.strip()
     else:
         select = f"""
@@ -289,9 +313,7 @@ dst AS (
 SELECT COUNT(*) AS cnt
 FROM src s
 LEFT JOIN dst d ON s.key = d.key
-WHERE d.key IS NULL
-   OR s.size <> d.size
-   OR s.e_tag <> d.e_tag
+{_DIFF_WHERE}
 """.strip()
     else:
         return f"""

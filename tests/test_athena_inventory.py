@@ -106,6 +106,9 @@ def test_build_unload_query_incremental_diff():
     assert "LEFT JOIN" in q
     assert "inv_dst" in q
     assert "'my-bucket' AS bucket" in q
+    # Smart ETag: only compare when both are single-part (no hyphen = not multipart)
+    assert "strpos" in q
+    assert "s.e_tag <> d.e_tag" in q
 
 
 def test_build_count_query_full_sync():
@@ -121,6 +124,7 @@ def test_build_count_query_incremental_diff():
     )
     assert "COUNT(*)" in q
     assert "LEFT JOIN" in q
+    assert "strpos" in q  # smart ETag comparison
 
 
 # ---------------------------------------------------------------------------
