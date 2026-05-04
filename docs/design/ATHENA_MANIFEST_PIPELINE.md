@@ -115,40 +115,109 @@ WHERE d.key IS NULL
 
 ## Manifest materialization strategy
 
-Athena returns key-only rows (no URL encoding). CLI/runtime then:
+### v1 — Lambda streaming (superseded)
+
+The original approach streamed Athena result CSV through Lambda:
 
 1. downloads Athena result CSV from query output location
 2. URL-encodes keys in Python (`quote(key, safe='/')`)
 3. writes final S3 Batch manifest to backup bucket `_manifests/...`
 4. uses manifest ETag for `s3control:CreateJob`
 
-Rationale:
+**Problem discovered 2026-05-04:** For the `static` source (~40M objects, 4.7 GB
+Athena result), Lambda OOM'd at 1024 MB. Even after switching to line-by-line
+streaming (`iter_lines()`), the I/O rate (~1K rows/sec at 1 GB Lambda) meant
+~8 hours to process — far beyond the 15-minute timeout. Scaling Lambda memory
+does not resolve this; the approach is fundamentally I/O-bound.
 
-- keeps URL-encoding behavior consistent with existing manifest writer
-- avoids SQL function differences/edge cases for reserved characters
+### v2 — Athena UNLOAD (current)
+
+Replace Lambda streaming with server-side CSV generation. Lambda only
+orchestrates — no data flows through its memory.
+
+#### Phase A: Athena UNLOAD
+
+Wrap the diff query in `UNLOAD` to write CSV directly to S3:
+
+```sql
+UNLOAD (
+  SELECT '{source_bucket}' AS bucket,
+         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+           key, '%', '%25'), ',', '%2C'), ' ', '%20'), '=', '%3D'),
+           '(', '%28'), ')', '%29'), '"', '%22'), '#', '%23') AS key
+  FROM ...
+)
+TO 's3://{control_bucket}/_manifests/unload/{source_alias}/{source_bucket}/{query_id}/'
+WITH (format = 'TEXTFILE', field_delimiter = ',')
+```
+
+Key design decisions:
+
+- **URL encoding in SQL:** Athena has no `url_encode()`, so a nested `REPLACE()`
+  chain handles the known special characters. `%` is encoded first to avoid
+  double-encoding. Commas are encoded to `%2C` to prevent TEXTFILE field splitting.
+- **Validation:** A parameterized unit test confirms the REPLACE chain matches
+  `quote(key, safe='/')` for all characters found in production data.
+- **Output format:** `TEXTFILE` with `field_delimiter=','` produces bare CSV
+  with no header and no quoting — exactly what S3 Batch expects.
+- **Collision avoidance:** The UNLOAD prefix includes the Athena `query_id`
+  (unique per execution), so concurrent Lambda invocations cannot collide.
+- **Empty results:** UNLOAD with 0 matching rows writes no files to the prefix.
+
+#### Phase B: S3 multipart-copy concatenation
+
+S3 Batch `CreateJob` requires a single manifest file (one `ObjectArn` + `ETag`).
+UNLOAD may produce multiple part files (~100-200 MB each). Concatenation uses
+S3 server-side copy — no data through Lambda memory.
+
+| UNLOAD output | Action |
+|---------------|--------|
+| 0 files | Return "skipped" (nothing to copy) |
+| 1 file | `copy_object` to `backup_bucket/_manifests/{name}.csv` |
+| N files, all parts >= 5 MB | Multipart upload with `UploadPartCopy` per file |
+| N files, any non-last part < 5 MB | Download all + `PutObject` (safe: small parts = small total data) |
+
+S3 multipart constraints: max 10,000 parts, each >= 5 MB (except last), max 5 TB.
+A 40M-row manifest at ~130 bytes/row is ~4.7 GB with ~25-50 UNLOAD parts — well
+within limits.
+
+#### Row count
+
+Run `SELECT COUNT(*)` as a separate Athena query (fast on Parquet) in parallel
+with UNLOAD. Provides exact `objects_in_manifest` without streaming.
+
+#### Cleanup
+
+After successful concatenation, delete intermediate UNLOAD part files from the
+control bucket `_manifests/unload/` prefix.
 
 ## Runtime flow integration
 
-`batch_manifest_mode: inventory` path should execute:
+`batch_manifest_mode: inventory` path executes:
 
 1. resolve control bucket + inventory metadata paths
 2. ensure Athena tables/partitions for source+backup latest snapshots
-3. execute diff query and wait for completion
-4. stream query result -> write S3 Batch manifest CSV
-5. continue existing `prepare_only` or `CreateJob` flow
+3. execute UNLOAD query + COUNT(*) query (parallel)
+4. wait for both queries to complete
+5. concatenate UNLOAD output to single manifest via S3 multipart-copy
+6. clean up intermediate UNLOAD files
+7. continue existing `prepare_only` or `CreateJob` flow
 
 No change to command/scheduler interface.
 
 ## IAM and service dependencies
 
-Backup runtime principal (Lambda/CodeBuild role) needs:
+Backup runtime principal (Lambda role) needs:
 
-- `athena:StartQueryExecution`
-- `athena:GetQueryExecution`
-- `athena:GetQueryResults`
-- `glue:GetDatabase`, `glue:GetTable`, `glue:CreateTable`, `glue:UpdateTable`
-- `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` on Athena query-results bucket/prefix
-- existing inventory-read and manifest-write permissions
+- **Athena:** `StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`,
+  `ListDatabases`, `ListTables`, `GetDatabase`, `GetTableMetadata`
+- **Glue Data Catalog:** full CRUD for databases, tables, and partitions —
+  `Get*`, `Create*`, `Update*`, `Delete*`, `BatchCreatePartition`,
+  `BatchDeletePartition` (Athena delegates all catalog ops to Glue)
+- **S3:** `GetObject`, `PutObject`, `ListBucket`, `CopyObject` on control bucket
+  (Athena results, UNLOAD output, inventory data) and backup bucket (manifest
+  destination)
+- Existing inventory-read and manifest-write permissions
 
 ## Performance and cost expectations
 

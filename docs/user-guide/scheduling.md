@@ -1,8 +1,10 @@
 # Scheduling
 
-Backups run automatically via AWS EventBridge rules. By default rules target
-the backup Lambda; for interim large-source workflows you can target CodeBuild.
-Each rule is named `nzshm-backup-{source}-{frequency}`.
+Backups run automatically via AWS EventBridge rules. Rules target the backup
+Lambda by default. CodeBuild targeting is available as a fallback for sources
+that exceed Lambda's 15-minute timeout, but since the switch to inventory-based
+Athena manifest generation (`batch_manifest_mode: inventory`) all production
+sources run on Lambda. Each rule is named `nzshm-backup-{source}-{frequency}`.
 
 ## View current schedules
 
@@ -17,7 +19,7 @@ Output:
 Rule Name                                     State      Schedule               Target     Target detail                        Local time
 ----------------------------------------------------------------------------------------------------------------------------------------------------
 nzshm-backup-arkivalist-hourly               ENABLED    cron(0 * * * ? *)      lambda     nzshm-backup-service-prod-backup      → :00 past each hour (NZDT)
-nzshm-backup-ths-weekly                      ENABLED    cron(15 8 ? * WED *)    codebuild  nzshm-backup-ths-backup              → Wednesday 20:15 NZST locally
+nzshm-backup-ths-weekly                      ENABLED    cron(15 8 ? * WED *)    lambda     nzshm-backup-service-prod-backup     → Wednesday 20:15 NZST locally
 ```
 
 The **Target** and **Target detail** columns show whether the rule triggers
@@ -147,6 +149,11 @@ See [Lambda Deployment](../development/lambda-deployment.md) for full deploy ins
 
 ## Mixed-target release checklist (Lambda + CodeBuild)
 
+> **Note:** Since the switch to inventory-based Athena manifest generation
+> (2026-05-04), all production sources run on Lambda. This checklist is retained
+> for cases where CodeBuild targeting is needed as a fallback (e.g. sources that
+> require long-running compute beyond Lambda's 15-minute limit).
+
 When production uses a mix of Lambda-targeted and CodeBuild-targeted schedules,
 use this checklist to avoid drift:
 
@@ -179,26 +186,15 @@ use this checklist to avoid drift:
    - Lambda rollback: redeploy previous artifact and restore lambda target
    - CodeBuild rollback: point project to previous source artifact and restore prior target mode
 
-## THS CodeBuild run-now and progress monitoring
+## CodeBuild fallback: run-now and progress monitoring
 
-For THS, the scheduled production path is EventBridge -> CodeBuild project
-`nzshm-backup-ths-backup`.
+> **Legacy path.** Before inventory-based Athena manifests, THS used CodeBuild
+> because inline manifest preparation exceeded Lambda's 15-minute timeout (~50-60
+> minutes for 4M objects). With `batch_manifest_mode: inventory`, Athena generates
+> the manifest in seconds, so all sources now run on Lambda. This section is
+> retained for reference if CodeBuild targeting is needed in future.
 
-### How a scheduled THS run executes
-
-When the schedule fires, the runtime path is:
-
-```text
-EventBridge -> CodeBuild -> backup run --source ths
-                         -> prepare (build manifest)
-                         -> submit (CreateJob)
-```
-
-The `prepare` step happens on every run. The long-term inventory design keeps
-the same `prepare -> submit` structure but replaces live source/backup listing
-with inventory-snapshot diffing.
-
-### Trigger a production-equivalent THS run now
+### Trigger a CodeBuild run manually
 
 ```bash
 AWS_PROFILE=<aws-profile> aws codebuild start-build \
@@ -206,7 +202,7 @@ AWS_PROFILE=<aws-profile> aws codebuild start-build \
   --project-name nzshm-backup-ths-backup
 ```
 
-### Monitor progress during manifest preparation (~50-60 minutes typical)
+### Monitor CodeBuild progress
 
 1) Poll build status:
 
@@ -223,7 +219,7 @@ AWS_PROFILE=<aws-profile> aws codebuild batch-get-builds \
   --query 'builds[0].{Status:buildStatus,Start:startTime,End:endTime,Log:logs.deepLink}'
 ```
 
-2) Follow build logs (best visibility during manifest phase):
+2) Follow build logs:
 
 ```bash
 AWS_PROFILE=<aws-profile> aws logs tail \
@@ -232,7 +228,7 @@ AWS_PROFILE=<aws-profile> aws logs tail \
   --follow
 ```
 
-### Switch to S3 Batch progress after job submission
+### Monitor S3 Batch progress after job submission
 
 S3 Batch progress is only available after `CreateJob` succeeds. During manifest prep,
 `backup status` may show no batch jobs yet.
@@ -244,12 +240,4 @@ in pre-submit phases.
 AWS_PROFILE=<aws-profile> \
 BACKUP_CONFIG_PATH=backup-config.production.yaml \
 uv run backup status --source ths --output json
-```
-
-When a `job_id` appears, monitor that job directly:
-
-```bash
-AWS_PROFILE=<aws-profile> \
-BACKUP_CONFIG_PATH=backup-config.production.yaml \
-uv run backup status --source ths --job-id <JOB_ID>
 ```
