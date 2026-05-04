@@ -80,6 +80,13 @@ All notable changes to this project will be documented here.
   set that `urllib.parse.quote(key, safe='/')` encodes. The previous subset
   missed `+` (caused 2/39.9M static failures) and 18 other RFC 3986 reserved
   characters that could appear in S3 keys.
+- Inventory diff now uses smart ETag comparison: only compares ETags when both
+  source and backup are single-part uploads (no `-N` suffix). Multipart ETags
+  are not content-deterministic (they depend on upload chunk boundaries), so
+  the diff falls back to size-only for those keys. This eliminated 4,224 false
+  positives per THS run caused by S3 Batch copy producing different ETags for
+  identical content. Inventory table schema now includes `checksum_algorithm`
+  column to support future SHA256 content checksum comparison when enabled.
 - Lambda IAM: added `s3:CreateJob`/`s3:DescribeJob`/`s3:ListJobs` alongside
   `s3control:` variants — the error message referenced the `s3:` prefix.
 - S3 Batch manifest keys are now URL-encoded when generated, matching S3 Batch
