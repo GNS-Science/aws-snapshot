@@ -76,6 +76,10 @@ All notable changes to this project will be documented here.
   0-byte `_SUCCESS` markers, preventing `HIVE_PATH_ALREADY_EXISTS` on retry.
 - Empty backup inventory (first-ever backup) no longer crashes the inventory
   diff. The code falls back to a source-only query that copies everything.
+- UNLOAD SQL REPLACE chain expanded from 9 characters to the full 28-character
+  set that `urllib.parse.quote(key, safe='/')` encodes. The previous subset
+  missed `+` (caused 2/39.9M static failures) and 18 other RFC 3986 reserved
+  characters that could appear in S3 keys.
 - Lambda IAM: added `s3:CreateJob`/`s3:DescribeJob`/`s3:ListJobs` alongside
   `s3control:` variants — the error message referenced the `s3:` prefix.
 - S3 Batch manifest keys are now URL-encoded when generated, matching S3 Batch
