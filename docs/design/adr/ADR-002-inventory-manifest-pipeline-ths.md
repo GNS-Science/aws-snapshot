@@ -1,7 +1,8 @@
 # ADR-002: Inventory-based manifest pipeline for THS
 
-- Status: Proposed
+- Status: Implemented
 - Date: 2026-04-21
+- Updated: 2026-05-04
 
 ## Context
 
@@ -63,17 +64,22 @@ the external run UX unchanged.
 
 ## Non-goals (for this ADR)
 
-- Migrating all sources (`toshi`, `static`) in the same change set.
 - Replacing S3 Batch submission contract.
 - Implementing centralized run-state storage in this phase.
 
 ## Rollout plan
 
-1. Add inventory mode behind per-source config flag.
-2. Enable for THS only in production.
+1. ~~Add inventory mode behind per-source config flag.~~ Done 2026-04-23.
+2. ~~Enable for THS only in production.~~ Done 2026-04-23.
 3. Keep inline mode available as rollback path.
-4. Validate 2 consecutive scheduled THS runs.
-5. Decide promotion to other large sources after THS pilot results.
+4. ~~Validate 2 consecutive scheduled THS runs.~~ Done 2026-04-23.
+5. ~~Promote to other large sources.~~ Enabled for toshi, weka (2026-04-23),
+   static (2026-05-04). All sources now use inventory mode on Lambda.
+6. ~~Manifest materialization pivot to Athena UNLOAD.~~ Lambda streaming
+   OOM'd for static (~40M objects). Replaced with Athena UNLOAD +
+   S3 multipart-copy concat (2026-05-04). See ATHENA_MANIFEST_PIPELINE.md v2.
+7. ~~CodeBuild cutover for THS reversed.~~ All sources back on Lambda
+   (2026-05-04) — UNLOAD eliminates the need for CodeBuild compute.
 
 ## Acceptance criteria
 
