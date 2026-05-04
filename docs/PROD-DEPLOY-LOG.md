@@ -375,6 +375,64 @@ Confirmed: `cron(0 2 ? * THU *)` → Thursday 14:00 NZST locally.
 
 ---
 
+## Step 26 — Athena UNLOAD manifest pipeline ✅ 2026-05-04
+
+### Problem
+
+Lambda streaming of Athena results for manifest generation failed at scale:
+- 1024 MB Lambda OOM'd on `static` (~40M objects, 4.7 GB result)
+- Line-by-line streaming (`iter_lines`) achieved only ~1K rows/s — ~8 hours
+  for 40M rows, far beyond Lambda's 15-minute timeout
+- Even max Lambda (10 GB) estimated ~80 minutes — still too slow
+
+### Solution: Athena UNLOAD
+
+Replaced Lambda streaming with server-side Athena UNLOAD:
+
+1. Athena `UNLOAD` writes diff query results directly to S3 as CSV
+2. URL encoding handled in SQL via `REPLACE()` chain (8 characters:
+   `%`, `,`, space, `=`, `(`, `)`, `"`, `#`)
+3. `SELECT COUNT(*)` runs in parallel for exact row count
+4. Lambda concatenates UNLOAD part files via S3 multipart-copy (no
+   data through memory)
+5. `CreateJob` with the single concatenated manifest
+
+### Deployment iterations
+
+| Deploy | Issue | Fix |
+|--------|-------|-----|
+| 1st | UNLOAD defaulted to gzip compression — binary manifest | Added `compression = 'NONE'` |
+| 2nd | `HIVE_PATH_ALREADY_EXISTS` — stale `_SUCCESS` markers | Fixed cleanup to delete all objects including 0-byte markers |
+| 3rd | weka batch job `AccessDenied` on source bucket | Re-ran `create-backup-roles.py` to add `nzshm22-weka-ui-prod` |
+| 4th | **SUCCESS** | weka 4/4 objects copied |
+
+### Validated results
+
+| Source | Objects | UNLOAD time | Total Lambda | Memory | Status |
+|--------|---------|-------------|-------------|--------|--------|
+| `static` | 39,973,875 | ~12s | 28s | 432 MB | Batch job submitted, actively copying |
+| `weka` | 4 | ~2s | ~17s | 129 MB | Batch job complete, 4/4 copied |
+
+### Schedules after validation
+
+```
+static-weekly    ENABLED  cron(...)  → Monday (temporary, needs permanent slot)
+ths-weekly       ENABLED  cron(...)  → Monday 20:15 NZST (Lambda, was CodeBuild)
+toshi-weekly     ENABLED  cron(...)  → Thursday 14:00 NZST (Lambda)
+weka-weekly      ENABLED  cron(...)  → Monday (temporary, needs permanent slot)
+```
+
+All sources now on Lambda — CodeBuild no longer required for any source.
+
+### Outstanding
+
+- Static batch job `b2832b7b` used compressed manifest from earlier deploy —
+  may partially fail. Needs re-run with uncompressed manifest.
+- SSM config not pushed this session.
+- Permanent schedule slots for static and weka need to be set.
+
+---
+
 ## Step 20 — Deployed Athena THS runtime artifact to CodeBuild ✅ 2026-04-23
 
 Published runtime artifact from commit `6fb7128` to the THS CodeBuild source key:

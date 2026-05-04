@@ -68,6 +68,8 @@ def test_build_url_encode_sql_encodes_percent_first():
         "already%encoded.txt",
         "key,with,commas.txt",
         "all special % , = ( ) \" # chars.txt",
+        "Mw=logA+C+equations.pdf",
+        "key+with+plus.txt",
     ],
 )
 def test_url_encode_via_replace_matches_python_quote(key):

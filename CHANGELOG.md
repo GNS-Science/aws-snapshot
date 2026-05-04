@@ -18,6 +18,17 @@ All notable changes to this project will be documented here.
 
 ### Changed
 
+- **Inventory manifest generation replaced with Athena UNLOAD pipeline.**
+  Previously, Athena query results were streamed through Lambda to build the
+  S3 Batch manifest CSV. This OOM'd at 1024 MB and would take ~8 hours for
+  40M-object sources. The new approach uses Athena `UNLOAD` to write manifest
+  CSV directly to S3 (server-side), with URL encoding via a SQL `REPLACE()`
+  chain. Lambda only orchestrates — no data flows through its memory. The
+  `static` source (39.9M objects) now completes manifest generation in ~28
+  seconds at 432 MB peak memory.
+- All production sources (toshi, ths, static, weka) now run on Lambda via the
+  inventory-based Athena UNLOAD pipeline. CodeBuild is retained as a fallback
+  but no longer required.
 - `backup schedule add` now replaces existing EventBridge rule targets before
   registering a new target, preventing dual Lambda+CodeBuild triggering.
 - `backup schedule remove` now removes all rule targets (not only `backup-lambda`)
@@ -56,6 +67,17 @@ All notable changes to this project will be documented here.
 - Backup engine now writes `status="failed"` when S3 backup throws an exception.
   Previously the run state was left permanently stuck at `"running"` because the
   exception handler logged the error but never updated the state record.
+- Athena inventory diff queries now accept `NULL` `is_latest`/`is_delete_marker`
+  fields for non-versioned S3 buckets (e.g. `static`). Previously these rows
+  were silently filtered out, producing empty manifests.
+- Athena UNLOAD output now uses `compression = 'NONE'`. Default gzip compression
+  produced binary manifests that S3 Batch could not parse.
+- UNLOAD cleanup now deletes all objects under the intermediate prefix including
+  0-byte `_SUCCESS` markers, preventing `HIVE_PATH_ALREADY_EXISTS` on retry.
+- Empty backup inventory (first-ever backup) no longer crashes the inventory
+  diff. The code falls back to a source-only query that copies everything.
+- Lambda IAM: added `s3:CreateJob`/`s3:DescribeJob`/`s3:ListJobs` alongside
+  `s3control:` variants — the error message referenced the `s3:` prefix.
 - S3 Batch manifest keys are now URL-encoded when generated, matching S3 Batch
   CSV requirements for object keys containing reserved characters (`=`, `(`, `)` etc.).
   This fixes THS copy failures that previously returned `403 AccessDenied` for encoded-key
