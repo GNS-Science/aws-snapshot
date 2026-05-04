@@ -219,11 +219,52 @@ Backup runtime principal (Lambda role) needs:
   destination)
 - Existing inventory-read and manifest-write permissions
 
+## Operational caveats
+
+### Inventory lag after first-ever backup (full-sync race)
+
+When a source runs its first backup, the backup bucket goes from empty to
+containing millions of objects. However, the **backup-side S3 Inventory** won't
+reflect those new objects until the next daily inventory delivery (up to 24
+hours later).
+
+If a second backup run triggers before the backup inventory refreshes:
+- The code still sees "no backup inventory partitions"
+- Falls back to full-sync mode (source-only query)
+- Re-submits all objects as a batch job — wasteful but **not destructive**
+  (S3 Batch copy is idempotent; objects already present are overwritten
+  identically)
+
+**Operational rule:** after a first-ever backup, do not manually re-trigger
+the same source until the next inventory cycle has completed (~24h). The
+weekly schedule naturally avoids this. The log message
+`"No backup inventory partitions for ... — treating as full sync"` is the
+visible signal.
+
+Future mitigation options:
+- Guard against re-running if a recent batch job completed successfully and
+  backup inventory hasn't refreshed since
+- Write a "first backup completed" marker and skip full-sync re-submission
+  until inventory catches up
+
+### Inventory freshness determines effective RPO
+
+The `effective` timestamp shown by `backup status` is
+`min(source_inventory_dt, backup_inventory_dt)`. Objects written to the
+source after this timestamp are not visible to the diff query until the
+next inventory snapshot. With daily inventory, worst-case data lag is ~48h
+(object written just after one snapshot, not picked up until the run after
+the next snapshot).
+
 ## Performance and cost expectations
 
 - Inventory listing + Athena scan remains low-cent order per run when partition-pruned.
 - Query runtime should be materially more stable than live listing path.
 - Primary added overhead is orchestration plumbing (table/partition/query lifecycle).
+- With UNLOAD, manifest generation for 40M objects takes ~12 seconds (Athena
+  server-side) + ~7 seconds (S3 multipart-copy concat) = ~20 seconds total.
+  Lambda execution ~28 seconds at 432 MB. Cost per run: ~$0.01-0.05 (Athena
+  scan + S3 operations).
 
 ## Delivery plan
 
