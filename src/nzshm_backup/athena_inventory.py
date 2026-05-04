@@ -239,7 +239,7 @@ WHERE {src_filter}
     return f"""
 UNLOAD ({select})
 TO '{unload_location}'
-WITH (format = 'TEXTFILE', field_delimiter = ',')
+WITH (format = 'TEXTFILE', field_delimiter = ',', compression = 'NONE')
 """.strip()
 
 
@@ -392,14 +392,20 @@ def _download_and_upload(
 
 
 def _cleanup_unload_parts(s3_client, bucket: str, prefix: str) -> None:
-    """Delete intermediate UNLOAD output files."""
-    parts = _list_unload_parts(s3_client, bucket, prefix)
-    if not parts:
+    """Delete ALL objects under the UNLOAD prefix (including 0-byte markers)."""
+    paginator = s3_client.get_paginator("list_objects_v2")
+    keys: list[dict] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []) or []:
+            keys.append({"Key": obj["Key"]})
+    if not keys:
         return
-    s3_client.delete_objects(
-        Bucket=bucket,
-        Delete={"Objects": [{"Key": p["Key"]} for p in parts], "Quiet": True},
-    )
+    # delete_objects accepts max 1000 keys per call
+    for i in range(0, len(keys), 1000):
+        s3_client.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": keys[i : i + 1000], "Quiet": True},
+        )
 
 
 # ---------------------------------------------------------------------------

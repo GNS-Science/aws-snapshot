@@ -409,7 +409,8 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Pre-flight `backup check` command verified against all sources
 - [x] Weekly schedules live (weka/ths/static: Wednesday 20:15 NZST; toshi: Thursday 20:15 NZST)
 - [x] Weka smoke test confirmed end-to-end EventBridge → Lambda → S3 path
-- [ ] First full backup run — toshi, ths, static (scheduled this week)
+- [x] First full backup run — static (39.9M objects) S3 Batch job submitted 2026-05-04; toshi validated (skipped — inventories in sync); ths Lambda cutover validated
+- [ ] Weka first Lambda-triggered backup with UNLOAD pipeline (in progress 2026-05-04)
 - [ ] Restore drill against NSHM production data
 - [ ] Cost verification after first month
 - [ ] Cutover planning + AWS Backup decommission
@@ -636,7 +637,7 @@ testing:
 
 ---
 
-**Document Version:** 1.4
-**Created:** 2026-03-09  **Last updated:** 2026-04-15
-**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress (NSHM production deployed, weekly schedules live; first full backup run pending).
+**Document Version:** 1.5
+**Created:** 2026-03-09  **Last updated:** 2026-05-04
+**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress — all sources validated on Lambda via Athena UNLOAD manifest pipeline; static first full backup (39.9M objects) submitted; restore drill and cost verification pending.
 **Owner:** NSHM DevOps Team
