@@ -275,15 +275,23 @@ def test_batch_backup_inventory_mode_uses_inventory_builder(aws_session, s3_clie
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
 
     with pytest.MonkeyPatch.context() as mp:
+        # _build_manifest_via_inventory now returns (etag, src_dt, bkp_dt, row_count)
+        # and writes the manifest directly — no streaming through write_manifest_to_s3.
         mp.setattr(
-            "nzshm_backup.s3_batch._build_manifest_rows_from_inventory",
-            lambda *a, **k: (iter(["src5,abc.txt\n"]), "2026-04-23-00-00", "2026-04-23-00-00", 0),
+            "nzshm_backup.s3_batch._build_manifest_via_inventory",
+            lambda *a, **k: ('"test-etag"', "2026-04-23-00-00", "2026-04-23-00-00", 1),
         )
         mp.setattr(
             "nzshm_backup.s3_batch._list_bucket",
-            lambda *a, **k: (
-                _ for _ in ()
-            ).throw(AssertionError("_list_bucket should not be used")),
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("_list_bucket should not be used")
+            ),
+        )
+        mp.setattr(
+            "nzshm_backup.s3_batch.write_manifest_to_s3",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("write_manifest_to_s3 should not be used in inventory mode")
+            ),
         )
 
         result = batch_backup_source(

@@ -15,7 +15,7 @@ from urllib.parse import quote
 import boto3
 from botocore.exceptions import ClientError
 
-from nzshm_backup.athena_inventory import build_inventory_manifest_rows_via_athena
+from nzshm_backup.athena_inventory import build_inventory_manifest_via_athena
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES
 from nzshm_backup.s3_backup import ensure_backup_bucket_ready, get_region
 
@@ -100,7 +100,7 @@ def write_manifest_to_s3(
     buffer = b""
     row_count = 0
 
-    _PROGRESS_INTERVAL = 100_000
+    progress_interval = 100_000
     t0 = time.monotonic()
     bytes_written = 0
 
@@ -110,7 +110,7 @@ def write_manifest_to_s3(
             buffer += encoded
             bytes_written += len(encoded)
             row_count += 1
-            if row_count % _PROGRESS_INTERVAL == 0:
+            if row_count % progress_interval == 0:
                 elapsed = time.monotonic() - t0
                 pct_timeout = elapsed / 900.0 * 100.0
                 if result_bytes > 0 and row_count > 0:
@@ -174,21 +174,25 @@ def _list_bucket(s3_client, bucket: str) -> dict:
     return objects
 
 
-def _build_manifest_rows_from_inventory(
+def _build_manifest_via_inventory(
     session: boto3.Session,
     source_alias: str,
     source_bucket: str,
     backup_bucket: str,
+    manifest_bucket: str,
+    manifest_key: str,
     full_sync: bool,
-) -> tuple[Iterator[str], str, str, int]:
-    rows, src_dt, bkp_dt, result_bytes = build_inventory_manifest_rows_via_athena(
+) -> tuple[str | None, str, str | None, int]:
+    """Build manifest via Athena UNLOAD.  Returns (etag, src_dt, bkp_dt, row_count)."""
+    return build_inventory_manifest_via_athena(
         session,
         source_alias,
         source_bucket,
         backup_bucket,
+        manifest_bucket,
+        manifest_key,
         full_sync,
     )
-    return rows, src_dt, bkp_dt, result_bytes
 
 
 def batch_backup_source(
@@ -247,18 +251,19 @@ def batch_backup_source(
 
     ensure_backup_bucket_ready(session, backup_bucket)
 
-    result_bytes = 0
     if manifest_mode == "inventory":
         if not source_alias:
             raise ValueError("source_alias is required when manifest_mode='inventory'")
-        rows, src_dt, bkp_dt, result_bytes = _build_manifest_rows_from_inventory(
+        manifest_etag, src_dt, bkp_dt, row_count = _build_manifest_via_inventory(
             session,
             source_alias,
             source_bucket,
             backup_bucket,
-            full_sync,
+            manifest_bucket=backup_bucket,
+            manifest_key=manifest_key,
+            full_sync=full_sync,
         )
-        logger.info(f"Inventory diff snapshots selected: source={src_dt}, backup={bkp_dt}")
+        logger.info(f"Inventory diff: source={src_dt}, backup={bkp_dt}")
     else:
         logger.info(f"Listing source objects in {source_bucket}")
         source_objects = _list_bucket(src_s3_client, source_bucket)
@@ -276,11 +281,11 @@ def batch_backup_source(
 
         rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
 
-    logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
-    manifest_etag, row_count = write_manifest_to_s3(
-        s3_client, rows, backup_bucket, manifest_key, result_bytes=result_bytes,
-    )
-    logger.info(f"Manifest written: {row_count} objects, ETag={manifest_etag}")
+        logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
+        manifest_etag, row_count = write_manifest_to_s3(
+            s3_client, rows, backup_bucket, manifest_key,
+        )
+        logger.info(f"Manifest written: {row_count} objects, ETag={manifest_etag}")
 
     if row_count == 0:
         logger.info("Nothing to copy — manifest is empty, skipping job submission")
