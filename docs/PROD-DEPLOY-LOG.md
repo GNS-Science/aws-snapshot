@@ -5,6 +5,14 @@
 **Region:** `ap-southeast-2`
 **Date started:** 2026-04-15
 
+**Related docs:**
+- [Backup Solution Plan](design/backup-solution-plan.md) — overall architecture, phases, and cost analysis (this log is the execution journal for that plan)
+- [ADR-002: Inventory Manifest Pipeline](design/adr/ADR-002-inventory-manifest-pipeline-ths.md) — design decision for Athena-based inventory diff
+- [S3 Manifest Bottleneck](design/S3_MANIFEST_BOTTLENECK.md) — Lambda/CodeBuild sizing matrix that drove the inventory pivot
+- [Athena Manifest Pipeline](design/ATHENA_MANIFEST_PIPELINE.md) — Athena inventory-diff implementation design
+- [Lambda Deployment Guide](development/lambda-deployment.md) — deploy procedures for `serverless.yml`
+- [Scheduling Guide](user-guide/scheduling.md) — EventBridge schedule management and `lambda_arn` config
+
 ---
 
 ## Step 1 — Inspect source account and create config (2026-04-15)
@@ -268,6 +276,102 @@ AWS_PROFILE=nshm-backup-admin BACKUP_CONFIG_PATH=backup-config.production.yaml \
 ```
 
 - Confirmed `nzshm-backup-toshi-daily` no longer appears in `backup schedule show`.
+
+---
+
+## Step 24 — Toshi scheduled Lambda run failed (missing Glue permissions) ⚠️ 2026-04-30
+
+Weekly toshi schedule (`nzshm-backup-toshi-weekly`, Thursday 14:00 NZST) fired the
+Lambda successfully, but the Athena inventory-diff query failed during manifest
+preparation.
+
+Error from CloudWatch logs:
+
+```
+Athena query bfa18477-e9b7-4b53-b5d3-f6f1088fe3f9 FAILED:
+User: arn:aws:sts::737696831915:assumed-role/nzshm-backup-service-prod-ap-southeast-2-lambdaRole/nzshm-backup-service-prod-backup
+is not authorized to perform: glue:CreateDatabase on resource: arn:aws:glue:ap-southeast-2:737696831915:catalog
+```
+
+Root cause:
+- Lambda role in `serverless.yml` only had Glue read permissions (`GetDatabase`,
+  `GetTable`, `GetTables`). Athena inventory queries need full Data Catalog CRUD
+  to create databases, tables, and partitions for S3 Inventory Parquet data.
+- Additionally, `backup_engine.py` did not write `status="failed"` on exceptions,
+  leaving the run state permanently stuck at `"running"`.
+
+DynamoDB exports completed normally (all four toshi tables `COMPLETED`).
+
+---
+
+## Step 25 — Glue permission fix and failed-state handling ✅ 2026-05-04
+
+### Code fixes (commit `064f40d`)
+
+**`serverless.yml`** — Added Athena and full Glue Data Catalog permissions to Lambda role:
+
+Athena actions:
+- `athena:StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`,
+  `ListDatabases`, `ListTables`, `GetDatabase`, `GetTableMetadata`
+
+Glue actions (database, table, and partition CRUD):
+- `glue:GetDatabase`, `CreateDatabase`
+- `glue:GetTable`, `GetTables`, `CreateTable`, `UpdateTable`, `DeleteTable`
+- `glue:GetPartition`, `GetPartitions`, `CreatePartition`, `BatchCreatePartition`,
+  `DeletePartition`, `UpdatePartition`, `BatchDeletePartition`
+
+**`backup_engine.py`** — Added `write_run_state(..., status="failed")` in the
+S3 backup exception handler so runs no longer get stuck at `"running"` forever.
+
+### Deploy and validation iterations
+
+Three deploy/test cycles were needed to discover the full set of required Glue
+permissions (each failure surfaced the next missing action):
+
+| Deploy | Error | Missing action |
+|--------|-------|---------------|
+| 1st | `glue:CreateDatabase` denied | `CreateDatabase`, `CreateTable`, `DeleteTable`, `UpdateTable` added |
+| 2nd | `glue:BatchCreatePartition` denied | All partition CRUD actions added |
+| 3rd | `glue:GetPartition` denied | `GetPartition`, `GetPartitions` added |
+| 4th | **SUCCESS** | All permissions in place |
+
+Deploy command:
+
+```bash
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+```
+
+Each test iteration used a temporary schedule override:
+
+```bash
+run_time=$(TZ=Pacific/Auckland date -v+5M "+%Y-%m-%d %H:%M %Z")
+BACKUP_CONFIG_PATH=backup-config.production.yaml AWS_PROFILE=nshm-backup-admin \
+  uv run backup schedule add --source toshi --time "$run_time" --frequency weekly
+```
+
+Final successful run status (2026-05-04 ~11:29 NZST):
+- S3: `last run: 2026-05-04 11:29 NZST — skipped` (inventories in sync, no objects to copy)
+- DynamoDB: all four tables `IN_PROGRESS` (exports initiated)
+- `status="failed"` fix confirmed working on earlier iterations
+
+### Schedule restored
+
+```bash
+BACKUP_CONFIG_PATH=backup-config.production.yaml AWS_PROFILE=nshm-backup-admin \
+  uv run backup schedule add --source toshi --time "2026-05-07 14:00 NZST" --frequency weekly
+```
+
+Confirmed: `cron(0 2 ? * THU *)` → Thursday 14:00 NZST locally.
+
+### Outstanding
+
+- SSM config has not been pushed this session — `serverless.yml` IAM changes are
+  deployed via CloudFormation (not config), so Lambda permissions are active. Config
+  push is only needed if `backup-config.production.yaml` content changed.
+- Known bug: `schedule add` removes existing EventBridge targets before re-adding,
+  but if `load_config()` fails (no local config file), the Lambda target is deleted
+  and not restored. Workaround: always set `BACKUP_CONFIG_PATH` when using
+  `schedule add` with `--target lambda`.
 
 ---
 
