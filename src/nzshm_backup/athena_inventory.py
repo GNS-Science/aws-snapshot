@@ -18,18 +18,38 @@ _SYMLINK_DT_RE = re.compile(r"/hive/dt=([^/]+)/symlink\.txt$")
 # S3 multipart-copy minimum part size (5 MB), except for the last part.
 _MIN_PART_BYTES = 5 * 1024 * 1024
 
-# Characters that urllib.parse.quote(key, safe='/') encodes and that appear
-# in production S3 keys.  '%' MUST be first to avoid double-encoding.
+# All characters that urllib.parse.quote(key, safe='/') encodes.
+# '%' MUST be first to avoid double-encoding.  Generated from:
+#   [(c, quote(c, safe='/')) for c in map(chr, range(32,127)) if quote(c, safe='/') != c]
 _URL_ENCODE_PAIRS = [
-    ("%", "%25"),
-    (",", "%2C"),
+    ("%", "%25"),  # must be first
     (" ", "%20"),
-    ("=", "%3D"),
-    ("(", "%28"),
-    (")", "%29"),
+    ("!", "%21"),
     ('"', "%22"),
     ("#", "%23"),
+    ("$", "%24"),
+    ("&", "%26"),
+    ("'", "%27"),
+    ("(", "%28"),
+    (")", "%29"),
+    ("*", "%2A"),
     ("+", "%2B"),
+    (",", "%2C"),
+    (":", "%3A"),
+    (";", "%3B"),
+    ("<", "%3C"),
+    ("=", "%3D"),
+    (">", "%3E"),
+    ("?", "%3F"),
+    ("@", "%40"),
+    ("[", "%5B"),
+    ("\\", "%5C"),
+    ("]", "%5D"),
+    ("^", "%5E"),
+    ("`", "%60"),
+    ("{", "%7B"),
+    ("|", "%7C"),
+    ("}", "%7D"),
 ]
 
 
