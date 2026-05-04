@@ -200,10 +200,13 @@ def _build_url_encode_sql(column: str) -> str:
 
     Equivalent to Python's ``urllib.parse.quote(value, safe='/')``.
     ``%`` is encoded first to prevent double-encoding.
+    Single quotes are escaped as '' in SQL string literals.
     """
     expr = column
     for char, encoded in _URL_ENCODE_PAIRS:
-        expr = f"REPLACE({expr}, '{char}', '{encoded}')"
+        # Escape single quote for SQL string literal
+        sql_char = "''" if char == "'" else char
+        expr = f"REPLACE({expr}, '{sql_char}', '{encoded}')"
     return expr
 
 
