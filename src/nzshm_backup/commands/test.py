@@ -27,6 +27,52 @@ app = typer.Typer()
 _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
 
 
+_CHECKSUM_KEYS = [
+    "ChecksumCRC64NVME", "ChecksumCRC32", "ChecksumCRC32C",
+    "ChecksumSHA256", "ChecksumSHA1",
+]
+
+
+def _get_object_checksum(s3_client, bucket: str, key: str) -> tuple[str, str] | None:
+    """Return (algorithm, value) for the first available checksum, or None."""
+    try:
+        resp = s3_client.get_object_attributes(
+            Bucket=bucket, Key=key, ObjectAttributes=["Checksum"],
+        )
+        checksum = resp.get("Checksum", {})
+        for ck in _CHECKSUM_KEYS:
+            if ck in checksum and checksum[ck]:
+                return ck, checksum[ck]
+    except Exception:
+        pass
+    return None
+
+
+def _verify_restored_object(
+    s3_client, source_bucket: str, target_bucket: str, key: str, expected_etag: str,
+) -> str | None:
+    """Verify a restored object against its backup source.
+
+    Tries checksum comparison first (content-deterministic), falls back to ETag.
+    Returns an error description string, or None if verification passed.
+    """
+    # Try checksum comparison first (reliable across copy methods)
+    src_ck = _get_object_checksum(s3_client, source_bucket, key)
+    if src_ck:
+        tgt_ck = _get_object_checksum(s3_client, target_bucket, key)
+        if tgt_ck and src_ck[0] == tgt_ck[0]:
+            # Same algorithm — compare values
+            if src_ck[1] == tgt_ck[1]:
+                return None  # checksum match — verified
+            return f"{src_ck[0]} mismatch: {src_ck[1]} != {tgt_ck[1]}"
+
+    # Fall back to ETag comparison
+    head = s3_client.head_object(Bucket=target_bucket, Key=key)
+    if head["ETag"] != expected_etag:
+        return f"ETag mismatch: {head['ETag']} != {expected_etag}"
+    return None
+
+
 @app.command("integrity")
 def test_integrity(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
@@ -375,9 +421,12 @@ def test_restore(
                             for obj in sample:
                                 key = obj["Key"]
                                 try:
-                                    head = s3.head_object(Bucket=temp_bucket, Key=key)
-                                    if head["ETag"] != obj["ETag"]:
-                                        etag_mismatches.append(key)
+                                    err = _verify_restored_object(
+                                        s3, backup_bucket, temp_bucket,
+                                        key, obj["ETag"],
+                                    )
+                                    if err:
+                                        etag_mismatches.append(f"{key}: {err}")
                                 except Exception as e:
                                     copy_errors.append(f"{key}: {e}")
                     except TimeoutError as e:
@@ -393,9 +442,11 @@ def test_restore(
                             Key=key,
                             MetadataDirective="COPY",
                         )
-                        head = s3.head_object(Bucket=temp_bucket, Key=key)
-                        if head["ETag"] != expected_etag:
-                            etag_mismatches.append(key)
+                        err = _verify_restored_object(
+                            s3, backup_bucket, temp_bucket, key, expected_etag,
+                        )
+                        if err:
+                            etag_mismatches.append(f"{key}: {err}")
                     except Exception as copy_err:
                         copy_errors.append(f"{key}: {copy_err}")
         finally:
