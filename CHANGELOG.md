@@ -57,6 +57,12 @@ All notable changes to this project will be documented here.
   set required by copy jobs on large sources (`GetObject*`/version-tag variants,
   plus backup write ACL/tagging actions).
 
+- `test restore` now refuses to fall back to full bucket listing for
+  inventory-mode sources when inventory is unavailable. Prints an actionable
+  message instead of silently stalling for hours on multi-million-object buckets.
+- `test integrity` now warns before running full listing on inventory-mode
+  sources with potentially millions of objects.
+
 ### Docs
 
 - Updated scheduling docs with CodeBuild-target examples and a mixed-target
