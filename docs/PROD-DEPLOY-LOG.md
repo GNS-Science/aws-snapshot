@@ -512,6 +512,34 @@ versions for objects overwritten by the second job. Bucket metrics count
 all versions (current + non-current). Non-current versions will expire
 via lifecycle policy (365 days).
 
+### Storage cost analysis (2026-05-06)
+
+Non-current object versions (from duplicate batch jobs and ETag false-positive
+re-copies during testing) add ~1,248 GB of overhead across backup buckets.
+
+| Source | Source (GB) | Backup current (GB) | Backup total (GB) | Non-current (GB) | Overhead |
+|--------|------------|--------------------|--------------------|-----------------|----------|
+| static | 2,668 | 2,673 | 3,497 | 824 | 31% |
+| toshi | 7,885 | 7,886 | 7,887 | 2 | 0% |
+| ths | 427 | 431 | 853 | 423 | 100% |
+| weka | 0.01 | 0.03 | 0.05 | 0.02 | — |
+| **Total** | **10,980** | **10,989** | **12,238** | **1,248** | **11%** |
+
+Cost impact (S3 Standard): ~NZD 76/month for non-current versions.
+Will reduce as lifecycle transitions apply:
+- 30 days → Glacier IR (~NZD 15/month)
+- 120 days → Deep Archive (~NZD 4/month)
+- 365 days → expired (NZD 0)
+
+Root causes:
+- **static** (824 GB): duplicate full-sync batch job due to inventory lag
+  (backup inventory not refreshed before second run)
+- **ths** (423 GB): 4,224 false-positive re-copies from multipart ETag
+  mismatch (fixed by smart ETag comparison) plus earlier failed/retried jobs
+
+Both root causes are now mitigated (inventory lag guard, smart ETag diff).
+No further non-current accumulation expected under normal weekly schedule.
+
 ### Schedules need resetting
 
 All source schedules are on temporary slots from testing. Need to be reset
