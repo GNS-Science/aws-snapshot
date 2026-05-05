@@ -474,6 +474,26 @@ positives eliminated.
 
 Validated: weka and THS both pass restore tests with checksum verification.
 
+### Inventory guard for large buckets
+
+`test restore --source static` was falling back to listing 40M objects when
+backup inventory was unavailable (not yet refreshed after first backup).
+Added guards:
+- `test restore`: refuses listing fallback for inventory-mode sources;
+  prints actionable message with remediation steps
+- `test integrity`: warns before running full listing on large buckets
+- Improved `_latest_inventory_partition` error message with guidance
+
+### SSM config push
+
+Pushed `backup-config.production.yaml` to SSM — static `batch_manifest_mode:
+inventory` was missing from the SSM copy.
+
+### Schedules need resetting
+
+All source schedules are on temporary slots from testing. Need to be reset
+to permanent production times before Thursday.
+
 ---
 
 ## Step 20 — Deployed Athena THS runtime artifact to CodeBuild ✅ 2026-04-23
