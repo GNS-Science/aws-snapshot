@@ -129,6 +129,13 @@ def test_integrity(
         )
 
         typer.echo(f"  S3: {source_bucket}  ↔  {backup_bucket}")
+        if source_config.batch_manifest_mode == "inventory":
+            typer.echo(
+                f"    ⚠ Integrity check uses full bucket listing — may be very slow\n"
+                f"      for inventory-mode sources with millions of objects.\n"
+                f"      Use 'backup status --source {source}' for inventory-based health.",
+                err=True,
+            )
         result = check_bucket_integrity(backup_s3, source_bucket, backup_bucket, source_s3)
 
         typer.echo(
@@ -304,8 +311,15 @@ def test_restore(
                     session, source, backup_bucket, sample_size=sample_size,
                 )
             except (ValueError, Exception) as e:
-                typer.echo(f"    Inventory sampling failed ({e}), falling back to listing")
-                use_inventory = False
+                typer.echo(
+                    f"    ✗ Inventory unavailable for {backup_bucket}: {e}\n"
+                    f"      Inventory-mode sources require inventory data for sampling.\n"
+                    f"      Wait for the next daily inventory cycle, or run:\n"
+                    f"        backup check --source {source}",
+                    err=True,
+                )
+                any_failure = True
+                continue
 
         if not use_inventory:
             typer.echo("    Sampling via bucket listing...")
