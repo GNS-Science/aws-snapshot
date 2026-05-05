@@ -87,7 +87,8 @@ def _latest_inventory_partition(
 
     if not dt_to_symlink:
         raise ValueError(
-            f"No inventory hive partitions found under s3://{control_bucket}/{prefix}"
+            f"No inventory data under s3://{control_bucket}/{prefix} — "
+            f"run 'backup setup inventory' or wait for first daily delivery (~24h)"
         )
 
     dt = max(dt_to_symlink)
