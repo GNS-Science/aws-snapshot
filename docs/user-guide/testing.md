@@ -92,6 +92,23 @@ Exits with code 1 if any check fails.
 
 ---
 
+## Inventory availability requirements
+
+For sources configured with `batch_manifest_mode: inventory` (all production
+sources), some test commands require inventory data to be available:
+
+| Command | Inventory required? | Behaviour when unavailable |
+|---------|--------------------|-----------------------------|
+| `test restore` | Yes (for sampling) | Refuses with actionable message — no fallback to listing |
+| `test integrity` | No (uses listing) | Warns that listing may be very slow for large buckets |
+| `test restore` (non-inventory source) | No | Falls back to `list_objects_v2` sampling |
+
+**Common cause of unavailability:** inventory data takes up to 24 hours to
+refresh after a first-ever backup populates a previously empty bucket. Run
+`backup check --source <alias>` to verify inventory freshness before testing.
+
+---
+
 ## `backup test full-drill`
 
 Not yet implemented. Planned to run a full quarterly disaster recovery drill (restore + validate
