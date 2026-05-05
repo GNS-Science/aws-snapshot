@@ -475,3 +475,204 @@ def test_config_accepts_batch_role_when_use_s3_batch():
     )
     assert cfg.general.s3_batch_role_arn.startswith("arn:aws:iam::")
     assert cfg.sources["toshi"].use_s3_batch is True
+
+
+# ---------------------------------------------------------------------------
+# write_manifest_to_s3 — progress logging and error handling
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+def test_write_manifest_progress_logging(aws_session, s3_client, caplog):
+    """Progress is logged every 100K rows."""
+    import logging
+
+    _create_bucket(s3_client, "manifest-bucket")
+
+    # Generate >100K rows to trigger progress log
+    def _rows():
+        for i in range(100_001):
+            yield f"bucket,key{i}\n"
+
+    with caplog.at_level(logging.INFO, logger="nzshm_backup.s3_batch"):
+        etag, count = write_manifest_to_s3(
+            s3_client, _rows(), "manifest-bucket", "test.csv", result_bytes=5_000_000,
+        )
+
+    assert count == 100_001
+    assert any("Manifest progress: 100,000 rows" in msg for msg in caplog.messages)
+    assert any("est. rows" in msg for msg in caplog.messages)
+    assert any("Lambda timeout" in msg for msg in caplog.messages)
+
+
+@mock_aws
+def test_write_manifest_progress_unknown_total(aws_session, s3_client, caplog):
+    """Progress log shows 'total unknown' when result_bytes=0."""
+    import logging
+
+    _create_bucket(s3_client, "manifest-bucket2")
+
+    def _rows():
+        for i in range(100_001):
+            yield f"bucket,key{i}\n"
+
+    with caplog.at_level(logging.INFO, logger="nzshm_backup.s3_batch"):
+        write_manifest_to_s3(s3_client, _rows(), "manifest-bucket2", "t.csv")
+
+    assert any("total unknown" in msg for msg in caplog.messages)
+
+
+@mock_aws
+def test_write_manifest_abort_on_error(aws_session, s3_client):
+    """Manifest upload aborts multipart on error."""
+    from unittest.mock import MagicMock
+
+    mock_s3 = MagicMock()
+    mock_s3.create_multipart_upload.return_value = {"UploadId": "up-err"}
+    mock_s3.upload_part.side_effect = Exception("UploadFailed")
+
+    with pytest.raises(Exception, match="UploadFailed"):
+        write_manifest_to_s3(mock_s3, iter(["row\n"]), "bkt", "key.csv")
+
+    mock_s3.abort_multipart_upload.assert_called_once_with(
+        Bucket="bkt", Key="key.csv", UploadId="up-err",
+    )
+
+
+# ---------------------------------------------------------------------------
+# wait_for_batch_job
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_batch_job_completes():
+    """Returns terminal status when job completes."""
+    from unittest.mock import MagicMock, patch
+
+    from nzshm_backup.s3_batch import wait_for_batch_job
+
+    mock_session = MagicMock()
+    mock_s3ctrl = MagicMock()
+    mock_session.client.return_value = mock_s3ctrl
+    mock_s3ctrl.describe_job.return_value = {
+        "Job": {"Status": "Complete"}
+    }
+
+    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("nzshm_backup.s3_batch.time.sleep"):
+            status = wait_for_batch_job(mock_session, "123", "job-1", timeout=60)
+
+    assert status == "Complete"
+
+
+def test_wait_for_batch_job_polls_then_completes():
+    """Polls Active then returns Complete."""
+    from unittest.mock import MagicMock, patch
+
+    from nzshm_backup.s3_batch import wait_for_batch_job
+
+    mock_session = MagicMock()
+    mock_s3ctrl = MagicMock()
+    mock_session.client.return_value = mock_s3ctrl
+    mock_s3ctrl.describe_job.side_effect = [
+        {"Job": {"Status": "Active"}},
+        {"Job": {"Status": "Active"}},
+        {"Job": {"Status": "Complete"}},
+    ]
+
+    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("nzshm_backup.s3_batch.time.sleep"):
+            status = wait_for_batch_job(
+                mock_session, "123", "job-2", poll_interval=1, timeout=60,
+            )
+
+    assert status == "Complete"
+    assert mock_s3ctrl.describe_job.call_count == 3
+
+
+def test_wait_for_batch_job_returns_failed():
+    """Returns Failed status."""
+    from unittest.mock import MagicMock, patch
+
+    from nzshm_backup.s3_batch import wait_for_batch_job
+
+    mock_session = MagicMock()
+    mock_s3ctrl = MagicMock()
+    mock_session.client.return_value = mock_s3ctrl
+    mock_s3ctrl.describe_job.return_value = {"Job": {"Status": "Failed"}}
+
+    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("nzshm_backup.s3_batch.time.sleep"):
+            status = wait_for_batch_job(mock_session, "123", "job-3")
+
+    assert status == "Failed"
+
+
+def test_wait_for_batch_job_timeout():
+    """Raises TimeoutError when job doesn't complete."""
+    from unittest.mock import MagicMock, patch
+
+    from nzshm_backup.s3_batch import wait_for_batch_job
+
+    mock_session = MagicMock()
+    mock_s3ctrl = MagicMock()
+    mock_session.client.return_value = mock_s3ctrl
+    mock_s3ctrl.describe_job.return_value = {"Job": {"Status": "Active"}}
+
+    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("nzshm_backup.s3_batch.time.sleep"):
+            with pytest.raises(TimeoutError, match="did not complete"):
+                wait_for_batch_job(
+                    mock_session, "123", "job-4", poll_interval=1, timeout=3,
+                )
+
+
+# ---------------------------------------------------------------------------
+# batch_backup_source — CreateJob success and failure
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+def test_batch_backup_inline_createjob_failure(aws_session, s3_client):
+    """CreateJob ClientError returns FAILED result instead of raising."""
+    from unittest.mock import MagicMock
+
+    _create_bucket(s3_client, "src-cj")
+    s3_client.put_object(Bucket="src-cj", Key="a.txt", Body=b"data")
+
+    backup_name = "src-cj-backup-ap-southeast-2-123456789012"
+    from nzshm_backup.s3_backup import create_backup_bucket
+
+    create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
+
+    # Mock s3control to raise ClientError
+    mock_s3ctrl = MagicMock()
+    from botocore.exceptions import ClientError
+
+    mock_s3ctrl.create_job.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "no perms"}}, "CreateJob",
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "nzshm_backup.s3_batch.get_region", lambda s: "ap-southeast-2",
+        )
+        original_client = aws_session.client
+
+        def patched_client(service, **kw):
+            if service == "s3control":
+                return mock_s3ctrl
+            return original_client(service, **kw)
+
+        mp.setattr(aws_session, "client", patched_client)
+
+        result = batch_backup_source(
+            session=aws_session,
+            source_bucket="src-cj",
+            backup_bucket=backup_name,
+            batch_role_arn="arn:aws:iam::123456789012:role/batch",
+            account_id="123456789012",
+            dry_run=False,
+        )
+
+    assert result.status == "FAILED"
+    assert len(result.errors) > 0
