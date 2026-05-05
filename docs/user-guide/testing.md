@@ -9,8 +9,9 @@ tests to validate that backups are readable and consistent.
 |---------|--------|-------|
 | `test integrity` — S3 object comparison | ✅ Implemented | Full ETag diff; excludes operational prefixes |
 | `test integrity` — DynamoDB PITR check | ✅ Implemented | Read-only; checks PITR enabled + completed exports exist |
-| `test restore` — S3 direct copy sample | ✅ Implemented | Copies N objects to temp bucket, verifies ETags, cleans up |
+| `test restore` — S3 direct copy sample | ✅ Implemented | Copies N objects to temp bucket, verifies via checksum or ETag |
 | `test restore` — S3 Batch Operations path | ✅ Implemented | `--use-batch`; validates production IAM + Batch pipeline |
+| `test restore` — inventory-based sampling | ✅ Implemented | Uses Athena `ORDER BY RAND()` for large buckets; falls back to listing |
 | `test restore` — DynamoDB restorability | ✅ Implemented | Read-only; checks PITR + export bucket accessible |
 | Event log (`test_restore` events) | ✅ Implemented | Emits passed/failed/etag_mismatch to `_events/` |
 | `test full-drill` | ⏳ Not yet implemented | Planned quarterly DR drill |
@@ -63,10 +64,17 @@ backup test restore --source arkivalist --sample-size 20
 
 **S3 testing:**
 
-1. Samples N objects from each backup bucket (default 10; reduced if fewer available)
+1. Samples N objects from each backup bucket (default 10; reduced if fewer available).
+   For sources with `batch_manifest_mode: inventory`, sampling uses an Athena query
+   against the backup inventory (`ORDER BY RAND() LIMIT N`) — instant even for
+   multi-million-object buckets. Falls back to `list_objects_v2` pagination when
+   inventory is unavailable.
 2. Creates a temporary bucket (`bb-restore-test-{ts}-{account_id}`)
 3. Copies objects via direct copy or S3 Batch Operations
-4. Verifies ETags match the backup
+4. Verifies each copied object using S3 checksums (CRC64NVME, CRC32, or SHA256 via
+   `GetObjectAttributes`) when available. Falls back to ETag comparison when no
+   checksum is present. Checksums are content-deterministic regardless of upload
+   method, avoiding false mismatches from multipart copy ETag differences.
 5. Deletes the temporary bucket (always, even on failure)
 
 Objects in archived storage tiers (Glacier, Glacier IR, Deep Archive) are automatically skipped —

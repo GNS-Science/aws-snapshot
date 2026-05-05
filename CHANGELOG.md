@@ -15,6 +15,14 @@ All notable changes to this project will be documented here.
 - `backup check [--source SOURCE]` — fast pre-flight command that validates IAM credentials,
   cross-account role assumption, S3 bucket read access, backup bucket existence, S3 Batch
   role presence, and DynamoDB PITR status. No object enumeration — completes in seconds.
+- `backup test restore` now samples objects via Athena inventory query (`ORDER BY
+  RAND() LIMIT N`) instead of listing the entire backup bucket. Falls back to
+  full listing when inventory is unavailable. THS (3.8M objects) sampling now
+  completes in seconds instead of minutes.
+- `backup test restore` now verifies restored objects using S3 checksums
+  (CRC64NVME/CRC32/SHA256 via `GetObjectAttributes`) when available, falling
+  back to ETag comparison when not. Checksums are content-deterministic
+  regardless of upload method, eliminating false ETag mismatches.
 
 ### Changed
 

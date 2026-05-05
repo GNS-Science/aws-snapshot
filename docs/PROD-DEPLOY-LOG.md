@@ -424,12 +424,55 @@ weka-weekly      ENABLED  cron(...)  → Monday (temporary, needs permanent slot
 
 All sources now on Lambda — CodeBuild no longer required for any source.
 
-### Outstanding
+### Outstanding (from Step 26)
 
-- Static batch job `b2832b7b` used compressed manifest from earlier deploy —
-  may partially fail. Needs re-run with uncompressed manifest.
-- SSM config not pushed this session.
 - Permanent schedule slots for static and weka need to be set.
+
+---
+
+## Step 27 — Static first backup completed, toshi first backup triggered ✅ 2026-05-05
+
+### Static results
+
+Static batch job `b2832b7b` (39,973,875 objects) completed with only 2 failures:
+- Both failed keys contained `+` characters not URL-encoded in the manifest
+- Fix: expanded REPLACE chain from 9 to all 28 RFC 3986 reserved characters
+- Also fixed: single quote `'` in REPLACE chain broke Athena SQL parser
+
+SSM config pushed (static `batch_manifest_mode: inventory` was missing).
+
+### Toshi first S3 backup
+
+Toshi had never had a successful S3 backup — every previous run was either
+"failed" (Glue permissions) or "skipped" (NULL `is_latest` filter bug on
+non-versioned buckets). Triggered first real run:
+
+- Batch job `bb5d364d`: 6,908,702 objects submitted
+- UNLOAD completed in ~20 seconds
+
+### THS smart ETag validation
+
+THS diff was producing 4,224 false positives per run — objects re-copied
+despite identical content. Root cause: S3 Batch copy produces different ETags
+from source when upload method differs (multipart vs single-part).
+
+Fix: smart ETag comparison — only compare ETags when both are single-part
+(no `-` suffix). Falls back to size-only when either is multipart.
+
+Validated: THS run returned "skipped" (0 objects) after fix — false
+positives eliminated.
+
+### Test restore improvements
+
+1. **Inventory-based sampling**: `test restore` now queries Athena inventory
+   for random samples instead of listing entire backup buckets. THS (3.8M
+   objects) sampling completes in seconds instead of minutes.
+
+2. **Checksum verification**: `test restore` now compares CRC64NVME checksums
+   (via `GetObjectAttributes`) when available, falling back to ETag. S3 Batch
+   already computes CRC64NVME on copied objects.
+
+Validated: weka and THS both pass restore tests with checksum verification.
 
 ---
 
