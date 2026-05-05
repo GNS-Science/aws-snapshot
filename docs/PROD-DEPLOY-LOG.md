@@ -489,6 +489,29 @@ Added guards:
 Pushed `backup-config.production.yaml` to SSM — static `batch_manifest_mode:
 inventory` was missing from the SSM copy.
 
+### Object count reconciliation (2026-05-06, inventory dt=2026-05-05)
+
+Reconciled source inventory counts against backup inventory counts for
+all four production sources. Backup buckets contain operational objects
+(manifests, batch reports, event logs, state files) in addition to backed-up
+data objects.
+
+| Source | Source objects | Backup (total) | Backup (operational) | Backup (data) | Match? |
+|--------|--------------|----------------|---------------------|---------------|--------|
+| static | 39,973,875 | 39,973,884 | 9 | 39,973,875 | **Yes** |
+| toshi | 6,908,702 | 6,908,710 | 8 | 6,908,702 | **Yes** |
+| ths | 3,886,583 | 3,886,621 | 38 | 3,886,583 | **Yes** |
+| weka | 11 | 33 | 22 | 11 | **Yes** |
+
+All sources fully reconciled: source data count = backup data count.
+
+**Note on static bucket metrics showing ~52M objects:** The backup bucket
+has versioning enabled. Two full-sync batch jobs ran (the second due to
+inventory lag before backup inventory refreshed), creating non-current
+versions for objects overwritten by the second job. Bucket metrics count
+all versions (current + non-current). Non-current versions will expire
+via lifecycle policy (365 days).
+
 ### Schedules need resetting
 
 All source schedules are on temporary slots from testing. Need to be reset
