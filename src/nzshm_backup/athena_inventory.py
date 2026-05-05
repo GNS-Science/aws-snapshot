@@ -621,3 +621,115 @@ def _read_count_result(s3_client, result_location: str) -> int:
         except ValueError:
             pass
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Inventory-based random sampling for test commands
+# ---------------------------------------------------------------------------
+
+_ARCHIVED_STORAGE_CLASSES = frozenset({
+    "GLACIER", "DEEP_ARCHIVE", "GLACIER_IR",
+})
+
+# Prefixes used by the backup system itself (not user data)
+_OPERATIONAL_PREFIXES = ("_state/", "_manifests/", "_batch-reports/", "_events/")
+
+
+def sample_objects_via_inventory(
+    session: boto3.Session,
+    source_alias: str,
+    backup_bucket: str,
+    sample_size: int = 10,
+) -> list[dict]:
+    """Return a random sample of backup objects using Athena inventory queries.
+
+    Returns a list of dicts with ``Key``, ``ETag``, and ``Size`` fields,
+    matching the shape expected by the test restore command.
+
+    Raises ``ValueError`` if no inventory partitions are available.
+    """
+    import csv as csv_mod
+
+    s3_client = session.client("s3")
+    athena_client = session.client("athena")
+    account_id = session.client("sts").get_caller_identity()["Account"]
+    control_bucket = f"nzshm-backup-inventory-{account_id}"
+
+    backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
+    backup_dt, backup_hive_root = _latest_inventory_partition(
+        s3_client, control_bucket, backup_prefix,
+    )
+
+    database = "nzshm_backup_inventory"
+    table = _table_name(source_alias, "backup", backup_bucket)
+    output_location = (
+        f"s3://{control_bucket}/athena-results/{source_alias}/{backup_bucket}/"
+    )
+
+    _ensure_inventory_table(
+        athena_client, output_location, database,
+        table, control_bucket, backup_hive_root,
+    )
+    _ensure_partition(
+        athena_client, output_location, database,
+        table, control_bucket, backup_hive_root, backup_dt,
+    )
+
+    # Build exclusion filters
+    prefix_filters = " AND ".join(
+        f"key NOT LIKE '{p}%'" for p in _OPERATIONAL_PREFIXES
+    )
+    storage_filters = " AND ".join(
+        f"storage_class <> '{sc}'" for sc in sorted(_ARCHIVED_STORAGE_CLASSES)
+    )
+    version_filter = (
+        "(is_latest = true OR is_latest IS NULL)"
+        " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
+    )
+
+    query = f"""
+SELECT key, e_tag, size
+FROM {table}
+WHERE dt = '{backup_dt}'
+  AND {version_filter}
+  AND {prefix_filters}
+  AND ({storage_filters} OR storage_class IS NULL)
+ORDER BY RAND()
+LIMIT {sample_size}
+""".strip()
+
+    qid = _run_athena_query(athena_client, query, output_location, database=database)
+    _wait_for_athena_query(athena_client, qid)
+
+    execution = athena_client.get_query_execution(QueryExecutionId=qid)
+    result_location = execution["QueryExecution"]["ResultConfiguration"][
+        "OutputLocation"
+    ]
+
+    # Read Athena result CSV
+    result_bucket, result_key = _parse_s3_uri(result_location)
+    body = s3_client.get_object(Bucket=result_bucket, Key=result_key)["Body"]
+    text = body.read().decode("utf-8")
+    reader = csv_mod.reader(text.splitlines())
+
+    objects: list[dict] = []
+    first = True
+    for row in reader:
+        if first:
+            first = False
+            continue
+        if len(row) >= 3 and row[0]:
+            etag = row[1].strip('"')
+            if not etag.startswith('"'):
+                etag = f'"{etag}"'
+            objects.append({
+                "Key": row[0],
+                "ETag": etag,
+                "Size": int(row[2]) if row[2] else 0,
+            })
+
+    logger.info(
+        "Sampled %d objects from inventory (dt=%s) for %s/%s",
+        len(objects), backup_dt, source_alias, backup_bucket,
+    )
+    return objects

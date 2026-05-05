@@ -246,35 +246,51 @@ def test_restore(
         )
         typer.echo(f"  Sampling from: {backup_bucket}")
 
-        # Collect copyable objects
-        all_objects: list[dict] = []
-        archived_count = 0
-        paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=backup_bucket):
-            for obj in page.get("Contents", []):
-                if any(obj["Key"].startswith(p) for p in OPERATIONAL_PREFIXES):
-                    continue
-                if obj.get("StorageClass") in _ARCHIVED_STORAGE_CLASSES:
-                    archived_count += 1
-                else:
-                    all_objects.append(obj)
+        # Sample objects — prefer inventory (fast) over full listing (slow)
+        sample: list[dict] = []
+        use_inventory = source_config.batch_manifest_mode == "inventory"
+        if use_inventory:
+            try:
+                from nzshm_backup.athena_inventory import sample_objects_via_inventory
 
-        if archived_count:
-            typer.echo(
-                f"    {archived_count} archived object(s) skipped "
-                f"(Glacier/Deep Archive — not directly copyable)"
+                typer.echo("    Sampling via inventory (Athena)...")
+                sample = sample_objects_via_inventory(
+                    session, source, backup_bucket, sample_size=sample_size,
+                )
+            except (ValueError, Exception) as e:
+                typer.echo(f"    Inventory sampling failed ({e}), falling back to listing")
+                use_inventory = False
+
+        if not use_inventory:
+            typer.echo("    Sampling via bucket listing...")
+            all_objects: list[dict] = []
+            archived_count = 0
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=backup_bucket):
+                for obj in page.get("Contents", []):
+                    if any(obj["Key"].startswith(p) for p in OPERATIONAL_PREFIXES):
+                        continue
+                    if obj.get("StorageClass") in _ARCHIVED_STORAGE_CLASSES:
+                        archived_count += 1
+                    else:
+                        all_objects.append(obj)
+
+            if archived_count:
+                typer.echo(
+                    f"    {archived_count} archived object(s) skipped "
+                    f"(Glacier/Deep Archive — not directly copyable)"
+                )
+            sample = (
+                random.sample(all_objects, sample_size)
+                if len(all_objects) >= sample_size
+                else all_objects
             )
 
-        if not all_objects:
+        if not sample:
             typer.echo("    ✗ No copyable objects found in backup bucket", err=True)
             any_failure = True
             continue
 
-        sample = (
-            random.sample(all_objects, sample_size)
-            if len(all_objects) >= sample_size
-            else all_objects
-        )
         if len(sample) < sample_size:
             typer.echo(
                 f"    Sample reduced to {len(sample)} (fewer copyable objects than requested)"
