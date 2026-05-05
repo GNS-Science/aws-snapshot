@@ -9,6 +9,7 @@ from typing import Any
 
 import boto3
 
+from nzshm_backup.integrity import OPERATIONAL_PREFIXES
 from nzshm_backup.inventory_state import _expected_prefix
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,13 @@ _SYMLINK_DT_RE = re.compile(r"/hive/dt=([^/]+)/symlink\.txt$")
 
 # S3 multipart-copy minimum part size (5 MB), except for the last part.
 _MIN_PART_BYTES = 5 * 1024 * 1024
+
+# SQL fragment for filtering current (non-deleted) objects in inventory.
+# Non-versioned buckets have NULL is_latest/is_delete_marker.
+_VERSION_FILTER = (
+    "(is_latest = true OR is_latest IS NULL)"
+    " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
+)
 
 # All characters that urllib.parse.quote(key, safe='/') encodes.
 # '%' MUST be first to avoid double-encoding.  Generated from:
@@ -114,7 +122,7 @@ def _run_athena_query(
     if database:
         request["QueryExecutionContext"] = {"Database": database}
     response = athena_client.start_query_execution(**request)
-    return response["QueryExecutionId"]
+    return str(response["QueryExecutionId"])
 
 
 def _wait_for_athena_query(
@@ -519,25 +527,19 @@ def build_inventory_manifest_via_athena(
         athena_client, output_location, database,
         source_table, control_bucket, source_hive_root, source_dt,
     )
-    if backup_dt is not None:
+    if backup_dt is not None and backup_hive_root is not None:
         _ensure_partition(
             athena_client, output_location, database,
             backup_table, control_bucket, backup_hive_root, backup_dt,
         )
 
     # Build filters
-    _src_filter = (
-        f"dt = '{source_dt}'"
-        " AND (is_latest = true OR is_latest IS NULL)"
-        " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
+    _src_filter = f"dt = '{source_dt}' AND {_VERSION_FILTER}"
+    _prefix_exclusions = " AND ".join(
+        f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES
     )
     _dst_filter = (
-        f"dt = '{backup_dt}'"
-        " AND (is_latest = true OR is_latest IS NULL)"
-        " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
-        " AND key NOT LIKE '_manifests/%'"
-        " AND key NOT LIKE '_batch-reports/%'"
-        " AND key NOT LIKE '_state/%'"
+        f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {_prefix_exclusions}"
     ) if backup_dt else None
 
     _backup_table = backup_table if backup_dt else None
@@ -632,9 +634,6 @@ _ARCHIVED_STORAGE_CLASSES = frozenset({
     "GLACIER", "DEEP_ARCHIVE", "GLACIER_IR",
 })
 
-# Prefixes used by the backup system itself (not user data)
-_OPERATIONAL_PREFIXES = ("_state/", "_manifests/", "_batch-reports/", "_events/")
-
 
 def sample_objects_via_inventory(
     session: boto3.Session,
@@ -678,21 +677,17 @@ def sample_objects_via_inventory(
 
     # Build exclusion filters
     prefix_filters = " AND ".join(
-        f"key NOT LIKE '{p}%'" for p in _OPERATIONAL_PREFIXES
+        f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES
     )
     storage_filters = " AND ".join(
         f"storage_class <> '{sc}'" for sc in sorted(_ARCHIVED_STORAGE_CLASSES)
-    )
-    version_filter = (
-        "(is_latest = true OR is_latest IS NULL)"
-        " AND (is_delete_marker = false OR is_delete_marker IS NULL)"
     )
 
     query = f"""
 SELECT key, e_tag, size
 FROM {table}
 WHERE dt = '{backup_dt}'
-  AND {version_filter}
+  AND {_VERSION_FILTER}
   AND {prefix_filters}
   AND ({storage_filters} OR storage_class IS NULL)
 ORDER BY RAND()
