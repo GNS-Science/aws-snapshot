@@ -1,3 +1,3 @@
 """NSHM Backup Solution."""
 
-__version__ = "0.1.0"
+from nzshm_backup._version import __version__  # noqa: F401

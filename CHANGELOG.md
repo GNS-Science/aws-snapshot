@@ -4,6 +4,30 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Changed
+
+- **Migrated from Poetry to uv** — build backend switched from `poetry-core` to
+  `hatchling`, dev dependencies moved to `[dependency-groups]` (PEP 735), lockfile
+  is now `uv.lock`.
+- **Replaced black with ruff format** — single tool for both formatting and linting.
+- Added tox configuration (`setup.cfg`) with `py310`/`py311`/`py312`, `format`,
+  `lint`, `build-linux`/`build-macos`, and `audit` environments.
+- Added GitHub Actions CI workflow (`.github/workflows/dev.yml`) using
+  `GNS-Science/nshm-github-actions/.github/workflows/python-run-tests-uv.yml`.
+- Added `tox`, `tox-uv`, and `pip-audit` to dev dependency group.
+
+### Fixed
+
+- Tests in `test_schedule.py`, `test_cli.py`, and `test_lambda_handler.py` now set
+  `AWS_DEFAULT_REGION` — previously failed with `NoRegionError` when `boto3.Session()`
+  was created without an explicit region.
+- Mypy errors in `inventory_state.py` (no-any-return) and `schedule.py`
+  (incompatible type assignment) resolved.
+
+---
+
+## Previous (pre-migration)
+
 ### Added
 
 - `backup schedule add` now supports `--target codebuild` for EventBridge -> CodeBuild

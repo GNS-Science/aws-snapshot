@@ -146,7 +146,9 @@ def test_backup_engine_dry_run_dynamodb_no_export():
         s3 = session.client("s3", region_name=REGION)
         buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
         export_bucket = config.sources["testsrc"].get_dynamodb_backup_bucket_name(
-            "testsrc", REGION, ACCOUNT_ID  # bb-testsrc-dynamo-{region}-{account}
+            "testsrc",
+            REGION,
+            ACCOUNT_ID,  # bb-testsrc-dynamo-{region}-{account}
         )
         assert export_bucket not in buckets
 
