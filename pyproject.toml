@@ -1,6 +1,6 @@
 [project]
 name = "nzshm-backup"
-version = "0.1.0"
+dynamic = ["version"]
 description = "AWS-native backup solution for NSHM datasets"
 authors = [
     {name = "NSHM DevOps Team", email = "admin@gns-nsdm.org.nz"}
@@ -40,8 +40,14 @@ dev = [
 backup = "nzshm_backup.cli:app"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/nzshm_backup/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nzshm_backup"]
