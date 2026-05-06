@@ -17,8 +17,9 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def mock_aws_session():
+def mock_aws_session(monkeypatch):
     """Activate moto mock for all tests in this module."""
+    monkeypatch.setenv("AWS_DEFAULT_REGION", REGION)
     with mock_aws():
         yield
 

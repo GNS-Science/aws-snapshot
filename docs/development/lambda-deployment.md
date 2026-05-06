@@ -55,11 +55,11 @@ sls --version
 sls plugin install -n serverless-python-requirements
 ```
 
-### 4. Poetry (used by serverless-python-requirements to package deps)
+### 4. uv (used by serverless-python-requirements to package deps)
 
 ```bash
-pip install poetry    # or: brew install poetry
-poetry --version
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv --version
 ```
 
 ---
@@ -208,9 +208,9 @@ Serverless does not read SSO profiles from `~/.aws/config`. You must use the
 `eval` export approach above.
 
 **`serverless-python-requirements` packaging fails**
-Ensure Poetry is installed and `poetry.lock` is up to date:
+Ensure uv is installed and `uv.lock` is up to date:
 ```bash
-poetry lock --no-update
+uv lock
 sls deploy
 ```
 

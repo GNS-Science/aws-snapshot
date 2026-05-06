@@ -15,7 +15,7 @@ uv sync --all-extras      # install all deps (replaces poetry install)
 # Common workflows via Makefile
 make test                 # run pytest
 make lint                 # ruff + mypy
-make fmt                  # black + ruff --fix
+make fmt                  # ruff format + ruff --fix
 make check                # lint then test
 make upgrade              # upgrade deps with 1-week safety margin (--exclude-newer)
 
@@ -53,7 +53,7 @@ Propose a commit after each logical unit of work is verified working. Check `git
 
 ## Code Style
 
-- Line length: 100 (black + ruff)
+- Line length: 100 (ruff)
 - Target Python: 3.10+
 - Type annotations expected (mypy configured)
 - Ruff selects: E, F, W, I, N, UP, B, C4

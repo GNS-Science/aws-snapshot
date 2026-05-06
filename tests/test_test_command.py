@@ -16,6 +16,7 @@ from nzshm_backup.commands.test import (
 def _reset_global_state():
     """Reset singleton state before each test to avoid dry_run leaks."""
     from nzshm_backup.state import _state
+
     _state.dry_run = False
     _state.verbose = False
     _state.output = "text"
@@ -364,9 +365,7 @@ class TestRestoreCommand:
             return_value=sample_data,
         ) as mock_sample:
             runner = CliRunner()
-            runner.invoke(
-                app, ["restore", "--source", "mysource", "--sample-size", "2"]
-            )
+            runner.invoke(app, ["restore", "--source", "mysource", "--sample-size", "2"])
 
         # Should have called the inventory sampler
         mock_sample.assert_called_once()
@@ -377,9 +376,7 @@ class TestRestoreCommand:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_inventory_unavailable_guard(
-        self, mock_config, mock_boto, mock_account
-    ):
+    def test_inventory_unavailable_guard(self, mock_config, mock_boto, mock_account):
         """When inventory is unavailable, should refuse with message."""
         from typer.testing import CliRunner
 
@@ -406,9 +403,7 @@ class TestRestoreCommand:
             side_effect=ValueError("No inventory data"),
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                app, ["restore", "--source", "mysource"]
-            )
+            result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert result.exit_code == 1
         assert "Inventory unavailable" in result.stderr
@@ -449,9 +444,7 @@ class TestRestoreCommand:
         mock_boto.Session.return_value.client.return_value = s3_mock
 
         runner = CliRunner()
-        result = runner.invoke(
-            app, ["restore", "--source", "mysource", "--dry-run"]
-        )
+        result = runner.invoke(app, ["restore", "--source", "mysource", "--dry-run"])
         assert "DRY RUN" in result.output
         s3_mock.create_bucket.assert_not_called()
 
@@ -477,9 +470,7 @@ class TestRestoreCommand:
         mock_config.return_value = cfg
 
         runner = CliRunner()
-        result = runner.invoke(
-            app, ["restore", "--source", "mysource", "--use-batch"]
-        )
+        result = runner.invoke(app, ["restore", "--source", "mysource", "--use-batch"])
         assert result.exit_code == 1
         assert "s3_batch_role_arn" in result.stderr
 
@@ -517,9 +508,7 @@ class TestIntegrityDirtyResults:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_missing_objects_reported(
-        self, mock_config, mock_boto, mock_account, mock_integrity
-    ):
+    def test_missing_objects_reported(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
         from nzshm_backup.commands.test import app
@@ -551,9 +540,7 @@ class TestIntegrityDirtyResults:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_etag_mismatches_reported(
-        self, mock_config, mock_boto, mock_account, mock_integrity
-    ):
+    def test_etag_mismatches_reported(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
         from nzshm_backup.commands.test import app
@@ -569,8 +556,10 @@ class TestIntegrityDirtyResults:
         result_obj.mismatch_count = 1
         result_obj.errors = []
         diff1 = MagicMock(
-            issue="etag_mismatch", key="bad.txt",
-            source_etag='"aaa"', backup_etag='"bbb"',
+            issue="etag_mismatch",
+            key="bad.txt",
+            source_etag='"aaa"',
+            backup_etag='"bbb"',
         )
         result_obj.diffs = [diff1]
         mock_integrity.return_value = result_obj
@@ -586,9 +575,7 @@ class TestIntegrityDirtyResults:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_integrity_errors_reported(
-        self, mock_config, mock_boto, mock_account, mock_integrity
-    ):
+    def test_integrity_errors_reported(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
         from nzshm_backup.commands.test import app
@@ -617,18 +604,14 @@ class TestIntegrityDynamoDB:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_dynamodb_pitr_enabled(
-        self, mock_config, mock_boto, mock_account, mock_integrity
-    ):
+    def test_dynamodb_pitr_enabled(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
         from nzshm_backup.commands.test import app
 
         cfg, source_cfg = _make_integrity_mocks()
         source_cfg.s3_buckets = []
-        source_cfg.dynamodb_tables = [
-            "arn:aws:dynamodb:ap-southeast-2:123:table/MyTable"
-        ]
+        source_cfg.dynamodb_tables = ["arn:aws:dynamodb:ap-southeast-2:123:table/MyTable"]
         mock_config.return_value = cfg
 
         mock_dynamo = MagicMock()
@@ -658,18 +641,14 @@ class TestIntegrityDynamoDB:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_dynamodb_pitr_disabled(
-        self, mock_config, mock_boto, mock_account, mock_integrity
-    ):
+    def test_dynamodb_pitr_disabled(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
         from nzshm_backup.commands.test import app
 
         cfg, source_cfg = _make_integrity_mocks()
         source_cfg.s3_buckets = []
-        source_cfg.dynamodb_tables = [
-            "arn:aws:dynamodb:ap-southeast-2:123:table/MyTable"
-        ]
+        source_cfg.dynamodb_tables = ["arn:aws:dynamodb:ap-southeast-2:123:table/MyTable"]
         mock_config.return_value = cfg
 
         mock_dynamo = MagicMock()
@@ -694,18 +673,14 @@ class TestIntegrityDynamoDB:
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
-    def test_dynamodb_pitr_check_error(
-        self, mock_config, mock_boto, mock_account, mock_integrity
-    ):
+    def test_dynamodb_pitr_check_error(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
         from nzshm_backup.commands.test import app
 
         cfg, source_cfg = _make_integrity_mocks()
         source_cfg.s3_buckets = []
-        source_cfg.dynamodb_tables = [
-            "arn:aws:dynamodb:ap-southeast-2:123:table/MyTable"
-        ]
+        source_cfg.dynamodb_tables = ["arn:aws:dynamodb:ap-southeast-2:123:table/MyTable"]
         mock_config.return_value = cfg
 
         mock_dynamo = MagicMock()
@@ -754,8 +729,13 @@ class TestRestoreDirectCopy:
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
     def test_direct_copy_success(
-        self, mock_config, mock_boto, mock_account, mock_event,
-        mock_verify, mock_cleanup,
+        self,
+        mock_config,
+        mock_boto,
+        mock_account,
+        mock_event,
+        mock_verify,
+        mock_cleanup,
     ):
         from typer.testing import CliRunner
 
@@ -777,9 +757,7 @@ class TestRestoreDirectCopy:
             return_value=sample,
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                app, ["restore", "--source", "mysource"]
-            )
+            result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert "2 objects copied and verified" in result.output
         assert mock_s3.copy_object.call_count == 2
@@ -791,7 +769,12 @@ class TestRestoreDirectCopy:
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
     def test_direct_copy_error(
-        self, mock_config, mock_boto, mock_account, mock_event, mock_cleanup,
+        self,
+        mock_config,
+        mock_boto,
+        mock_account,
+        mock_event,
+        mock_cleanup,
     ):
         from typer.testing import CliRunner
 
@@ -811,9 +794,7 @@ class TestRestoreDirectCopy:
             return_value=sample,
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                app, ["restore", "--source", "mysource"]
-            )
+            result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert result.exit_code == 1
         assert "copy error" in result.output.lower()
@@ -829,8 +810,13 @@ class TestRestoreDirectCopy:
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
     def test_direct_copy_etag_mismatch(
-        self, mock_config, mock_boto, mock_account, mock_event,
-        mock_verify, mock_cleanup,
+        self,
+        mock_config,
+        mock_boto,
+        mock_account,
+        mock_event,
+        mock_verify,
+        mock_cleanup,
     ):
         from typer.testing import CliRunner
 
@@ -849,9 +835,7 @@ class TestRestoreDirectCopy:
             return_value=sample,
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                app, ["restore", "--source", "mysource"]
-            )
+            result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert result.exit_code == 1
         assert "mismatch" in result.output.lower()
@@ -861,7 +845,11 @@ class TestRestoreDirectCopy:
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
     def test_temp_bucket_creation_failure(
-        self, mock_config, mock_boto, mock_account, mock_event,
+        self,
+        mock_config,
+        mock_boto,
+        mock_account,
+        mock_event,
     ):
         from typer.testing import CliRunner
 
@@ -881,9 +869,7 @@ class TestRestoreDirectCopy:
             return_value=sample,
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                app, ["restore", "--source", "mysource"]
-            )
+            result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert result.exit_code == 1
         assert "Failed to create temp bucket" in result.output
@@ -893,7 +879,11 @@ class TestRestoreDirectCopy:
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
     def test_no_copyable_objects(
-        self, mock_config, mock_boto, mock_account, mock_event,
+        self,
+        mock_config,
+        mock_boto,
+        mock_account,
+        mock_event,
     ):
         from typer.testing import CliRunner
 
@@ -903,15 +893,11 @@ class TestRestoreDirectCopy:
         mock_config.return_value = cfg
 
         mock_s3 = MagicMock()
-        mock_s3.get_paginator.return_value.paginate.return_value = [
-            {"Contents": []}
-        ]
+        mock_s3.get_paginator.return_value.paginate.return_value = [{"Contents": []}]
         mock_boto.Session.return_value.client.return_value = mock_s3
 
         runner = CliRunner()
-        result = runner.invoke(
-            app, ["restore", "--source", "mysource"]
-        )
+        result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert result.exit_code == 1
         assert "No copyable objects" in result.output
@@ -930,7 +916,11 @@ class TestRestoreDynamoDB:
     @patch("nzshm_backup.commands.test.boto3")
     @patch("nzshm_backup.commands.test.load_config")
     def test_dynamodb_pitr_and_export_check(
-        self, mock_config, mock_boto, mock_account, mock_event,
+        self,
+        mock_config,
+        mock_boto,
+        mock_account,
+        mock_event,
     ):
         from typer.testing import CliRunner
 
@@ -941,9 +931,7 @@ class TestRestoreDynamoDB:
         cfg.sources["mysource"].dynamodb_tables = [
             "arn:aws:dynamodb:ap-southeast-2:123:table/TestTable"
         ]
-        cfg.sources["mysource"].get_dynamodb_backup_bucket_name.return_value = (
-            "bb-test-dynamo"
-        )
+        cfg.sources["mysource"].get_dynamodb_backup_bucket_name.return_value = "bb-test-dynamo"
         mock_config.return_value = cfg
 
         mock_dynamo = MagicMock()
@@ -967,9 +955,7 @@ class TestRestoreDynamoDB:
         mock_boto.Session.return_value.client.side_effect = client_factory
 
         runner = CliRunner()
-        result = runner.invoke(
-            app, ["restore", "--source", "mysource"]
-        )
+        result = runner.invoke(app, ["restore", "--source", "mysource"])
 
         assert "PITR enabled" in result.output
         assert "export bucket accessible" in result.output

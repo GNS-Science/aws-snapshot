@@ -123,7 +123,11 @@ def write_manifest_to_s3(
                 logger.info(
                     "Manifest progress: %s rows written (%s), %s parts uploaded, "
                     "%.0fs elapsed (%.0f%% of 15m Lambda timeout)",
-                    f"{row_count:,}", rows_str, part_number - 1, elapsed, pct_timeout,
+                    f"{row_count:,}",
+                    rows_str,
+                    part_number - 1,
+                    elapsed,
+                    pct_timeout,
                 )
             if len(buffer) >= _MULTIPART_CHUNK:
                 resp = s3_client.upload_part(
@@ -283,7 +287,10 @@ def batch_backup_source(
 
         logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
         manifest_etag, row_count = write_manifest_to_s3(
-            s3_client, rows, backup_bucket, manifest_key,
+            s3_client,
+            rows,
+            backup_bucket,
+            manifest_key,
         )
         logger.info(f"Manifest written: {row_count} objects, ETag={manifest_etag}")
 

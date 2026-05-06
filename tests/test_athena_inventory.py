@@ -86,7 +86,9 @@ def test_url_encode_via_replace_matches_python_quote(key):
 
 def test_build_unload_query_full_sync():
     q = ai._build_unload_query(
-        "my-bucket", "inv_src", "dt = '2026-05-01'",
+        "my-bucket",
+        "inv_src",
+        "dt = '2026-05-01'",
         "s3://ctrl/_manifests/unload/test/",
     )
     assert "UNLOAD" in q
@@ -98,9 +100,12 @@ def test_build_unload_query_full_sync():
 
 def test_build_unload_query_incremental_diff():
     q = ai._build_unload_query(
-        "my-bucket", "inv_src", "dt = '2026-05-01'",
+        "my-bucket",
+        "inv_src",
+        "dt = '2026-05-01'",
         "s3://ctrl/_manifests/unload/test/",
-        backup_table="inv_dst", dst_filter="dt = '2026-05-01'",
+        backup_table="inv_dst",
+        dst_filter="dt = '2026-05-01'",
     )
     assert "UNLOAD" in q
     assert "LEFT JOIN" in q
@@ -119,8 +124,10 @@ def test_build_count_query_full_sync():
 
 def test_build_count_query_incremental_diff():
     q = ai._build_count_query(
-        "inv_src", "dt = '2026-05-01'",
-        backup_table="inv_dst", dst_filter="dt = '2026-05-01'",
+        "inv_src",
+        "dt = '2026-05-01'",
+        backup_table="inv_dst",
+        dst_filter="dt = '2026-05-01'",
     )
     assert "COUNT(*)" in q
     assert "LEFT JOIN" in q
@@ -154,10 +161,7 @@ def test_concat_unload_parts_single_file():
 
 def test_concat_unload_parts_multiple_large_files():
     s3 = MagicMock()
-    parts = [
-        {"Key": f"prefix/part-{i:05d}.txt", "Size": 10 * 1024 * 1024}
-        for i in range(3)
-    ]
+    parts = [{"Key": f"prefix/part-{i:05d}.txt", "Size": 10 * 1024 * 1024} for i in range(3)]
     s3.get_paginator.return_value.paginate.return_value = [{"Contents": parts}]
     s3.create_multipart_upload.return_value = {"UploadId": "up-123"}
     s3.upload_part_copy.return_value = {"CopyPartResult": {"ETag": '"p1"'}}
@@ -234,9 +238,7 @@ def test_build_inventory_manifest_via_athena_runs_unload_and_count():
     athena = MagicMock()
     athena.get_query_execution.return_value = {
         "QueryExecution": {
-            "ResultConfiguration": {
-                "OutputLocation": "s3://ctrl/athena-results/count.csv"
-            }
+            "ResultConfiguration": {"OutputLocation": "s3://ctrl/athena-results/count.csv"}
         }
     }
     sts = MagicMock()
@@ -262,16 +264,14 @@ def test_build_inventory_manifest_via_athena_runs_unload_and_count():
             with patch.object(ai, "_ensure_partition"):
                 with patch.object(ai, "_run_athena_query", run_query):
                     with patch.object(ai, "_wait_for_athena_query"):
-                        etag, src_dt, bkp_dt, count = (
-                            ai.build_inventory_manifest_via_athena(
-                                session,
-                                "ths",
-                                "ths-dataset-prod",
-                                "bb-ths-backup",
-                                manifest_bucket="bb-ths-backup",
-                                manifest_key="_manifests/test.csv",
-                                full_sync=False,
-                            )
+                        etag, src_dt, bkp_dt, count = ai.build_inventory_manifest_via_athena(
+                            session,
+                            "ths",
+                            "ths-dataset-prod",
+                            "bb-ths-backup",
+                            manifest_bucket="bb-ths-backup",
+                            manifest_key="_manifests/test.csv",
+                            full_sync=False,
                         )
 
     assert src_dt == "2026-04-23-01-00"
@@ -345,9 +345,7 @@ def test_ensure_inventory_table_runs_create_db_drop_and_create():
     """Should run CREATE DATABASE, DROP TABLE, then CREATE EXTERNAL TABLE."""
     athena = MagicMock()
     query_ids = iter(["q1", "q2", "q3"])
-    athena.start_query_execution.side_effect = lambda **kw: {
-        "QueryExecutionId": next(query_ids)
-    }
+    athena.start_query_execution.side_effect = lambda **kw: {"QueryExecutionId": next(query_ids)}
 
     with patch.object(ai, "_wait_for_athena_query"):
         ai._ensure_inventory_table(
@@ -427,7 +425,9 @@ def test_multipart_copy_concat_aborts_on_error():
         ai._multipart_copy_concat(s3, "src", parts, "dest", "manifest.csv")
 
     s3.abort_multipart_upload.assert_called_once_with(
-        Bucket="dest", Key="manifest.csv", UploadId="up-err",
+        Bucket="dest",
+        Key="manifest.csv",
+        UploadId="up-err",
     )
 
 
@@ -500,18 +500,14 @@ def test_read_count_result_unquoted():
 
 def test_wait_for_athena_query_succeeded():
     athena = MagicMock()
-    athena.get_query_execution.return_value = {
-        "QueryExecution": {"Status": {"State": "SUCCEEDED"}}
-    }
+    athena.get_query_execution.return_value = {"QueryExecution": {"Status": {"State": "SUCCEEDED"}}}
     ai._wait_for_athena_query(athena, "qid-1")  # should not raise
 
 
 def test_wait_for_athena_query_failed():
     athena = MagicMock()
     athena.get_query_execution.return_value = {
-        "QueryExecution": {
-            "Status": {"State": "FAILED", "StateChangeReason": "syntax error"}
-        }
+        "QueryExecution": {"Status": {"State": "FAILED", "StateChangeReason": "syntax error"}}
     }
     with pytest.raises(RuntimeError, match="FAILED.*syntax error"):
         ai._wait_for_athena_query(athena, "qid-2")
@@ -519,9 +515,7 @@ def test_wait_for_athena_query_failed():
 
 def test_wait_for_athena_query_timeout():
     athena = MagicMock()
-    athena.get_query_execution.return_value = {
-        "QueryExecution": {"Status": {"State": "RUNNING"}}
-    }
+    athena.get_query_execution.return_value = {"QueryExecution": {"Status": {"State": "RUNNING"}}}
     with patch("nzshm_backup.athena_inventory.time") as mock_time:
         mock_time.time.side_effect = [0, 0, 1000]  # start, check, past deadline
         mock_time.sleep = MagicMock()
@@ -537,9 +531,7 @@ def test_wait_for_athena_query_timeout():
 def test_run_athena_query_with_database():
     athena = MagicMock()
     athena.start_query_execution.return_value = {"QueryExecutionId": "qid-99"}
-    result = ai._run_athena_query(
-        athena, "SELECT 1", "s3://output/", database="mydb"
-    )
+    result = ai._run_athena_query(athena, "SELECT 1", "s3://output/", database="mydb")
     assert result == "qid-99"
     call_kwargs = athena.start_query_execution.call_args.kwargs
     assert call_kwargs["QueryExecutionContext"] == {"Database": "mydb"}
@@ -568,14 +560,14 @@ def test_sample_objects_via_inventory():
 
     session = MagicMock()
     session.client.side_effect = lambda svc, **kw: {
-        "s3": s3, "athena": athena, "sts": sts,
+        "s3": s3,
+        "athena": athena,
+        "sts": sts,
     }[svc]
 
     # Athena result CSV
     csv_data = (
-        b'"key","e_tag","size"\n'
-        b'"data/file1.txt","abc123",1024\n'
-        b'"data/file2.txt","def456",2048\n'
+        b'"key","e_tag","size"\n"data/file1.txt","abc123",1024\n"data/file2.txt","def456",2048\n'
     )
     result_body = MagicMock()
     result_body.read.return_value = csv_data
@@ -583,14 +575,13 @@ def test_sample_objects_via_inventory():
 
     athena.get_query_execution.return_value = {
         "QueryExecution": {
-            "ResultConfiguration": {
-                "OutputLocation": "s3://ctrl/athena-results/result.csv"
-            }
+            "ResultConfiguration": {"OutputLocation": "s3://ctrl/athena-results/result.csv"}
         }
     }
 
     with patch.object(
-        ai, "_latest_inventory_partition",
+        ai,
+        "_latest_inventory_partition",
         return_value=("2026-04-25-01-00", "inventory/backup/hive/"),
     ):
         with patch.object(ai, "_ensure_inventory_table"):
@@ -598,7 +589,10 @@ def test_sample_objects_via_inventory():
                 with patch.object(ai, "_run_athena_query", return_value="sample-qid"):
                     with patch.object(ai, "_wait_for_athena_query"):
                         objects = ai.sample_objects_via_inventory(
-                            session, "ths", "backup-bucket", sample_size=2,
+                            session,
+                            "ths",
+                            "backup-bucket",
+                            sample_size=2,
                         )
 
     assert len(objects) == 2
@@ -617,16 +611,22 @@ def test_sample_objects_via_inventory_no_partitions():
 
     session = MagicMock()
     session.client.side_effect = lambda svc, **kw: {
-        "s3": s3, "athena": athena, "sts": sts,
+        "s3": s3,
+        "athena": athena,
+        "sts": sts,
     }[svc]
 
     with patch.object(
-        ai, "_latest_inventory_partition",
+        ai,
+        "_latest_inventory_partition",
         side_effect=ValueError("No inventory data"),
     ):
         with pytest.raises(ValueError, match="No inventory data"):
             ai.sample_objects_via_inventory(
-                session, "ths", "backup-bucket", sample_size=5,
+                session,
+                "ths",
+                "backup-bucket",
+                sample_size=5,
             )
 
 
@@ -656,7 +656,9 @@ def test_build_inventory_manifest_zero_rows():
 
     session = MagicMock()
     session.client.side_effect = lambda svc, **kw: {
-        "s3": s3, "athena": athena, "sts": sts,
+        "s3": s3,
+        "athena": athena,
+        "sts": sts,
     }[svc]
 
     # count result returns 0
@@ -668,14 +670,13 @@ def test_build_inventory_manifest_zero_rows():
 
     athena.get_query_execution.return_value = {
         "QueryExecution": {
-            "ResultConfiguration": {
-                "OutputLocation": "s3://ctrl/athena-results/count.csv"
-            }
+            "ResultConfiguration": {"OutputLocation": "s3://ctrl/athena-results/count.csv"}
         }
     }
 
     with patch.object(
-        ai, "_latest_inventory_partition",
+        ai,
+        "_latest_inventory_partition",
         side_effect=[
             ("2026-04-25-01-00", "inv/source/hive/"),
             ("2026-04-25-01-00", "inv/backup/hive/"),
@@ -684,16 +685,18 @@ def test_build_inventory_manifest_zero_rows():
         with patch.object(ai, "_ensure_inventory_table"):
             with patch.object(ai, "_ensure_partition"):
                 with patch.object(
-                    ai, "_run_athena_query",
+                    ai,
+                    "_run_athena_query",
                     side_effect=["unload-qid", "count-qid"],
                 ):
                     with patch.object(ai, "_wait_for_athena_query"):
-                        etag, src_dt, bkp_dt, count = (
-                            ai.build_inventory_manifest_via_athena(
-                                session, "ths", "src-bucket", "backup-bucket",
-                                manifest_bucket="backup-bucket",
-                                manifest_key="_manifests/test.csv",
-                            )
+                        etag, src_dt, bkp_dt, count = ai.build_inventory_manifest_via_athena(
+                            session,
+                            "ths",
+                            "src-bucket",
+                            "backup-bucket",
+                            manifest_bucket="backup-bucket",
+                            manifest_key="_manifests/test.csv",
                         )
 
     assert etag is None

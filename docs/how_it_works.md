@@ -7,7 +7,7 @@ two ways to invoke it:
 
 ```
 CLI mode (manual, on-demand):
-  your terminal → poetry run backup run → boto3 → S3 / DynamoDB APIs
+  your terminal → uv run backup run → boto3 → S3 / DynamoDB APIs
 
 Lambda mode (scheduled, automated):
   EventBridge cron → Lambda invocation → same Python code → boto3 → S3 / DynamoDB APIs
