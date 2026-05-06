@@ -200,8 +200,7 @@ def _ensure_partition(
 ) -> None:
     location = f"s3://{control_bucket}/{hive_root}dt={dt}/"
     query = (
-        f"ALTER TABLE {table_name} ADD IF NOT EXISTS PARTITION (dt='{dt}') "
-        f"LOCATION '{location}'"
+        f"ALTER TABLE {table_name} ADD IF NOT EXISTS PARTITION (dt='{dt}') LOCATION '{location}'"
     )
     qid = _run_athena_query(athena_client, query, output_location, database=database)
     _wait_for_athena_query(athena_client, qid)
@@ -210,6 +209,7 @@ def _ensure_partition(
 # ---------------------------------------------------------------------------
 # URL-encoding helper for Athena SQL
 # ---------------------------------------------------------------------------
+
 
 def _build_url_encode_sql(column: str) -> str:
     """Build a nested REPLACE() chain that URL-encodes special characters.
@@ -336,6 +336,7 @@ WHERE {src_filter}
 # S3 multipart-copy concatenation
 # ---------------------------------------------------------------------------
 
+
 def _list_unload_parts(s3_client, bucket: str, prefix: str) -> list[dict]:
     """List all UNLOAD output objects under *prefix*, sorted by key."""
     parts: list[dict] = []
@@ -376,9 +377,7 @@ def _concat_unload_parts(
         return resp["CopyObjectResult"]["ETag"], parts[0]["Size"]
 
     # Check if all non-last parts meet the 5 MB minimum for UploadPartCopy
-    can_multipart_copy = all(
-        p["Size"] >= _MIN_PART_BYTES for p in parts[:-1]
-    )
+    can_multipart_copy = all(p["Size"] >= _MIN_PART_BYTES for p in parts[:-1])
 
     if can_multipart_copy:
         return _multipart_copy_concat(s3_client, control_bucket, parts, dest_bucket, manifest_key)
@@ -395,7 +394,9 @@ def _multipart_copy_concat(
 ) -> tuple[str, int]:
     """Concatenate via S3 UploadPartCopy (server-side, no data through Lambda)."""
     mpu = s3_client.create_multipart_upload(
-        Bucket=dest_bucket, Key=manifest_key, ContentType="text/csv",
+        Bucket=dest_bucket,
+        Key=manifest_key,
+        ContentType="text/csv",
     )
     upload_id = mpu["UploadId"]
     uploaded: list[dict] = []
@@ -422,7 +423,9 @@ def _multipart_copy_concat(
         return result["ETag"], total_bytes
     except Exception:
         s3_client.abort_multipart_upload(
-            Bucket=dest_bucket, Key=manifest_key, UploadId=upload_id,
+            Bucket=dest_bucket,
+            Key=manifest_key,
+            UploadId=upload_id,
         )
         raise
 
@@ -441,7 +444,10 @@ def _download_and_upload(
         buf += body.read()
 
     resp = s3_client.put_object(
-        Bucket=dest_bucket, Key=manifest_key, Body=buf, ContentType="text/csv",
+        Bucket=dest_bucket,
+        Key=manifest_key,
+        Body=buf,
+        ContentType="text/csv",
     )
     return resp["ETag"], len(buf)
 
@@ -467,6 +473,7 @@ def _cleanup_unload_parts(s3_client, bucket: str, prefix: str) -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+
 def build_inventory_manifest_via_athena(
     session: boto3.Session,
     source_alias: str,
@@ -491,12 +498,16 @@ def build_inventory_manifest_via_athena(
     backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
 
     source_dt, source_hive_root = _latest_inventory_partition(
-        s3_client, control_bucket, source_prefix,
+        s3_client,
+        control_bucket,
+        source_prefix,
     )
 
     try:
         backup_dt, backup_hive_root = _latest_inventory_partition(
-            s3_client, control_bucket, backup_prefix,
+            s3_client,
+            control_bucket,
+            backup_prefix,
         )
     except ValueError:
         logger.info(
@@ -509,67 +520,96 @@ def build_inventory_manifest_via_athena(
     database = "nzshm_backup_inventory"
     source_table = _table_name(source_alias, "source", source_bucket)
     backup_table = _table_name(source_alias, "backup", backup_bucket)
-    output_location = (
-        f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
-    )
+    output_location = f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
 
     # Ensure tables and partitions
     _ensure_inventory_table(
-        athena_client, output_location, database,
-        source_table, control_bucket, source_hive_root,
+        athena_client,
+        output_location,
+        database,
+        source_table,
+        control_bucket,
+        source_hive_root,
     )
     if backup_hive_root is not None:
         _ensure_inventory_table(
-            athena_client, output_location, database,
-            backup_table, control_bucket, backup_hive_root,
+            athena_client,
+            output_location,
+            database,
+            backup_table,
+            control_bucket,
+            backup_hive_root,
         )
     _ensure_partition(
-        athena_client, output_location, database,
-        source_table, control_bucket, source_hive_root, source_dt,
+        athena_client,
+        output_location,
+        database,
+        source_table,
+        control_bucket,
+        source_hive_root,
+        source_dt,
     )
     if backup_dt is not None and backup_hive_root is not None:
         _ensure_partition(
-            athena_client, output_location, database,
-            backup_table, control_bucket, backup_hive_root, backup_dt,
+            athena_client,
+            output_location,
+            database,
+            backup_table,
+            control_bucket,
+            backup_hive_root,
+            backup_dt,
         )
 
     # Build filters
     _src_filter = f"dt = '{source_dt}' AND {_VERSION_FILTER}"
-    _prefix_exclusions = " AND ".join(
-        f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES
-    )
+    _prefix_exclusions = " AND ".join(f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES)
     _dst_filter = (
-        f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {_prefix_exclusions}"
-    ) if backup_dt else None
+        (f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {_prefix_exclusions}")
+        if backup_dt
+        else None
+    )
 
     _backup_table = backup_table if backup_dt else None
 
     # Run UNLOAD and COUNT(*) in parallel
-    unload_prefix = (
-        f"_manifests/unload/{source_alias}/{source_bucket}/"
-    )
+    unload_prefix = f"_manifests/unload/{source_alias}/{source_bucket}/"
     # Clean any stale output from a previous failed run
     _cleanup_unload_parts(s3_client, control_bucket, unload_prefix)
 
     unload_location = f"s3://{control_bucket}/{unload_prefix}"
     unload_query = _build_unload_query(
-        source_bucket, source_table, _src_filter, unload_location,
-        backup_table=_backup_table, dst_filter=_dst_filter,
+        source_bucket,
+        source_table,
+        _src_filter,
+        unload_location,
+        backup_table=_backup_table,
+        dst_filter=_dst_filter,
     )
     count_query = _build_count_query(
-        source_table, _src_filter,
-        backup_table=_backup_table, dst_filter=_dst_filter,
+        source_table,
+        _src_filter,
+        backup_table=_backup_table,
+        dst_filter=_dst_filter,
     )
 
     unload_qid = _run_athena_query(
-        athena_client, unload_query, output_location, database=database,
+        athena_client,
+        unload_query,
+        output_location,
+        database=database,
     )
     count_qid = _run_athena_query(
-        athena_client, count_query, output_location, database=database,
+        athena_client,
+        count_query,
+        output_location,
+        database=database,
     )
     logger.info(
         "Athena UNLOAD started for %s/%s: unload_qid=%s, count_qid=%s",
-        source_alias, source_bucket, unload_qid, count_qid,
+        source_alias,
+        source_bucket,
+        unload_qid,
+        count_qid,
     )
 
     _wait_for_athena_query(athena_client, unload_qid)
@@ -582,9 +622,12 @@ def build_inventory_manifest_via_athena(
 
     backup_dt_str = backup_dt or "none (first backup)"
     logger.info(
-        "Athena UNLOAD complete for %s/%s: source_dt=%s, backup_dt=%s, "
-        "row_count=%s, unload_qid=%s",
-        source_alias, source_bucket, source_dt, backup_dt_str, f"{row_count:,}",
+        "Athena UNLOAD complete for %s/%s: source_dt=%s, backup_dt=%s, row_count=%s, unload_qid=%s",
+        source_alias,
+        source_bucket,
+        source_dt,
+        backup_dt_str,
+        f"{row_count:,}",
         unload_qid,
     )
 
@@ -594,7 +637,11 @@ def build_inventory_manifest_via_athena(
 
     # Concatenate UNLOAD parts into single manifest
     result = _concat_unload_parts(
-        s3_client, control_bucket, unload_prefix, manifest_bucket, manifest_key,
+        s3_client,
+        control_bucket,
+        unload_prefix,
+        manifest_bucket,
+        manifest_key,
     )
     _cleanup_unload_parts(s3_client, control_bucket, unload_prefix)
 
@@ -605,7 +652,10 @@ def build_inventory_manifest_via_athena(
     manifest_etag, total_bytes = result
     logger.info(
         "Manifest concatenated: s3://%s/%s (%s bytes, %s rows, etag=%s)",
-        manifest_bucket, manifest_key, f"{total_bytes:,}", f"{row_count:,}",
+        manifest_bucket,
+        manifest_key,
+        f"{total_bytes:,}",
+        f"{row_count:,}",
         manifest_etag,
     )
     return manifest_etag, source_dt, backup_dt, row_count
@@ -630,9 +680,13 @@ def _read_count_result(s3_client, result_location: str) -> int:
 # Inventory-based random sampling for test commands
 # ---------------------------------------------------------------------------
 
-_ARCHIVED_STORAGE_CLASSES = frozenset({
-    "GLACIER", "DEEP_ARCHIVE", "GLACIER_IR",
-})
+_ARCHIVED_STORAGE_CLASSES = frozenset(
+    {
+        "GLACIER",
+        "DEEP_ARCHIVE",
+        "GLACIER_IR",
+    }
+)
 
 
 def sample_objects_via_inventory(
@@ -657,28 +711,35 @@ def sample_objects_via_inventory(
 
     backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
     backup_dt, backup_hive_root = _latest_inventory_partition(
-        s3_client, control_bucket, backup_prefix,
+        s3_client,
+        control_bucket,
+        backup_prefix,
     )
 
     database = "nzshm_backup_inventory"
     table = _table_name(source_alias, "backup", backup_bucket)
-    output_location = (
-        f"s3://{control_bucket}/athena-results/{source_alias}/{backup_bucket}/"
-    )
+    output_location = f"s3://{control_bucket}/athena-results/{source_alias}/{backup_bucket}/"
 
     _ensure_inventory_table(
-        athena_client, output_location, database,
-        table, control_bucket, backup_hive_root,
+        athena_client,
+        output_location,
+        database,
+        table,
+        control_bucket,
+        backup_hive_root,
     )
     _ensure_partition(
-        athena_client, output_location, database,
-        table, control_bucket, backup_hive_root, backup_dt,
+        athena_client,
+        output_location,
+        database,
+        table,
+        control_bucket,
+        backup_hive_root,
+        backup_dt,
     )
 
     # Build exclusion filters
-    prefix_filters = " AND ".join(
-        f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES
-    )
+    prefix_filters = " AND ".join(f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES)
     storage_filters = " AND ".join(
         f"storage_class <> '{sc}'" for sc in sorted(_ARCHIVED_STORAGE_CLASSES)
     )
@@ -698,9 +759,7 @@ LIMIT {sample_size}
     _wait_for_athena_query(athena_client, qid)
 
     execution = athena_client.get_query_execution(QueryExecutionId=qid)
-    result_location = execution["QueryExecution"]["ResultConfiguration"][
-        "OutputLocation"
-    ]
+    result_location = execution["QueryExecution"]["ResultConfiguration"]["OutputLocation"]
 
     # Read Athena result CSV
     result_bucket, result_key = _parse_s3_uri(result_location)
@@ -718,14 +777,19 @@ LIMIT {sample_size}
             etag = row[1].strip('"')
             if not etag.startswith('"'):
                 etag = f'"{etag}"'
-            objects.append({
-                "Key": row[0],
-                "ETag": etag,
-                "Size": int(row[2]) if row[2] else 0,
-            })
+            objects.append(
+                {
+                    "Key": row[0],
+                    "ETag": etag,
+                    "Size": int(row[2]) if row[2] else 0,
+                }
+            )
 
     logger.info(
         "Sampled %d objects from inventory (dt=%s) for %s/%s",
-        len(objects), backup_dt, source_alias, backup_bucket,
+        len(objects),
+        backup_dt,
+        source_alias,
+        backup_bucket,
     )
     return objects

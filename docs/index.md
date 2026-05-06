@@ -15,14 +15,11 @@ AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
 ## Quick Start
 
 ```bash
-# Install with Poetry
-poetry install
-
-# Activate virtual environment
-poetry shell
+# Install with uv
+uv sync --all-extras
 
 # Run the CLI
-backup --help
+uv run backup --help
 ```
 
 ## Key Commands

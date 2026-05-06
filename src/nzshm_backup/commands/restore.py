@@ -385,7 +385,8 @@ def run_restore(
                 typer.echo(f"  {prefix}Would submit PITR restore: {table_name} → {dest_table}")
                 continue
 
-            assert restore_point is not None  # non-dry-run DynamoDB restores require to_point_in_time (checked above)
+            # non-dry-run DynamoDB restores require to_point_in_time (checked above)
+            assert restore_point is not None
 
             if force:
                 try:
@@ -399,8 +400,7 @@ def run_restore(
                         raise
 
             typer.echo(
-                f"  Restoring DynamoDB: {table_name} → {dest_table} "
-                f"at {restore_point.isoformat()}"
+                f"  Restoring DynamoDB: {table_name} → {dest_table} at {restore_point.isoformat()}"
             )
 
             dynamo_result = restore_dynamodb_table(
