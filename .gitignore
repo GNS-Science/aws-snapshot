@@ -13,6 +13,7 @@ site/
 .pytest_cache/
 htmlcov/
 .coverage
+coverage.xml
 
 # Serverless
 .serverless/
