@@ -3,6 +3,7 @@
 __pycache__/
 .DS_Store
 *.egg-info/
+src/nzshm_backup/_version.py
 dist/
 build/
 site/
