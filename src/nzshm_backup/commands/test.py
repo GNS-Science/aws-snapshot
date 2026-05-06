@@ -27,6 +27,52 @@ app = typer.Typer()
 _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
 
 
+_CHECKSUM_KEYS = [
+    "ChecksumCRC64NVME", "ChecksumCRC32", "ChecksumCRC32C",
+    "ChecksumSHA256", "ChecksumSHA1",
+]
+
+
+def _get_object_checksum(s3_client, bucket: str, key: str) -> tuple[str, str] | None:
+    """Return (algorithm, value) for the first available checksum, or None."""
+    try:
+        resp = s3_client.get_object_attributes(
+            Bucket=bucket, Key=key, ObjectAttributes=["Checksum"],
+        )
+        checksum = resp.get("Checksum", {})
+        for ck in _CHECKSUM_KEYS:
+            if ck in checksum and checksum[ck]:
+                return ck, checksum[ck]
+    except Exception:
+        pass
+    return None
+
+
+def _verify_restored_object(
+    s3_client, source_bucket: str, target_bucket: str, key: str, expected_etag: str,
+) -> str | None:
+    """Verify a restored object against its backup source.
+
+    Tries checksum comparison first (content-deterministic), falls back to ETag.
+    Returns an error description string, or None if verification passed.
+    """
+    # Try checksum comparison first (reliable across copy methods)
+    src_ck = _get_object_checksum(s3_client, source_bucket, key)
+    if src_ck:
+        tgt_ck = _get_object_checksum(s3_client, target_bucket, key)
+        if tgt_ck and src_ck[0] == tgt_ck[0]:
+            # Same algorithm — compare values
+            if src_ck[1] == tgt_ck[1]:
+                return None  # checksum match — verified
+            return f"{src_ck[0]} mismatch: {src_ck[1]} != {tgt_ck[1]}"
+
+    # Fall back to ETag comparison
+    head = s3_client.head_object(Bucket=target_bucket, Key=key)
+    if head["ETag"] != expected_etag:
+        return f"ETag mismatch: {head['ETag']} != {expected_etag}"
+    return None
+
+
 @app.command("integrity")
 def test_integrity(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
@@ -83,6 +129,13 @@ def test_integrity(
         )
 
         typer.echo(f"  S3: {source_bucket}  ↔  {backup_bucket}")
+        if source_config.batch_manifest_mode == "inventory":
+            typer.echo(
+                f"    ⚠ Integrity check uses full bucket listing — may be very slow\n"
+                f"      for inventory-mode sources with millions of objects.\n"
+                f"      Use 'backup status --source {source}' for inventory-based health.",
+                err=True,
+            )
         result = check_bucket_integrity(backup_s3, source_bucket, backup_bucket, source_s3)
 
         typer.echo(
@@ -246,35 +299,58 @@ def test_restore(
         )
         typer.echo(f"  Sampling from: {backup_bucket}")
 
-        # Collect copyable objects
-        all_objects: list[dict] = []
-        archived_count = 0
-        paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=backup_bucket):
-            for obj in page.get("Contents", []):
-                if any(obj["Key"].startswith(p) for p in OPERATIONAL_PREFIXES):
-                    continue
-                if obj.get("StorageClass") in _ARCHIVED_STORAGE_CLASSES:
-                    archived_count += 1
-                else:
-                    all_objects.append(obj)
+        # Sample objects — prefer inventory (fast) over full listing (slow)
+        sample: list[dict] = []
+        use_inventory = source_config.batch_manifest_mode == "inventory"
+        if use_inventory:
+            try:
+                from nzshm_backup.athena_inventory import sample_objects_via_inventory
 
-        if archived_count:
-            typer.echo(
-                f"    {archived_count} archived object(s) skipped "
-                f"(Glacier/Deep Archive — not directly copyable)"
+                typer.echo("    Sampling via inventory (Athena)...")
+                sample = sample_objects_via_inventory(
+                    session, source, backup_bucket, sample_size=sample_size,
+                )
+            except (ValueError, Exception) as e:
+                typer.echo(
+                    f"    ✗ Inventory unavailable for {backup_bucket}: {e}\n"
+                    f"      Inventory-mode sources require inventory data for sampling.\n"
+                    f"      Wait for the next daily inventory cycle, or run:\n"
+                    f"        backup check --source {source}",
+                    err=True,
+                )
+                any_failure = True
+                continue
+
+        if not use_inventory:
+            typer.echo("    Sampling via bucket listing...")
+            all_objects: list[dict] = []
+            archived_count = 0
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=backup_bucket):
+                for obj in page.get("Contents", []):
+                    if any(obj["Key"].startswith(p) for p in OPERATIONAL_PREFIXES):
+                        continue
+                    if obj.get("StorageClass") in _ARCHIVED_STORAGE_CLASSES:
+                        archived_count += 1
+                    else:
+                        all_objects.append(obj)
+
+            if archived_count:
+                typer.echo(
+                    f"    {archived_count} archived object(s) skipped "
+                    f"(Glacier/Deep Archive — not directly copyable)"
+                )
+            sample = (
+                random.sample(all_objects, sample_size)
+                if len(all_objects) >= sample_size
+                else all_objects
             )
 
-        if not all_objects:
+        if not sample:
             typer.echo("    ✗ No copyable objects found in backup bucket", err=True)
             any_failure = True
             continue
 
-        sample = (
-            random.sample(all_objects, sample_size)
-            if len(all_objects) >= sample_size
-            else all_objects
-        )
         if len(sample) < sample_size:
             typer.echo(
                 f"    Sample reduced to {len(sample)} (fewer copyable objects than requested)"
@@ -359,9 +435,12 @@ def test_restore(
                             for obj in sample:
                                 key = obj["Key"]
                                 try:
-                                    head = s3.head_object(Bucket=temp_bucket, Key=key)
-                                    if head["ETag"] != obj["ETag"]:
-                                        etag_mismatches.append(key)
+                                    err = _verify_restored_object(
+                                        s3, backup_bucket, temp_bucket,
+                                        key, obj["ETag"],
+                                    )
+                                    if err:
+                                        etag_mismatches.append(f"{key}: {err}")
                                 except Exception as e:
                                     copy_errors.append(f"{key}: {e}")
                     except TimeoutError as e:
@@ -377,9 +456,11 @@ def test_restore(
                             Key=key,
                             MetadataDirective="COPY",
                         )
-                        head = s3.head_object(Bucket=temp_bucket, Key=key)
-                        if head["ETag"] != expected_etag:
-                            etag_mismatches.append(key)
+                        err = _verify_restored_object(
+                            s3, backup_bucket, temp_bucket, key, expected_etag,
+                        )
+                        if err:
+                            etag_mismatches.append(f"{key}: {err}")
                     except Exception as copy_err:
                         copy_errors.append(f"{key}: {copy_err}")
         finally:

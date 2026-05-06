@@ -146,6 +146,12 @@ class SourceConfig(BaseModel):
         description="Use S3 Batch Operations instead of per-object copy_object. "
         "Required for large buckets (millions of objects). Requires general.s3_batch_role_arn.",
     )
+    batch_manifest_mode: Literal["inline", "inventory"] = Field(
+        "inline",
+        description="How S3 Batch manifests are prepared: "
+        "'inline' lists source+backup buckets live; "
+        "'inventory' diffs latest S3 Inventory snapshots.",
+    )
 
     def get_backup_bucket_name(
         self, bucket_label: str, region: str, account_id: str, source_key: str

@@ -24,6 +24,13 @@ _EB_WEEKDAY = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT", 7: "S
 _EB_TO_ISO = {v: k for k, v in _EB_WEEKDAY.items()}
 
 
+def _fmt_dt(dt: datetime | str) -> str:
+    """Format datetime (or ISO string) in local timezone."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+
+
 def _schedule_expr_local_desc(expr: str) -> str:
     """Parse an EventBridge schedule expression and return a localised description.
 
@@ -86,6 +93,76 @@ def _human_schedule_desc(frequency: str, hh_utc: int, mm_utc: int, weekday_utc: 
     return ""
 
 
+def _target_type(targets: list[dict]) -> str:
+    """Return target mode label for an EventBridge rule."""
+    if not targets:
+        return "none"
+
+    kinds = set()
+    for target in targets:
+        arn = target.get("Arn", "")
+        if ":lambda:" in arn:
+            kinds.add("lambda")
+        elif ":codebuild:" in arn:
+            kinds.add("codebuild")
+        else:
+            kinds.add("other")
+
+    if len(kinds) == 1:
+        return next(iter(kinds))
+    return "mixed"
+
+
+def _target_summary(targets: list[dict]) -> str:
+    """Return compact target detail for display tables."""
+    if not targets:
+        return "-"
+    names = []
+    for target in targets:
+        arn = target.get("Arn", "")
+        names.append(arn.split(":")[-1])
+    return ",".join(names)
+
+
+def _metric_window_summary(
+    cloudwatch,
+    rule_name: str,
+    metric_name: str,
+    window_minutes: int,
+) -> tuple[float, datetime | None]:
+    """Return (sum, latest_nonzero_timestamp) for an EventBridge rule metric window."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(minutes=window_minutes)
+    resp = cloudwatch.get_metric_statistics(
+        Namespace="AWS/Events",
+        MetricName=metric_name,
+        Dimensions=[{"Name": "RuleName", "Value": rule_name}],
+        StartTime=start,
+        EndTime=end,
+        Period=60,
+        Statistics=["Sum"],
+    )
+    points = resp.get("Datapoints", [])
+    total = float(sum(float(p.get("Sum", 0) or 0) for p in points))
+    nonzero = [p for p in points if float(p.get("Sum", 0) or 0) > 0]
+    latest = max((p["Timestamp"] for p in nonzero), default=None)
+    return total, latest
+
+
+def _latest_codebuild_build(codebuild, project_arn: str) -> dict | None:
+    """Fetch latest CodeBuild build metadata for a project ARN."""
+    project_name = project_arn.split(":project/")[-1]
+    listed = codebuild.list_builds_for_project(
+        projectName=project_name,
+        sortOrder="DESCENDING",
+    )
+    ids = listed.get("ids", [])
+    if not ids:
+        return None
+    builds = codebuild.batch_get_builds(ids=[ids[0]]).get("builds", [])
+    return builds[0] if builds else None
+
+
 def _parse_schedule_time(time_str: str) -> tuple[int, int, str | None]:
     """Parse a time string and return (hour_utc, minute_utc, eb_weekday_or_none).
 
@@ -144,16 +221,134 @@ def show():
         typer.echo("No backup schedules found.")
         return
 
+    enriched_rules: list[dict] = []
+    for rule in rules:
+        targets = events.list_targets_by_rule(Rule=rule["Name"]).get("Targets", [])
+        enriched_rules.append(
+            {
+                **rule,
+                "target_type": _target_type(targets),
+                "target_summary": _target_summary(targets),
+                "targets": targets,
+            }
+        )
+
     if state.output == "json":
-        typer.echo(json.dumps(rules, indent=2))
+        typer.echo(json.dumps(enriched_rules, indent=2, default=str))
         return
 
-    typer.echo(f"{'Rule Name':<45} {'State':<10} {'Schedule':<30} {'Local time'}")
-    typer.echo("-" * 100)
-    for rule in rules:
+    typer.echo(
+        f"{'Rule Name':<45} {'State':<10} {'Schedule':<22} {'Target':<10} "
+        f"{'Target detail':<35} {'Local time'}"
+    )
+    typer.echo("-" * 148)
+    for rule in enriched_rules:
         expr = rule.get("ScheduleExpression", "n/a")
         local = _schedule_expr_local_desc(expr)
-        typer.echo(f"{rule['Name']:<45} {rule.get('State', 'UNKNOWN'):<10} " f"{expr:<30} {local}")
+        typer.echo(
+            f"{rule['Name']:<45} {rule.get('State', 'UNKNOWN'):<10} {expr:<22} "
+            f"{rule.get('target_type', 'none'):<10} {rule.get('target_summary', '-'):<35} {local}"
+        )
+
+
+@app.command("health")
+def health(
+    source: str = typer.Option(..., help="Data source"),
+    frequency: Literal["daily", "weekly", "hourly", "minutely"] | None = typer.Option(
+        None,
+        help="Frequency to inspect. Defaults to all schedule rules for source.",
+    ),
+    window_minutes: int = typer.Option(
+        120,
+        min=5,
+        help="CloudWatch metric lookback window (minutes)",
+    ),
+):
+    """Show scheduler health (rule/target/invocation) for a source."""
+    state = get_state()
+    session = boto3.Session()
+    events = session.client("events")
+    cloudwatch = session.client("cloudwatch")
+    codebuild = session.client("codebuild")
+
+    frequencies = [frequency] if frequency else ["daily", "weekly", "hourly", "minutely"]
+    rows: list[dict] = []
+    for freq in frequencies:
+        rule_name = _rule_name(source, freq)
+        try:
+            rule = events.describe_rule(Name=rule_name)
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("ResourceNotFoundException", "ValidationException"):
+                rows.append({"rule_name": rule_name, "exists": False})
+                continue
+            raise
+
+        targets = events.list_targets_by_rule(Rule=rule_name).get("Targets", [])
+        target_type = _target_type(targets)
+        target_summary = _target_summary(targets)
+        inv_sum, inv_last = _metric_window_summary(
+            cloudwatch, rule_name, "Invocations", window_minutes
+        )
+        fail_sum, fail_last = _metric_window_summary(
+            cloudwatch, rule_name, "FailedInvocations", window_minutes
+        )
+
+        row: dict = {
+            "rule_name": rule_name,
+            "exists": True,
+            "state": rule.get("State"),
+            "schedule": rule.get("ScheduleExpression"),
+            "target_type": target_type,
+            "target_summary": target_summary,
+            "invocations_window": inv_sum,
+            "invocations_last": inv_last,
+            "failed_invocations_window": fail_sum,
+            "failed_invocations_last": fail_last,
+        }
+
+        if target_type == "codebuild" and targets:
+            build = _latest_codebuild_build(codebuild, targets[0].get("Arn", ""))
+            if build:
+                row["latest_codebuild"] = {
+                    "id": build.get("id"),
+                    "status": build.get("buildStatus"),
+                    "phase": build.get("currentPhase"),
+                    "start_time": build.get("startTime"),
+                    "end_time": build.get("endTime"),
+                }
+        rows.append(row)
+
+    if state.output == "json":
+        typer.echo(json.dumps(rows, indent=2, default=str))
+        return
+
+    typer.echo(f"Scheduler health for source '{source}' (last {window_minutes}m)")
+    for row in rows:
+        if not row.get("exists"):
+            typer.echo(f"- {row['rule_name']}: not found")
+            continue
+        typer.echo(
+            f"- {row['rule_name']}: {row['state']}  {row['schedule']}  "
+            f"target={row['target_type']} ({row['target_summary']})"
+        )
+        inv_last = _fmt_dt(row["invocations_last"]) if row.get("invocations_last") else "none"
+        fail_last = (
+            _fmt_dt(row["failed_invocations_last"])
+            if row.get("failed_invocations_last")
+            else "none"
+        )
+        typer.echo(
+            f"  invocations={int(row['invocations_window'])} (last: {inv_last})  "
+            f"failed={int(row['failed_invocations_window'])} (last: {fail_last})"
+        )
+        latest = row.get("latest_codebuild")
+        if latest:
+            build_id = str(latest.get("id", "")).split(":")[-1]
+            start = _fmt_dt(latest["start_time"]) if latest.get("start_time") else "unknown"
+            typer.echo(
+                f"  latest build={build_id} status={latest.get('status')} "
+                f"phase={latest.get('phase')} start={start}"
+            )
 
 
 @app.command("add")
@@ -176,6 +371,18 @@ def add_schedule(
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be done without executing"
+    ),
+    target: Literal["lambda", "codebuild"] = typer.Option(
+        "lambda",
+        help="EventBridge target type",
+    ),
+    codebuild_project_arn: str | None = typer.Option(
+        None,
+        help="CodeBuild project ARN (required when --target codebuild)",
+    ),
+    target_role_arn: str | None = typer.Option(
+        None,
+        help="IAM role ARN EventBridge assumes to invoke target (required for codebuild)",
     ),
 ):
     """Add (create or update) an EventBridge schedule rule for a backup source.
@@ -216,6 +423,12 @@ def add_schedule(
 
     if state.dry_run:
         typer.echo(f"[DRY RUN] Would create/update rule '{rule_name}': {cron_expr}  {human}")
+        if target == "codebuild":
+            typer.echo(
+                f"[DRY RUN] Would register CodeBuild target: {codebuild_project_arn or '<missing>'}"
+            )
+        else:
+            typer.echo("[DRY RUN] Would register Lambda target from config.general.lambda_arn")
         return
 
     events.put_rule(
@@ -225,6 +438,36 @@ def add_schedule(
         Description=f"NSHM backup schedule: {source} {frequency} at {time} UTC",
     )
     typer.echo(f"Rule '{rule_name}' created/updated: {cron_expr}  {human}")
+
+    # Ensure idempotent target ownership: replace existing targets for this rule.
+    try:
+        existing_targets = events.list_targets_by_rule(Rule=rule_name).get("Targets", [])
+        if existing_targets:
+            events.remove_targets(Rule=rule_name, Ids=[t["Id"] for t in existing_targets])
+    except ClientError as e:
+        if e.response["Error"]["Code"] not in ("ResourceNotFoundException", "ValidationException"):
+            raise
+
+    if target == "codebuild":
+        if not codebuild_project_arn or not target_role_arn:
+            typer.echo(
+                "Error: --target codebuild requires --codebuild-project-arn and --target-role-arn",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        events.put_targets(
+            Rule=rule_name,
+            Targets=[
+                {
+                    "Id": "backup-codebuild",
+                    "Arn": codebuild_project_arn,
+                    "RoleArn": target_role_arn,
+                }
+            ],
+        )
+        typer.echo(f"Target registered: {codebuild_project_arn}")
+        return
 
     try:
         config = load_config()
@@ -291,10 +534,12 @@ def remove_schedule(
     session = boto3.Session()
     events = session.client("events")
 
-    # Remove Lambda target first (rule cannot be deleted while targets exist)
+    # Remove all known targets first (rule cannot be deleted while targets exist)
     try:
-        events.remove_targets(Rule=rule_name, Ids=["backup-lambda"])
-        typer.echo(f"Target removed: {rule_name}")
+        current = events.list_targets_by_rule(Rule=rule_name).get("Targets", [])
+        if current:
+            events.remove_targets(Rule=rule_name, Ids=[t["Id"] for t in current])
+            typer.echo(f"Targets removed: {rule_name}")
     except ClientError as e:
         if e.response["Error"]["Code"] in ("ResourceNotFoundException", "ValidationException"):
             pass  # no targets or rule doesn't exist yet

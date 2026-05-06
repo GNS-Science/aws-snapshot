@@ -73,11 +73,13 @@ from nzshm_backup.commands.report import app as report_app  # noqa: E402
 from nzshm_backup.commands.restore import app as restore_app  # noqa: E402
 from nzshm_backup.commands.run_backup import app as run_app  # noqa: E402
 from nzshm_backup.commands.schedule import app as schedule_app  # noqa: E402
+from nzshm_backup.commands.setup import app as setup_app  # noqa: E402
 from nzshm_backup.commands.status import app as status_app  # noqa: E402
 from nzshm_backup.commands.test import app as test_app  # noqa: E402
 
 app.add_typer(check_app, name="check", help="Pre-flight access and configuration checks.")
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")
+app.add_typer(setup_app, name="setup", help="Provision backup infrastructure.")
 app.add_typer(run_app, name="run", help="Execute manual backup.")
 app.add_typer(restore_app, name="restore", help="Manage backup restores. (TODO)")
 app.add_typer(test_app, name="test", help="Run backup tests and validation. (TODO)")

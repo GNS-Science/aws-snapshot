@@ -105,6 +105,8 @@ def run_backup_source(
                     full_sync=full_sync,
                     source_session=source_session,
                     prepare_only=prepare_only,
+                    source_alias=source_alias,
+                    manifest_mode=source_config.batch_manifest_mode,
                 )
                 result.s3_results.append(
                     {
@@ -195,6 +197,16 @@ def run_backup_source(
 
         except Exception as e:
             logger.error(f"Backup failed for {bucket_name}: {e}")
+            if not dry_run:
+                try:
+                    write_run_state(
+                        session,
+                        backup_bucket_name,
+                        bucket_name,
+                        status="failed",
+                    )
+                except Exception:
+                    logger.warning(f"Could not write failed state for {bucket_name}")
             result.s3_results.append(
                 {
                     "bucket_name": bucket_name,

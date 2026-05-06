@@ -127,6 +127,32 @@ Serverless will:
 
 ---
 
+## Lambda IAM permissions
+
+The Lambda execution role (managed by `serverless.yml`) includes:
+
+- **S3** — `ListBucket`, `GetObject`, `PutObject`, `CopyObject`, bucket management
+- **DynamoDB** — `ExportTableToPointInTime`, `DescribeExport`, `ListExports`,
+  `DescribeContinuousBackups`, `UpdateContinuousBackups`
+- **STS** — `AssumeRole` (cross-account access to source accounts)
+- **S3 Control** — `CreateJob`, `DescribeJob` (S3 Batch Operations)
+- **SSM** — `GetParameter`, `PutParameter` (config + run state)
+- **Athena** — `StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`,
+  `ListDatabases`, `ListTables`, `GetDatabase`, `GetTableMetadata`
+- **Glue Data Catalog** — full CRUD for databases, tables, and partitions
+  (`Get*`, `Create*`, `Update*`, `Delete*`, `BatchCreatePartition`,
+  `BatchDeletePartition`)
+
+The Athena and Glue permissions are required for inventory-based manifest
+generation (`batch_manifest_mode: inventory`), which uses Athena to diff
+S3 Inventory snapshots via Glue Data Catalog tables.
+
+> **Note:** if you add new Athena query patterns that touch additional Glue
+> resources (e.g. new databases or partition schemes), verify the Lambda role
+> has the required Glue actions — Athena delegates all catalog operations to Glue.
+
+---
+
 ## Post-deploy: register the Lambda target
 
 After deploy, copy the printed function ARN into `backup-config.yaml`:

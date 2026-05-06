@@ -1,15 +1,19 @@
 """Per-backup-bucket run state stored as _state/last-run.json.
 
 Provides a lightweight record of the last S3 backup attempt for each
-backup bucket — timestamp, result, and job ID. Written at the end of
-every S3 backup run (whether objects were copied or not). Read by the
-status command to show last-checked time.
+backup bucket — timestamp, phase, and batch job ID. Written during and
+at the end of S3 backup runs. Read by the status command to show run
+progress before and after S3 Batch submission.
 
 The state object lives at:
     s3://<backup-bucket>/_state/last-run.json
 
 It is operational metadata, not source data. The _state/ prefix follows
 the same convention as _manifests/ and _batch-reports/.
+
+Current persisted phases include: running, prepared, submitted, skipped,
+completed, failed. Some views may also derive "active" from S3 Batch job
+status once a batch_job_id exists.
 """
 
 import json
