@@ -28,8 +28,11 @@ _ARCHIVED_STORAGE_CLASSES = {"GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"}
 
 
 _CHECKSUM_KEYS = [
-    "ChecksumCRC64NVME", "ChecksumCRC32", "ChecksumCRC32C",
-    "ChecksumSHA256", "ChecksumSHA1",
+    "ChecksumCRC64NVME",
+    "ChecksumCRC32",
+    "ChecksumCRC32C",
+    "ChecksumSHA256",
+    "ChecksumSHA1",
 ]
 
 
@@ -37,7 +40,9 @@ def _get_object_checksum(s3_client, bucket: str, key: str) -> tuple[str, str] | 
     """Return (algorithm, value) for the first available checksum, or None."""
     try:
         resp = s3_client.get_object_attributes(
-            Bucket=bucket, Key=key, ObjectAttributes=["Checksum"],
+            Bucket=bucket,
+            Key=key,
+            ObjectAttributes=["Checksum"],
         )
         checksum = resp.get("Checksum", {})
         for ck in _CHECKSUM_KEYS:
@@ -49,7 +54,11 @@ def _get_object_checksum(s3_client, bucket: str, key: str) -> tuple[str, str] | 
 
 
 def _verify_restored_object(
-    s3_client, source_bucket: str, target_bucket: str, key: str, expected_etag: str,
+    s3_client,
+    source_bucket: str,
+    target_bucket: str,
+    key: str,
+    expected_etag: str,
 ) -> str | None:
     """Verify a restored object against its backup source.
 
@@ -308,7 +317,10 @@ def test_restore(
 
                 typer.echo("    Sampling via inventory (Athena)...")
                 sample = sample_objects_via_inventory(
-                    session, source, backup_bucket, sample_size=sample_size,
+                    session,
+                    source,
+                    backup_bucket,
+                    sample_size=sample_size,
                 )
             except (ValueError, Exception) as e:
                 typer.echo(
@@ -436,8 +448,11 @@ def test_restore(
                                 key = obj["Key"]
                                 try:
                                     err = _verify_restored_object(
-                                        s3, backup_bucket, temp_bucket,
-                                        key, obj["ETag"],
+                                        s3,
+                                        backup_bucket,
+                                        temp_bucket,
+                                        key,
+                                        obj["ETag"],
                                     )
                                     if err:
                                         etag_mismatches.append(f"{key}: {err}")
@@ -457,7 +472,11 @@ def test_restore(
                             MetadataDirective="COPY",
                         )
                         err = _verify_restored_object(
-                            s3, backup_bucket, temp_bucket, key, expected_etag,
+                            s3,
+                            backup_bucket,
+                            temp_bucket,
+                            key,
+                            expected_etag,
                         )
                         if err:
                             etag_mismatches.append(f"{key}: {err}")

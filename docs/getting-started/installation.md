@@ -3,19 +3,19 @@
 ## Prerequisites
 
 - Python 3.10 or higher
-- Poetry (dependency management)
+- [uv](https://docs.astral.sh/uv/) (dependency management)
 - AWS credentials configured
 
-## Install Poetry
+## Install uv
 
-If you don't have Poetry installed:
+If you don't have uv installed:
 
 ```bash
 # macOS/Linux
-curl -sSL https://install.python-poetry.org | python3 -
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Windows
-(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 ## Install from Source
@@ -26,20 +26,17 @@ git clone https://github.com/gns-science/nzshm-backup.git
 cd nzshm-backup
 
 # Install dependencies
-poetry install
-
-# Activate virtual environment
-poetry shell
+uv sync --all-extras
 ```
 
 ## Verify Installation
 
 ```bash
 # Check CLI is available
-backup --help
+uv run backup --help
 
 # Check version
-backup --version
+uv run backup --version
 ```
 
 ## AWS Configuration
@@ -62,13 +59,13 @@ Install shell completion for better CLI experience:
 
 ```bash
 # Bash
-backup --install-completion bash
+uv run backup --install-completion bash
 
 # Zsh
-backup --install-completion zsh
+uv run backup --install-completion zsh
 
 # Fish
-backup --install-completion fish
+uv run backup --install-completion fish
 ```
 
 ## Installation Verification
@@ -77,10 +74,10 @@ Run a test command to verify everything works:
 
 ```bash
 # Should show "coming soon" message
-backup status
+uv run backup status
 
 # Dry-run a backup
-backup run --source toshi --dry-run
+uv run backup run --source toshi --dry-run
 ```
 
 ## Next Steps

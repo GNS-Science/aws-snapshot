@@ -496,7 +496,11 @@ def test_write_manifest_progress_logging(aws_session, s3_client, caplog):
 
     with caplog.at_level(logging.INFO, logger="nzshm_backup.s3_batch"):
         etag, count = write_manifest_to_s3(
-            s3_client, _rows(), "manifest-bucket", "test.csv", result_bytes=5_000_000,
+            s3_client,
+            _rows(),
+            "manifest-bucket",
+            "test.csv",
+            result_bytes=5_000_000,
         )
 
     assert count == 100_001
@@ -535,7 +539,9 @@ def test_write_manifest_abort_on_error(aws_session, s3_client):
         write_manifest_to_s3(mock_s3, iter(["row\n"]), "bkt", "key.csv")
 
     mock_s3.abort_multipart_upload.assert_called_once_with(
-        Bucket="bkt", Key="key.csv", UploadId="up-err",
+        Bucket="bkt",
+        Key="key.csv",
+        UploadId="up-err",
     )
 
 
@@ -553,9 +559,7 @@ def test_wait_for_batch_job_completes():
     mock_session = MagicMock()
     mock_s3ctrl = MagicMock()
     mock_session.client.return_value = mock_s3ctrl
-    mock_s3ctrl.describe_job.return_value = {
-        "Job": {"Status": "Complete"}
-    }
+    mock_s3ctrl.describe_job.return_value = {"Job": {"Status": "Complete"}}
 
     with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
         with patch("nzshm_backup.s3_batch.time.sleep"):
@@ -582,7 +586,11 @@ def test_wait_for_batch_job_polls_then_completes():
     with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
         with patch("nzshm_backup.s3_batch.time.sleep"):
             status = wait_for_batch_job(
-                mock_session, "123", "job-2", poll_interval=1, timeout=60,
+                mock_session,
+                "123",
+                "job-2",
+                poll_interval=1,
+                timeout=60,
             )
 
     assert status == "Complete"
@@ -622,7 +630,11 @@ def test_wait_for_batch_job_timeout():
         with patch("nzshm_backup.s3_batch.time.sleep"):
             with pytest.raises(TimeoutError, match="did not complete"):
                 wait_for_batch_job(
-                    mock_session, "123", "job-4", poll_interval=1, timeout=3,
+                    mock_session,
+                    "123",
+                    "job-4",
+                    poll_interval=1,
+                    timeout=3,
                 )
 
 
@@ -649,12 +661,14 @@ def test_batch_backup_inline_createjob_failure(aws_session, s3_client):
     from botocore.exceptions import ClientError
 
     mock_s3ctrl.create_job.side_effect = ClientError(
-        {"Error": {"Code": "AccessDenied", "Message": "no perms"}}, "CreateJob",
+        {"Error": {"Code": "AccessDenied", "Message": "no perms"}},
+        "CreateJob",
     )
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "nzshm_backup.s3_batch.get_region", lambda s: "ap-southeast-2",
+            "nzshm_backup.s3_batch.get_region",
+            lambda s: "ap-southeast-2",
         )
         original_client = aws_session.client
 

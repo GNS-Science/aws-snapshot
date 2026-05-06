@@ -19,7 +19,7 @@ backup --version
 
 1. **Update version** in `pyproject.toml`:
    ```toml
-   [tool.poetry]
+   [project]
    version = "0.4.0"
    ```
 
@@ -30,9 +30,9 @@ backup --version
 
 3. **Run tests and checks**:
    ```bash
-   poetry run pytest
-   poetry run ruff check src/ tests/
-   poetry run mypy src/
+   uv run pytest
+   uv run ruff check src/ tests/
+   uv run mypy src/
    ```
 
 4. **Commit and tag**:
@@ -45,8 +45,8 @@ backup --version
 
 5. **Build and publish** (if publishing to PyPI):
    ```bash
-   poetry build
-   poetry publish
+   uv build
+   uv publish
    ```
 
 ## Docs versioning with mike
@@ -56,13 +56,13 @@ The docs site uses [mike](https://github.com/jimporter/mike) for versioned docs
 
 ```bash
 # Deploy a new version
-poetry run mike deploy 0.4.0 latest --update-aliases --push
+uv run mike deploy 0.4.0 latest --update-aliases --push
 
 # List deployed versions
-poetry run mike list
+uv run mike list
 
 # Set the default version shown on the landing page
-poetry run mike set-default latest --push
+uv run mike set-default latest --push
 ```
 
 Docs are served from the `gh-pages` branch.

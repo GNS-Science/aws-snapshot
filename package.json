@@ -8,5 +8,6 @@
     "remove": "sls remove",
     "logs": "sls logs --function backup --tail",
     "clean-cache": "sls requirements cleanCache && rm -rf ~/Library/Caches/serverless-python-requirements/"
-  }
+  },
+  "packageManager": "yarn@4.14.1"
 }
