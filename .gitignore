@@ -7,7 +7,7 @@ src/nzshm_backup/_version.py
 dist/
 build/
 site/
-.llm/.session
+.llm/
 .env
 .mypy_cache/
 .ruff_cache/
