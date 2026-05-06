@@ -331,15 +331,15 @@ def health(
             f"- {row['rule_name']}: {row['state']}  {row['schedule']}  "
             f"target={row['target_type']} ({row['target_summary']})"
         )
-        inv_last = _fmt_dt(row["invocations_last"]) if row.get("invocations_last") else "none"
-        fail_last = (
+        inv_last_str = _fmt_dt(row["invocations_last"]) if row.get("invocations_last") else "none"
+        fail_last_str = (
             _fmt_dt(row["failed_invocations_last"])
             if row.get("failed_invocations_last")
             else "none"
         )
         typer.echo(
-            f"  invocations={int(row['invocations_window'])} (last: {inv_last})  "
-            f"failed={int(row['failed_invocations_window'])} (last: {fail_last})"
+            f"  invocations={int(row['invocations_window'])} (last: {inv_last_str})  "
+            f"failed={int(row['failed_invocations_window'])} (last: {fail_last_str})"
         )
         latest = row.get("latest_codebuild")
         if latest:

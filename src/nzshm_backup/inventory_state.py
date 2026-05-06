@@ -41,7 +41,7 @@ def _inventory_config_for_prefix(
                 continue
             if str(dest.get("Prefix", "")).rstrip("/") != normalized_prefix:
                 continue
-            return cfg
+            return dict(cfg)
         except Exception:
             continue
     return None
