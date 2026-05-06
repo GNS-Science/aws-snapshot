@@ -133,12 +133,194 @@ as the input dataset for manifest generation.
 Inventory-based manifests are compatible with backup-not-replication goals:
 explicit cadence, no delete propagation, and recoverability-first behavior.
 
+### Cost direction (CodeBuild vs Inventory)
+
+Using current THS observations:
+
+- Manifest-prep runtime in CodeBuild is about 50-60 minutes per run.
+- Source/backup inventory scale is roughly 3.9M + 3.9M rows.
+
+Approximate weekly per-run prep cost:
+
+| Prep method | Typical per-run estimate | Notes |
+|-------------|--------------------------|-------|
+| CodeBuild (`BUILD_GENERAL1_MEDIUM`, ~58m) | ~NZD 0.8-2.0 | Runtime-priced; sensitive to compute tier and run length |
+| Inventory + Athena (Parquet) | ~NZD 0.04-0.08 | Inventory listing + Athena scan; excludes S3 Batch job fee |
+
+Interpretation:
+
+- Inventory + Athena is expected to be an order of magnitude cheaper for manifest prep.
+- S3 Batch job fees still apply in both approaches.
+- Exact values depend on current AWS regional pricing and Athena scanned GB.
+
+## Inventory design plan (THS-first)
+
+This is the planned implementation path for inventory-based manifests.
+
+### Scope
+
+- Start with `ths` as the canary source.
+- Keep existing backup buckets and S3 Batch submission contract.
+- Preserve backup semantics (explicit cadence, no delete propagation).
+
+### Architecture
+
+1. **Inventory producers**
+   - Enable daily S3 Inventory on:
+     - source bucket (`ths-dataset-prod`)
+     - backup bucket (`bb-ths-s3-dataset-prod-...`)
+   - Output format: Parquet
+   - Destination: dedicated control bucket/prefix (not backup data path)
+
+2. **Inventory query layer**
+   - Register inventory datasets in Glue Data Catalog.
+   - Use Athena SQL to compute diff set:
+     - join on key
+     - include rows where backup key missing, or source ETag/size differs
+
+3. **Manifest writer**
+   - Export Athena result to CSV manifest format expected by S3 Batch:
+     - `source-bucket,key`
+     - URL-encoded key format (preserve `/`)
+   - Write manifest to backup bucket `_manifests/`.
+
+4. **Batch submission + monitoring**
+   - Existing submission path calls `CreateJob` from manifest + ETag.
+   - Existing status path tracks submitted job and terminal state.
+
+5. **State tracking**
+   - During transition: keep `_state/last-run.json` compatibility.
+   - Preferred target: centralized run-state store (see compatibility contract).
+
+### Per-run flow (prepare -> submit)
+
+For inventory mode, every scheduled backup run still performs both steps:
+
+1. **prepare**
+   - read latest source/backup inventory snapshots
+   - compute diff set
+   - write manifest CSV + capture ETag
+2. **submit**
+   - call `s3control:CreateJob` with manifest location + ETag
+
+What changes from the current inline path is not the existence of `prepare`, but
+its implementation:
+
+- **Current inline prepare:** live `ListObjectsV2` on source + backup, in-process diff.
+- **Inventory prepare (target):** snapshot-driven query diff (Athena) and manifest export.
+
+Both approaches then use the same S3 Batch submission contract.
+
+### State model (useful operational phases)
+
+Recommended run phase model for visibility and troubleshooting:
+
+- `running` — run has started
+- `preparing_manifest` — inventory diff + manifest export in progress
+- `prepared` — manifest key + ETag ready
+- `submitted` — S3 Batch job created (`batch_job_id` known)
+- `active` — S3 Batch job running
+- terminal: `completed`, `failed`, `skipped`
+
+Implementation note:
+
+- Current `_state/last-run.json` already records `running`, `prepared`,
+  `submitted`, `completed`, `failed`, `skipped`.
+- `active` can be derived from `DescribeJob` once `batch_job_id` exists.
+
+### Delivery phases
+
+- **Phase A (Inventory v1, fast path):**
+  - Source inventory only (copy all listed source rows)
+  - Purpose: prove workflow reliability
+
+- **Phase B (Inventory v2, optimized):**
+  - Source + backup inventory diff (key + ETag/size)
+  - Purpose: restore copy minimization and reduce S3 Batch task counts
+
+### Athena starter schema + diff query (v2)
+
+Use external tables over Parquet inventories in a control bucket.
+
+Example table shape (adjust paths/partition columns to actual inventory layout):
+
+```sql
+CREATE EXTERNAL TABLE IF NOT EXISTS inv_ths_source (
+  bucket string,
+  key string,
+  size bigint,
+  etag string,
+  is_latest boolean,
+  is_delete_marker boolean,
+  last_modified_date timestamp
+)
+PARTITIONED BY (dt string)
+STORED AS PARQUET
+LOCATION 's3://<control-bucket>/inventory/ths-source/';
+
+CREATE EXTERNAL TABLE IF NOT EXISTS inv_ths_backup (
+  bucket string,
+  key string,
+  size bigint,
+  etag string,
+  is_latest boolean,
+  is_delete_marker boolean,
+  last_modified_date timestamp
+)
+PARTITIONED BY (dt string)
+STORED AS PARQUET
+LOCATION 's3://<control-bucket>/inventory/ths-backup/';
+```
+
+Starter diff query (latest partitions) for manifest candidates:
+
+```sql
+WITH src AS (
+  SELECT key, size, etag
+  FROM inv_ths_source
+  WHERE dt = '<source_dt>'
+    AND is_latest = true
+    AND is_delete_marker = false
+),
+dst AS (
+  SELECT key, size, etag
+  FROM inv_ths_backup
+  WHERE dt = '<backup_dt>'
+    AND is_latest = true
+    AND is_delete_marker = false
+)
+SELECT s.key
+FROM src s
+LEFT JOIN dst d ON s.key = d.key
+WHERE d.key IS NULL
+   OR s.size <> d.size
+   OR s.etag <> d.etag;
+```
+
+Manifest export shape for S3 Batch:
+
+- Output CSV rows as: `ths-dataset-prod,<url_encoded_key>`
+- Keep `/` unescaped in key paths
+- Write to: `s3://bb-ths-.../_manifests/ths-dataset-prod-<run_id>.csv`
+
+### Acceptance criteria (THS)
+
+1. Scheduled run no longer performs full live source/destination listing in runtime path.
+2. Manifest is generated from inventory snapshots and submitted successfully.
+3. Two consecutive scheduled THS runs succeed end-to-end.
+4. Per-run prep cost and runtime are lower/more stable than CodeBuild full-listing path.
+5. No migration required for existing live backup buckets.
+
 ## Additional findings
 
 - `toshi` currently has a separate IAM issue (`s3:PutBucketVersioning` denied on first-run bucket
   bootstrap for its S3 backup bucket).
 - Temporary verification rule `nzshm-backup-ths-daily` was disabled to avoid repeated timeout loops
   while redesign work proceeds.
+- S3 Select against inventory Parquet (`SelectObjectContent`) returned `MethodNotAllowed` in
+  production validation; implementation path pivots to Athena-backed diff queries.
+
+Athena design reference: `docs/design/ATHENA_MANIFEST_PIPELINE.md`.
 
 ## Compatibility contract (interim -> future)
 

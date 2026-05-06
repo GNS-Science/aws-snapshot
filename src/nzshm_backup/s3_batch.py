@@ -5,14 +5,17 @@ timeout on first-run syncs of multi-million-object buckets.
 """
 
 import logging
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Literal
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
 
+from nzshm_backup.athena_inventory import build_inventory_manifest_via_athena
 from nzshm_backup.integrity import OPERATIONAL_PREFIXES
 from nzshm_backup.s3_backup import ensure_backup_bucket_ready, get_region
 
@@ -62,8 +65,8 @@ def build_manifest_csv(
                 source_obj["ETag"] != dest_obj["ETag"] or source_obj["Size"] != dest_obj["Size"]
             )
         if should_copy:
-            # Escape key for CSV: wrap in quotes, double any internal quotes
-            safe_key = key.replace('"', '""')
+            # S3 Batch CSV manifests require URL-encoded keys. Keep path separators.
+            safe_key = quote(key, safe="/")
             yield f"{source_bucket},{safe_key}\n"
 
 
@@ -72,6 +75,7 @@ def write_manifest_to_s3(
     rows: Iterator[str],
     backup_bucket: str,
     manifest_key: str,
+    result_bytes: int = 0,
 ) -> tuple[str, int]:
     """Stream manifest rows to S3 via multipart upload.
 
@@ -80,6 +84,7 @@ def write_manifest_to_s3(
         rows:           iterator of CSV row strings
         backup_bucket:  destination bucket for the manifest
         manifest_key:   S3 key under which to store the manifest
+        result_bytes:   Athena result file size in bytes (for progress estimation)
 
     Returns:
         (etag, row_count) — ETag required by s3control:CreateJob
@@ -95,10 +100,31 @@ def write_manifest_to_s3(
     buffer = b""
     row_count = 0
 
+    progress_interval = 100_000
+    t0 = time.monotonic()
+    bytes_written = 0
+
     try:
         for row in rows:
-            buffer += row.encode()
+            encoded = row.encode()
+            buffer += encoded
+            bytes_written += len(encoded)
             row_count += 1
+            if row_count % progress_interval == 0:
+                elapsed = time.monotonic() - t0
+                pct_timeout = elapsed / 900.0 * 100.0
+                if result_bytes > 0 and row_count > 0:
+                    avg_row_bytes = bytes_written / row_count
+                    est_total = int(result_bytes / avg_row_bytes)
+                    pct_rows = row_count / est_total * 100.0
+                    rows_str = f"~{pct_rows:.0f}% of ~{est_total:,} est. rows"
+                else:
+                    rows_str = "total unknown"
+                logger.info(
+                    "Manifest progress: %s rows written (%s), %s parts uploaded, "
+                    "%.0fs elapsed (%.0f%% of 15m Lambda timeout)",
+                    f"{row_count:,}", rows_str, part_number - 1, elapsed, pct_timeout,
+                )
             if len(buffer) >= _MULTIPART_CHUNK:
                 resp = s3_client.upload_part(
                     Bucket=backup_bucket,
@@ -148,6 +174,27 @@ def _list_bucket(s3_client, bucket: str) -> dict:
     return objects
 
 
+def _build_manifest_via_inventory(
+    session: boto3.Session,
+    source_alias: str,
+    source_bucket: str,
+    backup_bucket: str,
+    manifest_bucket: str,
+    manifest_key: str,
+    full_sync: bool,
+) -> tuple[str | None, str, str | None, int]:
+    """Build manifest via Athena UNLOAD.  Returns (etag, src_dt, bkp_dt, row_count)."""
+    return build_inventory_manifest_via_athena(
+        session,
+        source_alias,
+        source_bucket,
+        backup_bucket,
+        manifest_bucket,
+        manifest_key,
+        full_sync,
+    )
+
+
 def batch_backup_source(
     session: boto3.Session,
     source_bucket: str,
@@ -158,6 +205,8 @@ def batch_backup_source(
     full_sync: bool = False,
     source_session: boto3.Session | None = None,
     prepare_only: bool = False,
+    source_alias: str | None = None,
+    manifest_mode: Literal["inline", "inventory"] = "inline",
 ) -> BatchJobResult:
     """Submit an S3 Batch Operations job to copy new/changed objects.
 
@@ -173,6 +222,8 @@ def batch_backup_source(
         account_id:      AWS account ID (for s3control API call)
         dry_run:         if True, build manifest but skip CreateJob
         full_sync:       if True, include all objects regardless of ETag
+        source_alias:    source key in config (required for inventory mode)
+        manifest_mode:   'inline' (live list/diff) or 'inventory' (latest inventory snapshot diff)
     """
     s3_client = session.client("s3")
     src_s3_client = source_session.client("s3") if source_session is not None else s3_client
@@ -200,25 +251,41 @@ def batch_backup_source(
 
     ensure_backup_bucket_ready(session, backup_bucket)
 
-    logger.info(f"Listing source objects in {source_bucket}")
-    source_objects = _list_bucket(src_s3_client, source_bucket)
-    logger.info(f"Found {len(source_objects)} source objects")
+    if manifest_mode == "inventory":
+        if not source_alias:
+            raise ValueError("source_alias is required when manifest_mode='inventory'")
+        manifest_etag, src_dt, bkp_dt, row_count = _build_manifest_via_inventory(
+            session,
+            source_alias,
+            source_bucket,
+            backup_bucket,
+            manifest_bucket=backup_bucket,
+            manifest_key=manifest_key,
+            full_sync=full_sync,
+        )
+        logger.info(f"Inventory diff: source={src_dt}, backup={bkp_dt}")
+    else:
+        logger.info(f"Listing source objects in {source_bucket}")
+        source_objects = _list_bucket(src_s3_client, source_bucket)
+        logger.info(f"Found {len(source_objects)} source objects")
 
-    dest_objects: dict = {}
-    try:
-        dest_objects = _list_bucket(s3_client, backup_bucket)
-        logger.info(f"Found {len(dest_objects)} existing backup objects")
-    except ClientError as e:
-        if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
-            logger.info("Backup bucket does not yet exist — all objects will be copied")
-        else:
-            raise
+        dest_objects: dict = {}
+        try:
+            dest_objects = _list_bucket(s3_client, backup_bucket)
+            logger.info(f"Found {len(dest_objects)} existing backup objects")
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
+                logger.info("Backup bucket does not yet exist — all objects will be copied")
+            else:
+                raise
 
-    rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
+        rows = build_manifest_csv(source_objects, dest_objects, source_bucket, full_sync)
 
-    logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
-    manifest_etag, row_count = write_manifest_to_s3(s3_client, rows, backup_bucket, manifest_key)
-    logger.info(f"Manifest written: {row_count} objects, ETag={manifest_etag}")
+        logger.info(f"Writing manifest to s3://{backup_bucket}/{manifest_key}")
+        manifest_etag, row_count = write_manifest_to_s3(
+            s3_client, rows, backup_bucket, manifest_key,
+        )
+        logger.info(f"Manifest written: {row_count} objects, ETag={manifest_etag}")
 
     if row_count == 0:
         logger.info("Nothing to copy — manifest is empty, skipping job submission")
@@ -329,7 +396,7 @@ def _build_restore_manifest_rows(
             key = obj["Key"]
             if any(key.startswith(p) for p in OPERATIONAL_PREFIXES):
                 continue
-            safe_key = key.replace('"', '""')
+            safe_key = quote(key, safe="/")
             yield f"{backup_bucket},{safe_key}\n"
 
 

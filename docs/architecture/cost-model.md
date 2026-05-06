@@ -105,6 +105,26 @@ The $0.25 USD flat fee per Batch job dominates on small incremental runs (~$0.39
 For all three Batch sources running weekly: ~$61 NZD/year in job fees — immaterial in the
 overall model.
 
+### Manifest-prep compute options (THS observed)
+
+S3 Batch job fees are only part of run cost. For large sources, manifest preparation can dominate
+runtime and introduce additional compute cost.
+
+Observed THS prep runtime (current code path): ~58 minutes in CodeBuild.
+
+Approximate prep-only cost comparison per THS run:
+
+| Manifest prep path | Approx NZD/run | Cost driver |
+|--------------------|----------------|-------------|
+| CodeBuild (MEDIUM, ~58m) | ~0.8-2.0 | Build-minute pricing |
+| Inventory + Athena (Parquet) | ~0.04-0.08 | Inventory listing + Athena scanned GB |
+
+Notes:
+
+- Both approaches still pay normal S3 Batch job fees for copy execution.
+- Inventory-based prep is expected to be materially cheaper and more predictable at scale.
+- Exact values vary with regional pricing and Athena data scanned; validate periodically.
+
 Full details: [S3 Batch Operations](s3-batch-operations.md).
 
 ---

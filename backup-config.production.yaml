@@ -23,6 +23,7 @@ sources:
     - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiThingObject-PROD
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
+    batch_manifest_mode: inventory
   ths:
     display_name: "THS dataset (production \u2014 account 461564345538)"
     source_account_id: '461564345538'
@@ -34,6 +35,7 @@ sources:
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
+    batch_manifest_mode: inventory
   static:
     display_name: "Static reports (production \u2014 account 461564345538)"
     source_account_id: '461564345538'
@@ -45,6 +47,7 @@ sources:
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
+    batch_manifest_mode: inventory
   weka:
     display_name: "Weka UI prod (production \u2014 account 461564345538)"
     source_account_id: '461564345538'
@@ -55,7 +58,8 @@ sources:
       label: weka-ui-prod
     dynamodb_tables: []
     dynamodb_export_format: DYNAMODB_JSON
-    use_s3_batch: false
+    use_s3_batch: true
+    batch_manifest_mode: inventory
 retention:
   hot_days: 30
   warm_days: 120
