@@ -540,10 +540,47 @@ Root causes:
 Both root causes are now mitigated (inventory lag guard, smart ETag diff).
 No further non-current accumulation expected under normal weekly schedule.
 
-### Schedules need resetting
+---
 
-All source schedules are on temporary slots from testing. Need to be reset
-to permanent production times before Thursday.
+## Step 28 — Switch to daily backups, redeploy with cleanup fix ✅ 2026-05-07
+
+### Toshi HIVE_PATH_ALREADY_EXISTS (last night's run)
+
+Toshi weekly run (2026-05-06 20:15 NZST) failed — stale UNLOAD output from
+May 5 run was not cleaned up because the deployed Lambda was from before the
+cleanup fix. The other three sources ran fine (all skipped — in sync).
+
+Fix: cleaned stale prefix manually, redeployed Lambda with latest code
+(cleanup fix + all accumulated fixes from this session).
+
+Toshi re-run at 10:05 NZST: skipped successfully.
+
+### Schedule change: weekly → daily
+
+Switched all four sources from weekly to daily at 13:05 NZST:
+
+```bash
+backup schedule remove --source <all> --frequency weekly
+backup schedule add --source <all> --frequency daily --time "13:05 NZST"
+```
+
+Cost impact of daily vs weekly (when inventories are in sync):
+- Athena UNLOAD + COUNT: ~$0.01-0.04/run
+- Lambda: ~$0.0005/run
+- DynamoDB exports (toshi only): ~$0.002/run
+- Estimated: ~$1.50-4.50/month (up from ~$0.20-0.65/month weekly)
+- RPO improvement: worst-case 7 days → ~1-2 days
+
+First daily run (2026-05-07 13:05 NZST): all four sources skipped — clean.
+
+### Current schedule
+
+```
+nzshm-backup-static-daily     ENABLED  cron(5 1 * * ? *)  → 13:05 NZST daily
+nzshm-backup-toshi-daily      ENABLED  cron(5 1 * * ? *)  → 13:05 NZST daily
+nzshm-backup-ths-daily        ENABLED  cron(5 1 * * ? *)  → 13:05 NZST daily
+nzshm-backup-weka-daily       ENABLED  cron(5 1 * * ? *)  → 13:05 NZST daily
+```
 
 ---
 
