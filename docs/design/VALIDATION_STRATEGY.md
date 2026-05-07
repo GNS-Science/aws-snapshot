@@ -101,6 +101,22 @@ corrupted data that has the right key/size/ETag but wrong content.
 
 ## The ETag problem and how we solve it
 
+### Historical timeline
+
+| Year | S3 change | Impact on object comparison |
+|------|-----------|---------------------------|
+| 2006 | S3 launch | ETag = MD5 of content. Reliable for comparison. |
+| 2010 | Multipart upload | ETag = MD5 of part-MD5s + `-N` suffix. **Broken** — same content, different ETag depending on chunk size. |
+| 2022 | Additional checksums (opt-in) | CRC32, CRC32C, SHA1, SHA256 available per-request. Content-deterministic regardless of upload method. But only set if uploader explicitly requests it. |
+| 2025 | Default integrity (boto3 1.36+) | SDK automatically computes CRC32/CRC64NVME on all uploads. No opt-in needed. S3 Batch copies get CRC64NVME automatically. |
+
+**Current state of objects in production:**
+- Source bucket objects: mostly pre-2022, no checksums
+- Backup copies (made by S3 Batch 2026): have CRC64NVME
+- Cross-account: `GetObjectAttributes` may not be permitted on source
+
+Our three-tier verification handles all of these eras gracefully.
+
 ### Why ETags aren't reliable for comparison
 
 S3 ETags are computed differently depending on how an object was uploaded:
