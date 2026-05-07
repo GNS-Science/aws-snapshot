@@ -9,11 +9,11 @@ backup run (inventory-based), and one that bypasses the pipeline entirely
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     SOURCE BUCKETS                                  │
-│        (toshi 7M, ths 4M, static 40M, weka 11 objects)            │
+│        (toshi 7M, ths 4M, static 40M, weka 11 objects).             │
 └──────────────┬──────────────────────────────────┬───────────────────┘
                │                                  │
-               │  S3 Inventory (daily)             │  Direct S3 API
-               │  Parquet snapshots                │  list_objects_v2
+               │  S3 Inventory (daily)            │  Direct S3 API
+               │  Parquet snapshots               │  list_objects_v2
                ▼                                  │
 ┌──────────────────────────────┐                  │
 │       ATHENA DIFF QUERY      │                  │
@@ -98,6 +98,85 @@ in seconds. If the pipeline is wrong for weka, it's wrong for everything.
 
 This catches a class of problems that neither Path A nor Path B detect:
 corrupted data that has the right key/size/ETag but wrong content.
+
+## The ETag problem and how we solve it
+
+### Why ETags aren't reliable for comparison
+
+S3 ETags are computed differently depending on how an object was uploaded:
+
+- **Single-part upload** → ETag = MD5 of content (deterministic)
+- **Multipart upload** → ETag = MD5 of concatenated part-MD5s + `-N` suffix
+  (depends on part count and chunk boundaries, NOT just content)
+
+When S3 Batch copies an object, it may use a different upload method than the
+original. Two identical files can have different ETags:
+
+```
+Source:  "ecff333f8d530ab722377c9440c57342-2"   (multipart, 2 parts)
+Backup:  "2ee248473e80f1310dcc6ae80005368f"      (single-part copy)
+```
+
+Same bytes, different ETags. A naive comparison flags this as a mismatch —
+producing thousands of false positives (4,224 per THS run before we fixed it).
+
+### Three-tier verification
+
+Each comparison point in the system uses a cascade of increasingly
+permissive checks:
+
+```
+  ETags match?
+      │
+      ├── YES → verified ✓
+      │
+      └── NO → try checksum comparison
+                    │
+                    ├── Both have CRC64/SHA256, values match → verified ✓
+                    │
+                    ├── Checksums differ → REAL MISMATCH ✗
+                    │
+                    └── Checksums unavailable → check ETag format
+                              │
+                              ├── Either ETag has '-N' suffix
+                              │   (multipart) → skip (known false positive) ✓
+                              │
+                              └── Both single-part, differ → REAL MISMATCH ✗
+```
+
+### Where each tier is used
+
+| Context | Tier 1: ETag | Tier 2: Checksum | Tier 3: Smart ETag |
+|---------|-------------|-----------------|-------------------|
+| **Athena diff** (Path A) | — | — | `strpos(e_tag, '-') = 0` in SQL |
+| **test integrity** (Path B) | `!=` compare | `get_object_checksum` via `GetObjectAttributes` | `-` in ETag string |
+| **test restore** (Path C) | fallback | `get_object_checksum` on source + copy | — |
+
+### S3 checksums (CRC64NVME)
+
+S3 now computes content-deterministic checksums alongside ETags. These are
+**not** affected by upload method — same content always produces the same
+checksum regardless of whether the upload was single-part or multipart.
+
+- S3 Batch copies automatically get CRC64NVME checksums
+- Available via `GetObjectAttributes` (not via `HeadObject` or S3 Inventory)
+- `test restore` and `test integrity` use these when available
+- Cross-account: requires `s3:GetObjectAttributes` permission on the reader
+  role (not currently granted for source buckets — falls back to smart ETag)
+
+### Why not just use checksums everywhere?
+
+- **S3 Inventory doesn't include checksum values** — only `ChecksumAlgorithm`
+  (which algorithm was used, not the value). So Athena diff queries can't
+  compare checksums.
+- **Cross-account access**: the backup reader role may not have
+  `GetObjectAttributes` on source buckets. Checksum comparison falls back
+  to smart ETag when source checksums are unavailable.
+- **Pre-existing objects**: objects uploaded before checksum support was
+  enabled may not have checksums at all.
+
+The smart ETag comparison (skip multipart) handles these edge cases without
+requiring infrastructure changes.
 
 ## Recommended testing cadence
 
