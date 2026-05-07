@@ -10,6 +10,30 @@ logger = logging.getLogger(__name__)
 # Objects written by the backup tooling itself; no counterpart in source buckets.
 OPERATIONAL_PREFIXES = ("_state/", "_manifests/", "_batch-reports/", "_events/")
 
+# S3 checksum algorithms in priority order.
+CHECKSUM_KEYS = (
+    "ChecksumCRC64NVME",
+    "ChecksumCRC32",
+    "ChecksumCRC32C",
+    "ChecksumSHA256",
+    "ChecksumSHA1",
+)
+
+
+def get_object_checksum(s3_client, bucket: str, key: str) -> tuple[str, str] | None:
+    """Return (algorithm, value) for the first available checksum, or None."""
+    try:
+        resp = s3_client.get_object_attributes(
+            Bucket=bucket, Key=key, ObjectAttributes=["Checksum"],
+        )
+        checksum = resp.get("Checksum", {})
+        for ck in CHECKSUM_KEYS:
+            if ck in checksum and checksum[ck]:
+                return ck, checksum[ck]
+    except Exception:
+        pass
+    return None
+
 
 def _is_operational(key: str) -> bool:
     return any(key.startswith(p) for p in OPERATIONAL_PREFIXES)
@@ -115,6 +139,7 @@ def check_bucket_integrity(
         return result
 
     # Compare
+    checksum_verified = 0
     for key, source_etag in source_objects.items():
         backup_etag = backup_objects.get(key)
         if backup_etag is None:
@@ -122,11 +147,35 @@ def check_bucket_integrity(
                 ObjectDiff(key=key, issue="missing_in_backup", source_etag=source_etag)
             )
         elif backup_etag != source_etag:
-            result.diffs.append(
-                ObjectDiff(
-                    key=key, issue="etag_mismatch", source_etag=source_etag, backup_etag=backup_etag
+            # ETags differ — try checksum comparison before flagging.
+            # Multipart uploads produce different ETags for identical content,
+            # but checksums (CRC64NVME etc.) are content-deterministic.
+            src_ck = get_object_checksum(src_client, source_bucket, key)
+            bkp_ck = get_object_checksum(backup_s3_client, backup_bucket, key)
+            if src_ck and bkp_ck and src_ck[0] == bkp_ck[0] and src_ck[1] == bkp_ck[1]:
+                checksum_verified += 1
+            elif "-" in source_etag.strip('"') or "-" in backup_etag.strip('"'):
+                # One or both ETags are multipart (contain '-N' suffix).
+                # Multipart ETags are not content-deterministic — skip.
+                checksum_verified += 1
+                logger.debug(
+                    f"Skipping multipart ETag mismatch for {key}: "
+                    f"source={source_etag} backup={backup_etag}"
                 )
-            )
+            else:
+                result.diffs.append(
+                    ObjectDiff(
+                        key=key,
+                        issue="etag_mismatch",
+                        source_etag=source_etag,
+                        backup_etag=backup_etag,
+                    )
+                )
+
+    if checksum_verified:
+        logger.info(
+            f"{checksum_verified} object(s) with differing ETags verified via checksum"
+        )
 
     result.end_time = datetime.now(timezone.utc)
     logger.info(

@@ -7,9 +7,9 @@ import pytest
 from nzshm_backup.commands.test import (
     _delete_temp_bucket,
     _fmt_dt,
-    _get_object_checksum,
     _verify_restored_object,
 )
+from nzshm_backup.integrity import get_object_checksum
 
 
 @pytest.fixture(autouse=True)
@@ -36,19 +36,19 @@ def test_fmt_dt_with_string():
 
 
 # ---------------------------------------------------------------------------
-# _get_object_checksum
+# get_object_checksum
 # ---------------------------------------------------------------------------
 
 
 class TestGetObjectChecksum:
-    """Tests for _get_object_checksum helper."""
+    """Tests for get_object_checksum helper."""
 
     def test_returns_first_available_checksum(self):
         s3 = MagicMock()
         s3.get_object_attributes.return_value = {
             "Checksum": {"ChecksumSHA256": "abc123"},
         }
-        result = _get_object_checksum(s3, "bucket", "key")
+        result = get_object_checksum(s3, "bucket", "key")
         assert result == ("ChecksumSHA256", "abc123")
 
     def test_returns_crc64_when_present(self):
@@ -56,14 +56,14 @@ class TestGetObjectChecksum:
         s3.get_object_attributes.return_value = {
             "Checksum": {"ChecksumCRC64NVME": "crc64val", "ChecksumSHA256": "sha256val"},
         }
-        result = _get_object_checksum(s3, "bucket", "key")
+        result = get_object_checksum(s3, "bucket", "key")
         # CRC64NVME is first in _CHECKSUM_KEYS, so it wins
         assert result == ("ChecksumCRC64NVME", "crc64val")
 
     def test_returns_none_when_no_checksum(self):
         s3 = MagicMock()
         s3.get_object_attributes.return_value = {"Checksum": {}}
-        result = _get_object_checksum(s3, "bucket", "key")
+        result = get_object_checksum(s3, "bucket", "key")
         assert result is None
 
     def test_returns_none_when_empty_value(self):
@@ -71,19 +71,19 @@ class TestGetObjectChecksum:
         s3.get_object_attributes.return_value = {
             "Checksum": {"ChecksumSHA256": ""},
         }
-        result = _get_object_checksum(s3, "bucket", "key")
+        result = get_object_checksum(s3, "bucket", "key")
         assert result is None
 
     def test_returns_none_on_exception(self):
         s3 = MagicMock()
         s3.get_object_attributes.side_effect = Exception("AccessDenied")
-        result = _get_object_checksum(s3, "bucket", "key")
+        result = get_object_checksum(s3, "bucket", "key")
         assert result is None
 
     def test_returns_none_when_checksum_key_missing(self):
         s3 = MagicMock()
         s3.get_object_attributes.return_value = {}
-        result = _get_object_checksum(s3, "bucket", "key")
+        result = get_object_checksum(s3, "bucket", "key")
         assert result is None
 
 
@@ -98,7 +98,7 @@ class TestVerifyRestoredObject:
     def test_checksum_match_returns_none(self):
         s3 = MagicMock()
         with patch(
-            "nzshm_backup.commands.test._get_object_checksum",
+            "nzshm_backup.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), ("ChecksumSHA256", "abc")],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -107,7 +107,7 @@ class TestVerifyRestoredObject:
     def test_checksum_mismatch_returns_error(self):
         s3 = MagicMock()
         with patch(
-            "nzshm_backup.commands.test._get_object_checksum",
+            "nzshm_backup.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), ("ChecksumSHA256", "xyz")],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -121,7 +121,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"etag"'}
         with patch(
-            "nzshm_backup.commands.test._get_object_checksum",
+            "nzshm_backup.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), ("ChecksumCRC32", "def")],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -132,7 +132,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"etag123"'}
         with patch(
-            "nzshm_backup.commands.test._get_object_checksum",
+            "nzshm_backup.commands.test.get_object_checksum",
             return_value=None,
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag123"')
@@ -142,7 +142,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"different"'}
         with patch(
-            "nzshm_backup.commands.test._get_object_checksum",
+            "nzshm_backup.commands.test.get_object_checksum",
             return_value=None,
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"expected"')
@@ -153,7 +153,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"etag"'}
         with patch(
-            "nzshm_backup.commands.test._get_object_checksum",
+            "nzshm_backup.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), None],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
