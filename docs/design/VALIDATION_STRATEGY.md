@@ -115,6 +115,14 @@ corrupted data that has the right key/size/ETag but wrong content.
 - Backup copies (made by S3 Batch 2026): have CRC64NVME
 - Cross-account: `GetObjectAttributes` may not be permitted on source
 
+**Concrete example — toshi (`nzshm22-toshi-api-prod`):** This bucket spans
+2020–2026 and contains ~7M objects uploaded by different tools and SDK
+versions over 6 years. Some objects are single-part (reliable ETags), some
+are multipart (unreliable ETags), most have no checksums (pre-2022). The
+backup copies (made by S3 Batch in 2026) all have CRC64NVME checksums but
+may have different ETags from the source. No single comparison method works
+for the entire bucket — which is exactly why the three-tier cascade exists.
+
 Our three-tier verification handles all of these eras gracefully.
 
 ### Why ETags aren't reliable for comparison
