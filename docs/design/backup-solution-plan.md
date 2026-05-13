@@ -359,15 +359,16 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Sandbox demo tooling (`scripts/sandbox_setup.sh`, `docs/sandbox-demo.md`)
 - [x] 69 tests passing
 
-**Remaining before first production run (toshi):**
-- [ ] Create S3 Batch IAM role in production account (`python scripts/create-backup-roles.py`)
-- [ ] Set `s3_batch_role_arn` + `use_s3_batch: true` for toshi in production config
+**Production status:** S3 Batch role created, all sources configured with
+`use_s3_batch: true` and `batch_manifest_mode: inventory`. Done.
 
 ### Phase 3: Notifications + Reporting
+
 - [ ] SES email integration
 - [ ] Slack webhook integration
 - [ ] Cost tracking implementation
 - [ ] Budget alerts setup
+- [ ] Automated weekly health report (see ADR-005)
 
 ### Phase 4: Restore Functionality ✅ Substantially complete
 
@@ -385,19 +386,17 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 
 ### Phase 5: Testing & Validation ✅ Substantially complete
 
-- [x] `backup test restore` — samples objects from each backup bucket; round-trip DynamoDB restore
-- [x] `backup test integrity` — ETag + object count verification (S3 + DynamoDB)
+- [x] `backup test restore` — inventory-based random sampling (Athena `ORDER BY RAND()`), CRC64NVME checksum verification, falls back to smart ETag
+- [x] `backup test integrity` — three-tier verification (checksum → smart ETag → skip multipart), DynamoDB PITR + export checks. Weka used as canary for independent pipeline audit.
 - [x] S3 versioning on backup buckets (`version_retention_days` config)
 - [x] Last-run state persisted to `_state/last-run.json` in backup bucket
-- [ ] Test scheduling (EventBridge-triggered automated test runs)
+- [x] Inventory guards — refuse listing fallback for large inventory-mode sources
+- [x] Validation strategy documented (`docs/design/VALIDATION_STRATEGY.md`)
+- [ ] Test scheduling (EventBridge-triggered automated test runs) — see ADR-005
 - [ ] Compliance reporting (HTML/PDF)
+- [ ] `test full-drill` — quarterly DR exercise
 
-### Phase 6: Parallel Run + Cutover
-
-> **Strategy:** Run the full backup→restore→validate cycle on **Arkivalist** first
-> (account `816711409078`, cross-account from backup account `595842668254`).
-> Arkivalist is lower-criticality but exercises the same cross-account IAM pattern
-> required for NSHM production (`461564345538`). See `docs/design/ACCOUNT_ISOLATION.md`.
+### Phase 6: Parallel Run + Cutover ✅ Substantially complete
 
 - [x] Arkivalist S3 buckets and DynamoDB tables configured
 - [x] Cross-account session support (`get_cross_account_session`)
@@ -407,12 +406,14 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] IAM roles created in source account (`nzshm-backup-reader`, `nzshm-backup-restore`)
 - [x] Lambda deployed to backup account (`737696831915`), config pushed to SSM
 - [x] Pre-flight `backup check` command verified against all sources
-- [x] Weekly schedules live (weka/ths/static: Wednesday 20:15 NZST; toshi: Thursday 20:15 NZST)
-- [x] Weka smoke test confirmed end-to-end EventBridge → Lambda → S3 path
-- [x] First full backup run — static (39.9M objects) S3 Batch job submitted 2026-05-04; toshi validated (skipped — inventories in sync); ths Lambda cutover validated
-- [ ] Weka first Lambda-triggered backup with UNLOAD pipeline (in progress 2026-05-04)
-- [ ] Restore drill against NSHM production data
-- [ ] Cost verification after first month
+- [x] Athena UNLOAD manifest pipeline — all sources on Lambda (28s for 40M objects)
+- [x] Smart ETag comparison — eliminates false-positive re-copies from multipart uploads
+- [x] All 4 sources backed up and object-count reconciled (50.8M objects, 11 TB)
+- [x] Daily schedules live (13:05 NZST) — 7+ consecutive days clean as of 2026-05-14
+- [x] Restore tests passing for all sources (checksum verified)
+- [x] `.env` support for CLI convenience (python-dotenv)
+- [ ] Restore drill against NSHM production data (`test full-drill`)
+- [ ] Cost verification after first month (scheduled June 2026)
 - [ ] Cutover planning + AWS Backup decommission
 
 ---
@@ -637,7 +638,7 @@ testing:
 
 ---
 
-**Document Version:** 1.5
-**Created:** 2026-03-09  **Last updated:** 2026-05-04
-**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress — all sources validated on Lambda via Athena UNLOAD manifest pipeline; static first full backup (39.9M objects) submitted; restore drill and cost verification pending.
+**Document Version:** 1.6
+**Created:** 2026-03-09  **Last updated:** 2026-05-14
+**Status:** Phases 1–2, 4–6 substantially complete. All 4 sources backed up daily (50.8M objects, 11 TB), restore-verified with CRC64 checksums, 7+ days clean. Remaining: Phase 3 (notifications), full DR drill, cost verification, AWS Backup cutover.
 **Owner:** NSHM DevOps Team
