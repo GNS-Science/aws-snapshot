@@ -414,7 +414,8 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] `.env` support for CLI convenience (python-dotenv)
 - [ ] Restore drill against NSHM production data (`test full-drill`)
 - [ ] Cost verification after first month (scheduled June 2026)
-- [ ] Cutover planning + AWS Backup decommission
+- [x] **AWS Backup decommissioned** (2026-05-13) — custom solution is now the
+  sole backup system for all NSHM production data
 
 ---
 
@@ -638,7 +639,7 @@ testing:
 
 ---
 
-**Document Version:** 1.6
+**Document Version:** 1.7
 **Created:** 2026-03-09  **Last updated:** 2026-05-14
-**Status:** Phases 1–2, 4–6 substantially complete. All 4 sources backed up daily (50.8M objects, 11 TB), restore-verified with CRC64 checksums, 7+ days clean. Remaining: Phase 3 (notifications), full DR drill, cost verification, AWS Backup cutover.
+**Status:** AWS Backup decommissioned 2026-05-13. Custom solution is sole backup system. All 4 sources backed up daily (50.8M objects, 11 TB), restore-verified. Remaining: Phase 3 (notifications), full DR drill, cost verification.
 **Owner:** NSHM DevOps Team
