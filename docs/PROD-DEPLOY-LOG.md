@@ -584,6 +584,22 @@ nzshm-backup-weka-daily       ENABLED  cron(5 1 * * ? *)  → 13:05 NZST daily
 
 ---
 
+## Step 29 — AWS Backup decommissioned ✅ 2026-05-13
+
+AWS Backup removed from the NSHM backup account. The custom nzshm-backup
+solution is now the **sole backup system** for all production data.
+
+- **Cost reduction:** $1,700/month (AWS Backup) → ~$10/month (custom solution)
+- **Savings:** ~97% / ~$20,000 NZD/year
+- **Coverage:** 50.8M objects, 11 TB across 4 sources + 4 DynamoDB tables
+- **Schedule:** daily at 13:05 NZST (was weekly under AWS Backup)
+- **Validation:** daily automated diff + restore tests with CRC64 checksums
+
+7+ days of clean daily runs preceded decommission. All restore tests
+passing across all sources.
+
+---
+
 ## Step 20 — Deployed Athena THS runtime artifact to CodeBuild ✅ 2026-04-23
 
 Published runtime artifact from commit `6fb7128` to the THS CodeBuild source key:
