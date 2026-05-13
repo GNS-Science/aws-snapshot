@@ -3,6 +3,7 @@
 import os
 
 import typer
+from dotenv import load_dotenv
 
 from nzshm_backup import __version__
 from nzshm_backup.state import _state
@@ -54,6 +55,8 @@ def main(
     version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ):
     """NSHM Backup Solution - Manage AWS backups for ToshiAPI and THS datasets."""
+    load_dotenv()  # loads .env from cwd if present (before any config/AWS ops)
+
     if version:
         typer.echo(f"backup {__version__}")
         raise typer.Exit()
