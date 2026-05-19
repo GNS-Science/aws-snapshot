@@ -1,7 +1,28 @@
 # ADR-003: Run-state transition model
 
-- Status: Proposed
+- Status: Implemented (with changes)
 - Date: 2026-04-21
+- Updated: 2026-05-19
+
+> **Outcome:** The phase model is live in `src/nzshm_backup/run_state.py`
+> and consumed by `backup status` (`commands/status.py:186-252`). Two
+> phases from the original proposal were intentionally collapsed during
+> implementation:
+>
+> - `preparing_manifest` — subsumed into `running`. `status.py:186`
+>   synthesises a "(preparing manifest; batch job not submitted yet)"
+>   display string from the `running` state plus the absence of
+>   `batch_job_id`, so the operator-visibility goal is met without a
+>   distinct persisted phase. The Athena pipeline (ADR-002) also
+>   shortened this window enough that a separate phase became less
+>   valuable.
+> - `active` — not persisted; derived live in `status.py` from the S3
+>   Batch `DescribeJob` API when `batch_job_id` is present. Avoids
+>   stale state when Batch progresses asynchronously after the Lambda
+>   exits.
+>
+> Persisted phases today: `running`, `prepared`, `submitted`, `skipped`,
+> `completed`, `failed` (see `run_state.py:36`).
 
 ## Context
 
