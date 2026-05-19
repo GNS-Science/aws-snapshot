@@ -139,6 +139,49 @@ wait time.
   rather than aging out. The no-delete IAM policy already prevents
   automatic cleanup anyway, so this is a documentation change more than
   a behaviour change.
+- **Intentional source deletions persist in backup forever.** If a team
+  identifies and deletes a large chunk of source data as garbage (e.g.
+  6 TB of bad-experiment outputs), the backup retains it indefinitely
+  at ~$42/month for that 6 TB. Under the current 365-day Expiration
+  policy the same garbage would age out within a year. This is a real
+  trade — it is the symmetric cost of the "deleted source objects are
+  protected from propagating to backups" guarantee.
+
+  The backup engine is deliberately deaf to source deletions
+  (`athena_inventory.py:248-256` only finds `source - backup`, never
+  the inverse) and the Lambda role has no `s3:DeleteObject` on backup
+  buckets. So there is no automated path to reflect intentional source
+  deletions into the backup — and under no-Expiration, no lifecycle
+  path either. Addressed by mitigations (1) and (2) below.
+
+## Mitigations
+
+1. **Daily object-count delta check** (folded into ADR-005 health
+   report). For each source the daily report compares
+   `source.object_count` against the previous day's value (already
+   available from S3 Inventory). Drops exceeding a configurable
+   threshold (default: 5% or 10,000 objects, whichever is larger) are
+   flagged loud in the Slack/email message. The goal is not to block
+   the backup — accidental deletions are exactly what we want to keep
+   backing up around — but to ensure a human notices within 24 hours
+   that a large drop occurred and can decide whether it was
+   intentional.
+
+2. **Documented manual-purge runbook**
+   (`docs/operations/purge-from-backup.md`, to be written). Describes
+   the out-of-band admin process for intentionally removing identified
+   garbage from a backup bucket: required IAM credentials, the
+   recommended command pattern (S3 Batch Operations with a
+   manually-prepared manifest of keys to delete), the verification
+   step (cross-check that source state matches expectation before
+   issuing deletes), and the post-purge audit trail. This is
+   deliberately a manual, friction-laden process — it should not feel
+   routine.
+
+Together these give the system the property: deletions are not
+silent (mitigation 1) and there is a documented way to act on them
+(mitigation 2), but no daily code path is empowered to remove backup
+data on its own.
 
 ## Alternatives considered
 
@@ -156,7 +199,17 @@ wait time.
    re-copy cliff to year 10 but doesn't eliminate it. A future operator
    inherits a sudden recopy spike without the context to recognise it.
    Rejected as deferring a problem rather than solving it.
-4. **Drop the Expiration rule only, keep Deep Archive.** Same as (2) —
+4. **Keep a long Expiration rule (e.g. 7 years) explicitly as a garbage
+   floor.** Would give intentionally-deleted source data an automatic
+   age-out path so it doesn't accumulate forever. Rejected because (a)
+   it reintroduces exactly the silent re-copy mechanism this ADR
+   removes — at the 7-year mark, immutable scientific outputs would
+   begin annual cycling — and (b) the same goal is served by the
+   manual-purge runbook (mitigation 2) without the lifecycle complexity
+   or the future cost cliff. The trade-off here was deliberate:
+   prefer "deletions require human action" over "deletions happen
+   automatically on a 7-year timer."
+5. **Drop the Expiration rule only, keep Deep Archive.** Same as (2) —
    still requires the thaw code path.
 
 ## Implementation scope
@@ -174,6 +227,8 @@ wait time.
 | Update retention-strategy doc | `docs/design/retention-strategy-and-costs.md` | Small |
 | Update DR scenario doc (Phase 2 collapses) | `docs/design/disaster-recovery-scenario.md` | Small |
 | Re-apply lifecycle policy to deployed buckets | One-off via `backup setup` or `aws s3api put-bucket-lifecycle-configuration` | Small |
+| Mitigation 1: object-count delta in health report | `src/nzshm_backup/health_report.py` (see ADR-005) | Small |
+| Mitigation 2: manual-purge runbook | `docs/operations/purge-from-backup.md` (new) | Small |
 
 ### Migration of existing data
 
