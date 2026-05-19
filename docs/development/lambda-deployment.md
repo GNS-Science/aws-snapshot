@@ -55,11 +55,11 @@ sls --version
 sls plugin install -n serverless-python-requirements
 ```
 
-### 4. Poetry (used by serverless-python-requirements to package deps)
+### 4. uv (used by serverless-python-requirements to package deps)
 
 ```bash
-pip install poetry    # or: brew install poetry
-poetry --version
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv --version
 ```
 
 ---
@@ -127,6 +127,32 @@ Serverless will:
 
 ---
 
+## Lambda IAM permissions
+
+The Lambda execution role (managed by `serverless.yml`) includes:
+
+- **S3** — `ListBucket`, `GetObject`, `PutObject`, `CopyObject`, bucket management
+- **DynamoDB** — `ExportTableToPointInTime`, `DescribeExport`, `ListExports`,
+  `DescribeContinuousBackups`, `UpdateContinuousBackups`
+- **STS** — `AssumeRole` (cross-account access to source accounts)
+- **S3 Control** — `CreateJob`, `DescribeJob` (S3 Batch Operations)
+- **SSM** — `GetParameter`, `PutParameter` (config + run state)
+- **Athena** — `StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`,
+  `ListDatabases`, `ListTables`, `GetDatabase`, `GetTableMetadata`
+- **Glue Data Catalog** — full CRUD for databases, tables, and partitions
+  (`Get*`, `Create*`, `Update*`, `Delete*`, `BatchCreatePartition`,
+  `BatchDeletePartition`)
+
+The Athena and Glue permissions are required for inventory-based manifest
+generation (`batch_manifest_mode: inventory`), which uses Athena to diff
+S3 Inventory snapshots via Glue Data Catalog tables.
+
+> **Note:** if you add new Athena query patterns that touch additional Glue
+> resources (e.g. new databases or partition schemes), verify the Lambda role
+> has the required Glue actions — Athena delegates all catalog operations to Glue.
+
+---
+
 ## Post-deploy: register the Lambda target
 
 After deploy, copy the printed function ARN into `backup-config.yaml`:
@@ -182,9 +208,9 @@ Serverless does not read SSO profiles from `~/.aws/config`. You must use the
 `eval` export approach above.
 
 **`serverless-python-requirements` packaging fails**
-Ensure Poetry is installed and `poetry.lock` is up to date:
+Ensure uv is installed and `uv.lock` is up to date:
 ```bash
-poetry lock --no-update
+uv lock
 sls deploy
 ```
 

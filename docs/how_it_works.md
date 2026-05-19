@@ -7,7 +7,7 @@ two ways to invoke it:
 
 ```
 CLI mode (manual, on-demand):
-  your terminal → poetry run backup run → boto3 → S3 / DynamoDB APIs
+  your terminal → uv run backup run → boto3 → S3 / DynamoDB APIs
 
 Lambda mode (scheduled, automated):
   EventBridge cron → Lambda invocation → same Python code → boto3 → S3 / DynamoDB APIs
@@ -37,7 +37,16 @@ that call the same underlying functions — `backup_source()` and
 3. **S3 loop** — for each bucket in `sources.toshi.s3_buckets`:
    - Derive backup bucket name: `bb-{source-key}-s3-{label}-{region}-{source-account-id}`
    - Create backup bucket if it doesn't exist (with lifecycle policy + delete-protection)
-   - Incremental sync: list source objects, compare ETags, copy only changed/new objects
+   - **Inventory mode** (`batch_manifest_mode: inventory`, used by all production sources):
+     1. Discover latest source and backup S3 Inventory snapshots
+     2. Run Athena UNLOAD query to diff source vs backup inventories — writes
+        CSV manifest directly to S3 (server-side, no data through Lambda)
+     3. Run COUNT(*) in parallel for exact row count
+     4. Concatenate UNLOAD output files into single manifest via S3 multipart-copy
+     5. Submit S3 Batch `CreateJob` with the manifest
+   - **Inline mode** (`batch_manifest_mode: inline`, legacy):
+     - List source objects, compare ETags, generate manifest in-process
+     - Only suitable for small buckets; times out for millions of objects
 4. **DynamoDB loop** — for each table ARN in `sources.toshi.dynamodb_tables`:
    - Derive export bucket name: `bb-{source-key}-dynamo-{region}-{source-account-id}`
    - Create export bucket if it doesn't exist (idempotent — no error if already exists)
@@ -57,28 +66,33 @@ target to fire automatically. Until `lambda_arn` is set in `backup-config.yaml`
 and a Lambda is deployed, the rules exist but have no target — running
 `backup run` manually is the only way to trigger a backup.
 
-## Lambda timeout risk with large S3 buckets
+## Lambda timeout and the Athena UNLOAD pipeline
 
-> **Production concern:** The current S3 sync uses per-object `copy_object` API
-> calls inside the Lambda. This does not scale to the production toshi bucket
-> (~8 TB, ~8 million objects).
+The Lambda timeout is 15 minutes (AWS maximum). For large buckets (millions of
+objects), generating the S3 Batch manifest must not stream data through Lambda.
 
-| Step | Cost at 8M objects |
-|------|--------------------|
-| `list_objects_v2` source | ~8,000 API calls, ~80s |
-| `list_objects_v2` backup | ~8,000 API calls, ~80s |
-| `copy_object` (first run / full sync) | ~8M calls, ~22 hours — **impossible** |
-| `copy_object` (incremental, 0.1% changed) | ~8,000 calls, ~80s — feasible |
+**Solution: Athena UNLOAD** — the inventory diff query runs as an Athena UNLOAD
+statement that writes the manifest CSV directly to S3 (server-side). Lambda only
+orchestrates the query and S3 copy operations. This scales to any bucket size —
+the `static` source (39.9M objects, ~2.7 TB) completes manifest generation in
+~28 seconds total Lambda execution.
 
-The Lambda timeout is 15 minutes (AWS maximum). Incremental runs after the
-first sync are likely fine. A first-run or forced full sync will time out.
-
-**Planned fix: S3 Batch Operations** — Lambda generates a diff manifest (CSV),
-submits an `s3control:CreateJob`, and exits immediately. AWS runs the copy
-asynchronously, following the same pattern as DynamoDB PITR exports. See
-`docs/architecture/s3-batch-operations.md` for the implementation plan.
+See `docs/design/ATHENA_MANIFEST_PIPELINE.md` for the full design and
+`docs/architecture/s3-batch-operations.md` for S3 Batch Operations details.
 
 ## How backup data accumulates
+
+### Backup model vs replication model
+
+This tool implements **backup semantics**, not continuous replication semantics.
+
+- Backups run on explicit schedule checkpoints (weekly/daily/manual)
+- Source deletes do not remove backup objects
+- Source mutations create new backup versions (with version retention) rather than
+  erasing the previous recoverable state
+
+The design goal is recoverability under human error and poisoning scenarios, even
+when that differs from source-mirror behaviour.
 
 Each backup run is **incremental and additive** — no existing backup data is
 ever overwritten or deleted by the tool:

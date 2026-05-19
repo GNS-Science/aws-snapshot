@@ -3,12 +3,18 @@
 import json
 from unittest.mock import patch
 
+import pytest
 from moto import mock_aws
 
 from nzshm_backup.config.models import ConfigModel, GeneralConfig, SourceConfig
 from nzshm_backup.lambda_handler import handler
 
 REGION = "ap-southeast-2"
+
+
+@pytest.fixture(autouse=True)
+def _set_region(monkeypatch):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", REGION)
 
 
 def _make_config(**source_kwargs) -> ConfigModel:

@@ -25,6 +25,7 @@ def test_backup_task_defaults():
     assert task.dry_run is False
     assert task.trigger_type == "scheduled"
     assert task.full_sync is False
+    assert task.prepare_only is False
     assert task.is_scheduled() is True
 
 
@@ -56,6 +57,7 @@ def test_backup_task_from_dict():
         "dry_run": True,
         "trigger_type": "manual",
         "full_sync": True,
+        "prepare_only": True,
     }
 
     task = BackupTask.model_validate(event)
@@ -64,3 +66,4 @@ def test_backup_task_from_dict():
     assert task.dry_run is True
     assert task.trigger_type == "manual"
     assert task.full_sync is True
+    assert task.prepare_only is True

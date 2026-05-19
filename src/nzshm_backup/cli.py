@@ -3,6 +3,7 @@
 import os
 
 import typer
+from dotenv import load_dotenv
 
 from nzshm_backup import __version__
 from nzshm_backup.state import _state
@@ -54,6 +55,8 @@ def main(
     version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ):
     """NSHM Backup Solution - Manage AWS backups for ToshiAPI and THS datasets."""
+    load_dotenv()  # loads .env from cwd if present (before any config/AWS ops)
+
     if version:
         typer.echo(f"backup {__version__}")
         raise typer.Exit()
@@ -65,6 +68,7 @@ def main(
 
 
 # Import and register subcommand groups (must be after main() to avoid circular imports)
+from nzshm_backup.commands.check import app as check_app  # noqa: E402
 from nzshm_backup.commands.config import app as config_app  # noqa: E402
 from nzshm_backup.commands.costs import app as costs_app  # noqa: E402
 from nzshm_backup.commands.events import app as events_app  # noqa: E402
@@ -72,10 +76,13 @@ from nzshm_backup.commands.report import app as report_app  # noqa: E402
 from nzshm_backup.commands.restore import app as restore_app  # noqa: E402
 from nzshm_backup.commands.run_backup import app as run_app  # noqa: E402
 from nzshm_backup.commands.schedule import app as schedule_app  # noqa: E402
+from nzshm_backup.commands.setup import app as setup_app  # noqa: E402
 from nzshm_backup.commands.status import app as status_app  # noqa: E402
 from nzshm_backup.commands.test import app as test_app  # noqa: E402
 
+app.add_typer(check_app, name="check", help="Pre-flight access and configuration checks.")
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")
+app.add_typer(setup_app, name="setup", help="Provision backup infrastructure.")
 app.add_typer(run_app, name="run", help="Execute manual backup.")
 app.add_typer(restore_app, name="restore", help="Manage backup restores. (TODO)")
 app.add_typer(test_app, name="test", help="Run backup tests and validation. (TODO)")

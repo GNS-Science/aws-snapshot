@@ -12,13 +12,19 @@
 
 ## Data Sources
 
-| Source | Size | Storage Type | Backup Method |
-|--------|------|--------------|---------------|
-| ToshiAPI - FileTable | 2.3 GB | DynamoDB | Point-in-Time Export to S3 |
-| ToshiAPI - ThingTable | 16 GB | DynamoDB | Point-in-Time Export to S3 |
-| ToshiBucket | 8 TB | S3 | S3 Copy + Lifecycle Policies |
-| THS_dataset_prod | 1 TB | S3 | S3 Copy + Lifecycle Policies |
-| **Total** | **9 TB + 18.3 GB** | | |
+| Source alias | Resource | Size | Storage Type | Backup Method |
+|--------|------|------|--------------|---------------|
+| `toshi` | ToshiFileObject-PROD | 2.3 GB | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | ToshiIdentity-PROD | — | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | ToshiTableObject-PROD | — | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | ToshiThingObject-PROD | 16 GB | DynamoDB | Point-in-Time Export to S3 |
+| `toshi` | nzshm22-toshi-api-prod | 8 TB | S3 | S3 Batch Operations |
+| `ths` | ths-dataset-prod | 1 TB | S3 | S3 Batch Operations |
+| `static` | nzshm22-static-reports | 2.7 TB | S3 | S3 Batch Operations |
+| `weka` | nzshm22-weka-ui-prod | 80 MB | S3 | Incremental sync |
+| **Total** | | **~11.7 TB + 18.3 GB** | | |
+
+All sources are cross-account: source account `461564345538` → backup account `737696831915`.
 
 ---
 
@@ -84,6 +90,29 @@
 
 ## Backup Methods
 
+### Backup semantics (explicitly not replication)
+
+This project is intentionally designed as a **backup system**, not a source-mirroring
+replication system.
+
+Core semantics:
+
+1. **Explicit run cadence** (weekly by default, optionally daily during active periods)
+   creates discrete, auditable recovery checkpoints.
+2. **No delete propagation** from source to backup. Source deletions remain recoverable
+   from backup buckets until lifecycle expiry.
+3. **Anti-poisoning posture**: backup buckets use versioning + non-current retention,
+   so source mutations do not irreversibly destroy the last known-good backup copy.
+
+Why this matters:
+
+- A pure replication model prioritizes source parity, which can propagate bad changes
+  quickly (corruption, accidental overwrite, or malicious mutation).
+- This project prioritizes recoverability and controlled retention over mirror fidelity.
+
+Cross-region replication may still be used as a storage/DR transport mechanism in future,
+but it is not the primary backup model for NSHM data protection.
+
 ### S3 Backup (ToshiBucket + THS_dataset_prod)
 
 **Recommended:** Same-region backup with S3 Lifecycle policies
@@ -114,8 +143,8 @@ For current storage tier pricing, monthly cost modelling, and AWS Backup compari
 ### Summary
 
 - **Current (AWS Backup):** $1,700 NZD/month ($20,400/year)
-- **Custom solution (steady-state, aged):** ~$29 NZD/month (~$344/year)
-- **Savings:** ~98% reduction once the 9 TB corpus has aged into Deep Archive
+- **Custom solution (steady-state, aged):** ~$47 NZD/month (~$552/year)
+- **Savings:** ~97% reduction once the 11.7 TB corpus has aged into Deep Archive
 
 ---
 
@@ -330,15 +359,17 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Sandbox demo tooling (`scripts/sandbox_setup.sh`, `docs/sandbox-demo.md`)
 - [x] 69 tests passing
 
-**Remaining before first production run (toshi):**
-- [ ] Create S3 Batch IAM role in production account (`python scripts/create-backup-roles.py`)
-- [ ] Set `s3_batch_role_arn` + `use_s3_batch: true` for toshi in production config
+**Production status:** S3 Batch role created, all sources configured with
+`use_s3_batch: true` and `batch_manifest_mode: inventory`. Done.
 
 ### Phase 3: Notifications + Reporting
+
 - [ ] SES email integration
 - [ ] Slack webhook integration
 - [ ] Cost tracking implementation
 - [ ] Budget alerts setup
+- [ ] CloudWatch Lambda error alarm → SNS → Slack + email (see ADR-005, fast path)
+- [ ] Automated daily health report (see ADR-005, slow path)
 
 ### Phase 4: Restore Functionality ✅ Substantially complete
 
@@ -356,29 +387,36 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 
 ### Phase 5: Testing & Validation ✅ Substantially complete
 
-- [x] `backup test restore` — samples objects from each backup bucket; round-trip DynamoDB restore
-- [x] `backup test integrity` — ETag + object count verification (S3 + DynamoDB)
+- [x] `backup test restore` — inventory-based random sampling (Athena `ORDER BY RAND()`), CRC64NVME checksum verification, falls back to smart ETag
+- [x] `backup test integrity` — three-tier verification (checksum → smart ETag → skip multipart), DynamoDB PITR + export checks. Weka used as canary for independent pipeline audit.
 - [x] S3 versioning on backup buckets (`version_retention_days` config)
 - [x] Last-run state persisted to `_state/last-run.json` in backup bucket
-- [ ] Test scheduling (EventBridge-triggered automated test runs)
+- [x] Inventory guards — refuse listing fallback for large inventory-mode sources
+- [x] Validation strategy documented (`docs/design/VALIDATION_STRATEGY.md`)
+- [ ] Test scheduling (EventBridge-triggered automated test runs) — see ADR-005
 - [ ] Compliance reporting (HTML/PDF)
+- [ ] `test full-drill` — quarterly DR exercise
 
-### Phase 6: Parallel Run + Cutover
-
-> **Strategy:** Run the full backup→restore→validate cycle on **Arkivalist** first
-> (account `816711409078`, cross-account from backup account `595842668254`).
-> Arkivalist is lower-criticality but exercises the same cross-account IAM pattern
-> required for NSHM production (`461564345538`). See `docs/design/ACCOUNT_ISOLATION.md`.
+### Phase 6: Parallel Run + Cutover ✅ Substantially complete
 
 - [x] Arkivalist S3 buckets and DynamoDB tables configured
 - [x] Cross-account session support (`get_cross_account_session`)
 - [x] IAM roles created in Arkivalist account (`nzshm-backup-reader`, `nzshm-backup-restore`)
 - [x] Full backup→restore→validate cycle verified on Arkivalist (S3 + DynamoDB)
-- [ ] Apply cross-account pattern to NSHM production (`461564345538`)
-- [ ] Parallel run with AWS Backup (2-3 months) — toshi + ths
-- [ ] Restore drill against NSHM production data
-- [ ] Cost verification
-- [ ] Cutover planning + AWS Backup decommission
+- [x] Apply cross-account pattern to NSHM production (`461564345538`) — all 4 sources configured
+- [x] IAM roles created in source account (`nzshm-backup-reader`, `nzshm-backup-restore`)
+- [x] Lambda deployed to backup account (`737696831915`), config pushed to SSM
+- [x] Pre-flight `backup check` command verified against all sources
+- [x] Athena UNLOAD manifest pipeline — all sources on Lambda (28s for 40M objects)
+- [x] Smart ETag comparison — eliminates false-positive re-copies from multipart uploads
+- [x] All 4 sources backed up and object-count reconciled (50.8M objects, 11 TB)
+- [x] Daily schedules live (13:05 NZST) — 7+ consecutive days clean as of 2026-05-14
+- [x] Restore tests passing for all sources (checksum verified)
+- [x] `.env` support for CLI convenience (python-dotenv)
+- [ ] Restore drill against NSHM production data (`test full-drill`)
+- [ ] Cost verification after first month (scheduled June 2026)
+- [x] **AWS Backup decommissioned** (2026-05-13) — custom solution is now the
+  sole backup system for all NSHM production data
 
 ---
 
@@ -602,7 +640,7 @@ testing:
 
 ---
 
-**Document Version:** 1.3
-**Created:** 2026-03-09  **Last updated:** 2026-03-18
-**Status:** Phases 1–2, 4–5 complete. Phase 6 in progress (Arkivalist validated; NSHM production pending).
+**Document Version:** 1.7
+**Created:** 2026-03-09  **Last updated:** 2026-05-14
+**Status:** AWS Backup decommissioned 2026-05-13. Custom solution is sole backup system. All 4 sources backed up daily (50.8M objects, 11 TB), restore-verified. Remaining: Phase 3 (notifications), full DR drill, cost verification.
 **Owner:** NSHM DevOps Team
