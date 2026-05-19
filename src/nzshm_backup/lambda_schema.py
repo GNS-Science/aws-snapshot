@@ -21,6 +21,10 @@ class BackupTask(BaseModel):
         "scheduled", description="What triggered this backup"
     )
     full_sync: bool = Field(False, description="Force full copy instead of incremental sync")
+    prepare_only: bool = Field(
+        False,
+        description="Build S3 Batch manifest only; skip job submission",
+    )
 
     def is_scheduled(self) -> bool:
         """Check if this is a scheduled (vs manual) backup."""

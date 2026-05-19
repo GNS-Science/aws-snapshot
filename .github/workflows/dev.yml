@@ -1,0 +1,19 @@
+name: Dev workflow
+
+on:
+  pull_request:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  call-test-workflow:
+    uses: GNS-Science/nshm-github-actions/.github/workflows/python-run-tests-uv.yml@main
+    with:
+      fail-fast: false
+      operating-systems: "['ubuntu-latest']"
+      python-versions: "['3.10', '3.11', '3.12']"
+      delete-uv-lock: ${{ github.event_name == 'schedule' }}
+      optional-dependency-groups: dev
+    secrets: inherit

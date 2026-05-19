@@ -115,8 +115,7 @@ def restore_dynamodb_table(
         result.restore_arn = response["TableDescription"]["TableArn"]
         result.status = "INITIATED"
         logger.info(
-            f"Restore initiated: {source_table_arn} → {target_table_name} "
-            f"({result.restore_arn})"
+            f"Restore initiated: {source_table_arn} → {target_table_name} ({result.restore_arn})"
         )
     except ClientError as e:
         code = e.response["Error"]["Code"]

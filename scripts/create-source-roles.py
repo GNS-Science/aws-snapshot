@@ -36,7 +36,6 @@ Config-driven mode writes both role ARNs back to the config file automatically.
 import argparse
 import json
 import sys
-from pathlib import Path
 
 import boto3
 import yaml
@@ -63,9 +62,7 @@ def build_trust_policy(backup_account_id: str) -> dict:
                 "Effect": "Allow",
                 "Principal": {"AWS": f"arn:aws:iam::{backup_account_id}:root"},
                 "Action": "sts:AssumeRole",
-                "Condition": {
-                    "StringEquals": {"sts:ExternalId": "nzshm-backup"}
-                },
+                "Condition": {"StringEquals": {"sts:ExternalId": "nzshm-backup"}},
             }
         ],
     }
@@ -82,60 +79,70 @@ def build_reader_policy(
     statements = []
 
     if s3_buckets:
-        statements.append({
-            "Sid": "ListSourceBuckets",
-            "Effect": "Allow",
-            "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
-            "Resource": [f"arn:aws:s3:::{b}" for b in s3_buckets],
-            "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
-        })
-        statements.append({
-            "Sid": "ReadSourceObjects",
-            "Effect": "Allow",
-            "Action": ["s3:GetObject", "s3:GetObjectTagging"],
-            "Resource": [f"arn:aws:s3:::{b}/*" for b in s3_buckets],
-            "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
-        })
+        statements.append(
+            {
+                "Sid": "ListSourceBuckets",
+                "Effect": "Allow",
+                "Action": ["s3:ListBucket", "s3:GetBucketLocation", "s3:GetInventoryConfiguration"],
+                "Resource": [f"arn:aws:s3:::{b}" for b in s3_buckets],
+                "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
+            }
+        )
+        statements.append(
+            {
+                "Sid": "ReadSourceObjects",
+                "Effect": "Allow",
+                "Action": ["s3:GetObject", "s3:GetObjectTagging"],
+                "Resource": [f"arn:aws:s3:::{b}/*" for b in s3_buckets],
+                "Condition": {"StringEquals": {"s3:ResourceAccount": account_id}},
+            }
+        )
 
     if dynamodb_tables:
-        statements.append({
-            "Sid": "ExportDynamoDBTables",
-            "Effect": "Allow",
-            "Action": [
-                "dynamodb:ExportTableToPointInTime",
-                "dynamodb:DescribeContinuousBackups",
-            ],
-            "Resource": [
-                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}"
-                for t in dynamodb_tables
-            ],
-        })
-        statements.append({
-            "Sid": "ListExports",
-            "Effect": "Allow",
-            "Action": ["dynamodb:ListExports"],
-            "Resource": [
-                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}"
-                for t in dynamodb_tables
-            ],
-        })
-        statements.append({
-            "Sid": "DescribeExport",
-            "Effect": "Allow",
-            "Action": ["dynamodb:DescribeExport"],
-            "Resource": [
-                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}/export/*"
-                for t in dynamodb_tables
-            ],
-        })
-        if backup_account_id:
-            statements.append({
-                "Sid": "WriteDynamoDBExportBucket",
+        statements.append(
+            {
+                "Sid": "ExportDynamoDBTables",
                 "Effect": "Allow",
-                "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
-                "Resource": [f"arn:aws:s3:::bb-*-{region}-{account_id}/*"],
-                "Condition": {"StringEquals": {"s3:ResourceAccount": backup_account_id}},
-            })
+                "Action": [
+                    "dynamodb:ExportTableToPointInTime",
+                    "dynamodb:DescribeContinuousBackups",
+                ],
+                "Resource": [
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/{t}" for t in dynamodb_tables
+                ],
+            }
+        )
+        statements.append(
+            {
+                "Sid": "ListExports",
+                "Effect": "Allow",
+                "Action": ["dynamodb:ListExports"],
+                "Resource": [
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/{t}" for t in dynamodb_tables
+                ],
+            }
+        )
+        statements.append(
+            {
+                "Sid": "DescribeExport",
+                "Effect": "Allow",
+                "Action": ["dynamodb:DescribeExport"],
+                "Resource": [
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/{t}/export/*"
+                    for t in dynamodb_tables
+                ],
+            }
+        )
+        if backup_account_id:
+            statements.append(
+                {
+                    "Sid": "WriteDynamoDBExportBucket",
+                    "Effect": "Allow",
+                    "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+                    "Resource": [f"arn:aws:s3:::bb-*-{region}-{account_id}/*"],
+                    "Condition": {"StringEquals": {"s3:ResourceAccount": backup_account_id}},
+                }
+            )
 
     return {"Version": "2012-10-17", "Statement": statements}
 
@@ -153,33 +160,41 @@ def build_restore_policy(
         restore_bucket_arns = [f"arn:aws:s3:::{make_restore_bucket_name(b)}" for b in s3_buckets]
         # Create, tag, and check existence of the restore target bucket.
         # s3:ListBucket is required for HeadBucket (used by bucket_exists).
-        statements.append({
-            "Sid": "CreateRestoreTargetBucket",
-            "Effect": "Allow",
-            "Action": ["s3:CreateBucket", "s3:PutBucketTagging", "s3:ListBucket", "s3:GetBucketLocation"],
-            "Resource": restore_bucket_arns,
-        })
-        # Needed so restore run can apply AllowNzshmBatchRoleWrite at runtime (self-contained restore).
-        statements.append({
-            "Sid": "PutRestoreTargetPolicy",
-            "Effect": "Allow",
-            "Action": ["s3:GetBucketPolicy", "s3:PutBucketPolicy"],
-            "Resource": (
-                [f"arn:aws:s3:::{b}" for b in s3_buckets] +
-                restore_bucket_arns
-            ),
-        })
+        statements.append(
+            {
+                "Sid": "CreateRestoreTargetBucket",
+                "Effect": "Allow",
+                "Action": [
+                    "s3:CreateBucket",
+                    "s3:PutBucketTagging",
+                    "s3:ListBucket",
+                    "s3:GetBucketLocation",
+                ],
+                "Resource": restore_bucket_arns,
+            }
+        )
+        # Needed so restore run can apply AllowNzshmBatchRoleWrite at runtime
+        # (self-contained restore).
+        statements.append(
+            {
+                "Sid": "PutRestoreTargetPolicy",
+                "Effect": "Allow",
+                "Action": ["s3:GetBucketPolicy", "s3:PutBucketPolicy"],
+                "Resource": ([f"arn:aws:s3:::{b}" for b in s3_buckets] + restore_bucket_arns),
+            }
+        )
 
     if dynamodb_tables:
-        statements.append({
-            "Sid": "SubmitPITRRestore",
-            "Effect": "Allow",
-            "Action": ["dynamodb:RestoreTableToPointInTime"],
-            "Resource": [
-                f"arn:aws:dynamodb:{region}:{account_id}:table/{t}"
-                for t in dynamodb_tables
-            ],
-        })
+        statements.append(
+            {
+                "Sid": "SubmitPITRRestore",
+                "Effect": "Allow",
+                "Action": ["dynamodb:RestoreTableToPointInTime"],
+                "Resource": [
+                    f"arn:aws:dynamodb:{region}:{account_id}:table/{t}" for t in dynamodb_tables
+                ],
+            }
+        )
         # Full DynamoDB access on all tables in this account.
         # Scope is intentionally broad for two reasons:
         #   1. RestoreTableToPointInTime performs undocumented internal checks
@@ -188,33 +203,44 @@ def build_restore_policy(
         #   2. Restored table names (<original>-restore) are not in the configured
         #      table list so resource-level scoping to known ARNs is not possible.
         # This role is only assumed during explicit restore operations, not continuously.
-        statements.append({
-            "Sid": "ManageRestoredTables",
-            "Effect": "Allow",
-            "Action": ["dynamodb:*"],
-            "Resource": [f"arn:aws:dynamodb:{region}:{account_id}:table/*"],
-        })
-        statements.append({
-            "Sid": "PITRPendingTagScan",
-            "Effect": "Allow",
-            "Action": ["tag:GetResources"],
-            "Resource": ["*"],
-        })
+        statements.append(
+            {
+                "Sid": "ManageRestoredTables",
+                "Effect": "Allow",
+                "Action": ["dynamodb:*"],
+                "Resource": [f"arn:aws:dynamodb:{region}:{account_id}:table/*"],
+            }
+        )
+        statements.append(
+            {
+                "Sid": "PITRPendingTagScan",
+                "Effect": "Allow",
+                "Action": ["tag:GetResources"],
+                "Resource": ["*"],
+            }
+        )
 
     return {"Version": "2012-10-17", "Statement": statements}
 
 
-def _create_or_update_role(iam, role_name: str, trust_policy: dict, permission_policy: dict,
-                            description: str, dry_run: bool) -> str:
+def _create_or_update_role(
+    iam,
+    role_name: str,
+    trust_policy: dict,
+    permission_policy: dict,
+    description: str,
+    dry_run: bool,
+    account_id: str = "",
+) -> str:
     """Create or update an IAM role and its inline policy. Returns the role ARN."""
     if dry_run:
         print(f"\n[DRY RUN] Would create/update role: {role_name}")
         print(f"  Description: {description}")
         print(f"  Trust policy:\n{json.dumps(trust_policy, indent=4)}")
         print(f"  Permission policy:\n{json.dumps(permission_policy, indent=4)}")
-        # Return a plausible ARN for dry-run write-back previews
-        caller = boto3.client("sts").get_caller_identity()
-        return f"arn:aws:iam::{caller['Account']}:role/{role_name}"
+        # Return a plausible ARN for dry-run write-back previews.
+        # account_id is passed in so no extra STS call is needed.
+        return f"arn:aws:iam::{account_id}:role/{role_name}"
 
     try:
         resp = iam.create_role(
@@ -266,26 +292,38 @@ def _merge_bucket_policy_statement(s3_client, bucket: str, sid: str, statement: 
 def apply_batch_role_bucket_policy(
     s3_client, bucket: str, batch_role_arn: str, dry_run: bool
 ) -> None:
-    """Add a bucket policy statement allowing the batch role to read source objects (backup direction)."""
+    """Allow the batch role to read source objects (backup direction)."""
     if dry_run:
         print(f"  [dry-run] Would add batch role read policy to {bucket}")
         return
 
     sid = "AllowNzshmBatchRoleRead"
     try:
-        _merge_bucket_policy_statement(s3_client, bucket, sid, {
-            "Sid": sid,
-            "Effect": "Allow",
-            "Principal": {"AWS": batch_role_arn},
-            "Action": ["s3:GetObject", "s3:GetObjectTagging"],
-            "Resource": f"arn:aws:s3:::{bucket}/*",
-        })
+        _merge_bucket_policy_statement(
+            s3_client,
+            bucket,
+            sid,
+            {
+                "Sid": sid,
+                "Effect": "Allow",
+                "Principal": {"AWS": batch_role_arn},
+                "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectAcl",
+                    "s3:GetObjectTagging",
+                    "s3:GetObjectVersion",
+                    "s3:GetObjectVersionTagging",
+                ],
+                "Resource": f"arn:aws:s3:::{bucket}/*",
+            },
+        )
         print(f"  Added batch role read policy to bucket: {bucket}")
     except ClientError as e:
         if e.response["Error"]["Code"] == "AccessDenied":
             print(
                 f"  WARNING: cannot apply read policy to {bucket} (AccessDenied). "
-                "The bucket may have a restrictive policy blocking s3:GetBucketPolicy for this caller. "
+                "The bucket may have a restrictive policy blocking "
+                "s3:GetBucketPolicy for this caller. "
                 "For same-account backups IAM identity policy is sufficient. "
                 "For cross-account, apply AllowNzshmBatchRoleRead manually via the S3 console."
             )
@@ -296,7 +334,7 @@ def apply_batch_role_bucket_policy(
 def apply_batch_role_write_policy(
     s3_client, bucket: str, batch_role_arn: str, dry_run: bool
 ) -> None:
-    """Add a bucket policy statement allowing the batch role to write to source objects (restore direction).
+    """Allow the batch role to write source objects (restore direction).
 
     Required for cross-account S3 Batch restore: the batch role (backup account) writes
     objects into the original source bucket (source account). The batch role's IAM identity
@@ -311,13 +349,18 @@ def apply_batch_role_write_policy(
 
     try:
         sid = "AllowNzshmBatchRoleWrite"
-        _merge_bucket_policy_statement(s3_client, bucket, sid, {
-            "Sid": sid,
-            "Effect": "Allow",
-            "Principal": {"AWS": batch_role_arn},
-            "Action": ["s3:PutObject", "s3:PutObjectTagging"],
-            "Resource": f"arn:aws:s3:::{bucket}/*",
-        })
+        _merge_bucket_policy_statement(
+            s3_client,
+            bucket,
+            sid,
+            {
+                "Sid": sid,
+                "Effect": "Allow",
+                "Principal": {"AWS": batch_role_arn},
+                "Action": ["s3:PutObject", "s3:PutObjectTagging"],
+                "Resource": f"arn:aws:s3:::{bucket}/*",
+            },
+        )
         print(f"  Added batch role write policy to bucket: {bucket}")
     except ClientError as e:
         if e.response["Error"]["Code"] in ("NoSuchBucket", "404"):
@@ -325,16 +368,19 @@ def apply_batch_role_write_policy(
         elif e.response["Error"]["Code"] == "AccessDenied":
             print(
                 f"  WARNING: cannot apply write policy to {bucket} (AccessDenied). "
-                "The bucket may have a restrictive policy blocking s3:GetBucketPolicy for this caller. "
+                "The bucket may have a restrictive policy blocking "
+                "s3:GetBucketPolicy for this caller. "
                 "For same-account restores IAM identity policy is sufficient. "
-                "For cross-account, the runtime apply in 'restore run' will attempt this automatically."
+                "For cross-account, the runtime apply in 'restore run' will attempt "
+                "this automatically."
             )
         else:
             raise
 
 
-def write_back_role_arns(config_path: str, source_alias: str,
-                          reader_arn: str, restore_arn: str) -> None:
+def write_back_role_arns(
+    config_path: str, source_alias: str, reader_arn: str, restore_arn: str
+) -> None:
     """Update both role ARNs in the config YAML file."""
     with open(config_path) as f:
         data = yaml.safe_load(f)
@@ -347,8 +393,19 @@ def write_back_role_arns(config_path: str, source_alias: str,
     print(f"    sources.{source_alias}.source_account_restore_role_arn = {restore_arn}")
 
 
-def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_override: str | None):
-    """Load config and return (backup_account_id, region, s3_buckets, dynamodb_tables, batch_role_arn)."""
+def resolve_from_config(
+    config_path: str,
+    source_alias: str,
+    batch_role_arn_override: str | None,
+    backup_account_id_override: str | None = None,
+):
+    """Load config and return account, region, sources, and batch role ARN.
+
+    Note: reader/restore roles are account-wide (`nzshm-backup-reader` and
+    `nzshm-backup-restore`). To avoid clobbering permissions when multiple
+    config sources share the same source account, aggregate S3/DynamoDB
+    resources across all matching sources in that account.
+    """
     with open(config_path) as f:
         data = yaml.safe_load(f)
 
@@ -361,21 +418,39 @@ def resolve_from_config(config_path: str, source_alias: str, batch_role_arn_over
         sys.exit(1)
 
     source = sources[source_alias]
+    selected_source_account_id = source.get("source_account_id")
 
-    lambda_arn = general.get("lambda_arn", "")
-    parts = lambda_arn.split(":")
-    if len(parts) < 6 or not parts[4].isdigit():
-        print(
-            f"ERROR: cannot derive backup account ID from general.lambda_arn={lambda_arn!r}.\n"
-            "  Use --backup-account-id to provide it explicitly.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    backup_account_id = parts[4]
+    if backup_account_id_override:
+        backup_account_id = backup_account_id_override
+    else:
+        lambda_arn = general.get("lambda_arn") or ""
+        parts = lambda_arn.split(":")
+        if len(parts) < 6 or not parts[4].isdigit():
+            print(
+                f"ERROR: cannot derive backup account ID from general.lambda_arn={lambda_arn!r}.\n"
+                "  Use --backup-account-id to provide it explicitly.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        backup_account_id = parts[4]
     region = general.get("region", "ap-southeast-2")
 
-    s3_buckets = [b["arn"].split(":::")[-1] for b in source.get("s3_buckets", [])]
-    dynamodb_tables = [arn.split("/")[-1] for arn in source.get("dynamodb_tables", [])]
+    matching_sources = []
+    if selected_source_account_id:
+        matching_sources = [
+            s for s in sources.values() if s.get("source_account_id") == selected_source_account_id
+        ]
+    if not matching_sources:
+        matching_sources = [source]
+
+    s3_buckets_set: set[str] = set()
+    dynamodb_tables_set: set[str] = set()
+    for src in matching_sources:
+        s3_buckets_set.update(b["arn"].split(":::")[-1] for b in src.get("s3_buckets", []))
+        dynamodb_tables_set.update(arn.split("/")[-1] for arn in src.get("dynamodb_tables", []))
+
+    s3_buckets = sorted(s3_buckets_set)
+    dynamodb_tables = sorted(dynamodb_tables_set)
 
     batch_role_arn = batch_role_arn_override
     if batch_role_arn is None and source.get("use_s3_batch"):
@@ -401,24 +476,28 @@ def main():
 
     parser.add_argument("--batch-role-arn", default=None)
     parser.add_argument(
-        "--profile", default=None,
+        "--profile",
+        default=None,
         help="AWS profile (SOURCE account). NOTE: SSO requires eval first: "
-             "eval $(aws configure export-credentials --profile <profile> --format env)",
+        "eval $(aws configure export-credentials --profile <profile> --format env)",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     config_mode = args.config is not None and args.source is not None
-    explicit_mode = args.backup_account_id is not None
+    explicit_mode = args.backup_account_id is not None and not config_mode
 
-    if config_mode and explicit_mode:
-        parser.error("Use either --config/--source OR --backup-account-id, not both.")
     if not config_mode and not explicit_mode:
         parser.error("Provide either --config + --source, or --backup-account-id.")
 
     if config_mode:
-        backup_account_id, region, s3_buckets, dynamodb_tables, batch_role_arn = resolve_from_config(
-            args.config, args.source, args.batch_role_arn
+        backup_account_id, region, s3_buckets, dynamodb_tables, batch_role_arn = (
+            resolve_from_config(
+                args.config,
+                args.source,
+                args.batch_role_arn,
+                backup_account_id_override=args.backup_account_id,
+            )
         )
     else:
         backup_account_id = args.backup_account_id
@@ -440,18 +519,32 @@ def main():
     print(f"DynamoDB tables: {dynamodb_tables or '(none)'}")
 
     trust_policy = build_trust_policy(backup_account_id)
-    reader_policy = build_reader_policy(region, account_id, s3_buckets, dynamodb_tables, backup_account_id)
+    reader_policy = build_reader_policy(
+        region, account_id, s3_buckets, dynamodb_tables, backup_account_id
+    )
     restore_policy = build_restore_policy(region, account_id, dynamodb_tables, s3_buckets)
 
     reader_arn = _create_or_update_role(
-        iam, READER_ROLE_NAME, trust_policy, reader_policy,
-        description="Read-only role assumed by nzshm-backup Lambda for S3 backup and DynamoDB exports",
+        iam,
+        READER_ROLE_NAME,
+        trust_policy,
+        reader_policy,
+        description=(
+            "Read-only role assumed by nzshm-backup Lambda for S3 backup and DynamoDB exports"
+        ),
         dry_run=args.dry_run,
+        account_id=account_id,
     )
     restore_arn = _create_or_update_role(
-        iam, RESTORE_ROLE_NAME, trust_policy, restore_policy,
-        description="Restore role assumed by nzshm-backup for DynamoDB PITR restore and PITR re-enable",
+        iam,
+        RESTORE_ROLE_NAME,
+        trust_policy,
+        restore_policy,
+        description=(
+            "Restore role assumed by nzshm-backup for DynamoDB PITR restore and PITR re-enable"
+        ),
         dry_run=args.dry_run,
+        account_id=account_id,
     )
 
     if batch_role_arn and s3_buckets:
@@ -459,7 +552,9 @@ def main():
         for bucket in s3_buckets:
             apply_batch_role_bucket_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
             apply_batch_role_write_policy(s3, bucket, batch_role_arn, dry_run=args.dry_run)
-            apply_batch_role_write_policy(s3, make_restore_bucket_name(bucket), batch_role_arn, dry_run=args.dry_run)
+            apply_batch_role_write_policy(
+                s3, make_restore_bucket_name(bucket), batch_role_arn, dry_run=args.dry_run
+            )
 
     if config_mode:
         print("\nWriting role ARNs back to config:")
@@ -469,9 +564,9 @@ def main():
             print(f"  [dry-run] Would set source_account_role_arn = {reader_arn}")
             print(f"  [dry-run] Would set source_account_restore_role_arn = {restore_arn}")
     else:
-        print(f"\nAdd to backup-config.yaml under the relevant source:")
-        print(f"    source_account_role_arn: \"{reader_arn}\"")
-        print(f"    source_account_restore_role_arn: \"{restore_arn}\"")
+        print("\nAdd to backup-config.yaml under the relevant source:")
+        print(f'    source_account_role_arn: "{reader_arn}"')
+        print(f'    source_account_restore_role_arn: "{restore_arn}"')
 
 
 if __name__ == "__main__":

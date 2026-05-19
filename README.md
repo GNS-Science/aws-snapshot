@@ -16,7 +16,7 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 | Phase 5        | ✅ Core done | Testing, validation, event audit log |
 | Phase 6        | 🔄 In progress | Parallel run, NSHM cutover (arkivalist done) |
 
-**Tests:** 200 passing · **Coverage:** 62% · **Lint:** ruff + black clean
+**Tests:** 200 passing · **Coverage:** 62% · **Lint:** ruff clean
 
 ---
 
@@ -222,7 +222,7 @@ See [`backup-config.sandbox.yaml`](backup-config.sandbox.yaml) for the matching 
 ```bash
 make test                 # All tests with coverage
 make lint                 # ruff + mypy
-make fmt                  # black + ruff --fix
+make fmt                  # ruff format + ruff --fix
 make check                # lint then test
 make upgrade              # upgrade deps (1-week safety margin)
 

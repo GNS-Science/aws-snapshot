@@ -15,7 +15,7 @@ lint:
 	uv run mypy src/
 
 fmt:
-	uv run black src/ tests/
+	uv run ruff format src/ tests/
 	uv run ruff check --fix src/ tests/
 
 check: lint test

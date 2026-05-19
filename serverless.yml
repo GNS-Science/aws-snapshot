@@ -1,6 +1,6 @@
-# "org" ensures this Service is used with the correct Serverless Framework Access Key.
-org: dailyscience
-service: nzshm-backup
+org: gnssciencenshm
+app: nzshm-backup
+service: nzshm-backup-service
 
 frameworkVersion: "4"
 
@@ -8,6 +8,8 @@ provider:
   name: aws
   runtime: python3.10
   region: ap-southeast-2
+  deploymentPrefix: nzshm-backup
+  # accountId guard not supported by Serverless Framework v4 — enforce via AWS SSO profile
   memorySize: 1024
   timeout: 900
   environment:
@@ -23,10 +25,14 @@ provider:
             - s3:PutObject
             - s3:CopyObject
             - s3:CreateBucket
+            - s3:GetBucketLocation
             - s3:GetBucketTagging
+            - s3:GetBucketVersioning
             - s3:PutLifecycleConfiguration
             - s3:PutBucketPolicy
             - s3:PutBucketTagging
+            - s3:PutBucketVersioning
+            - s3:GetBucketAcl
           Resource:
             - "*"
         - Effect: Allow
@@ -44,10 +50,13 @@ provider:
           Resource: "*"
         - Effect: Allow
           Action:
+            - s3:CreateJob
+            - s3:DescribeJob
+            - s3:ListJobs
             - s3control:CreateJob
             - s3control:DescribeJob
             - s3control:ListJobs
-          Resource: "*"  # s3control does not support resource-level ARN scoping
+          Resource: "*"  # S3 Batch Operations does not support resource-level ARN scoping
         - Effect: Allow
           Action:
             - iam:PassRole
@@ -65,6 +74,33 @@ provider:
             - ssm:GetParameter
             - ssm:PutParameter
           Resource: "arn:aws:ssm:ap-southeast-2:*:parameter/nzshm-backup/*"
+        - Effect: Allow
+          Action:
+            - athena:StartQueryExecution
+            - athena:GetQueryExecution
+            - athena:GetQueryResults
+            - athena:ListDatabases
+            - athena:ListTables
+            - athena:GetDatabase
+            - athena:GetTableMetadata
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - glue:GetDatabase
+            - glue:CreateDatabase
+            - glue:GetTable
+            - glue:GetTables
+            - glue:CreateTable
+            - glue:UpdateTable
+            - glue:DeleteTable
+            - glue:GetPartition
+            - glue:GetPartitions
+            - glue:CreatePartition
+            - glue:BatchCreatePartition
+            - glue:DeletePartition
+            - glue:UpdatePartition
+            - glue:BatchDeletePartition
+          Resource: "*"
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:
@@ -85,22 +121,8 @@ functions:
   backup:
     handler: nzshm_backup.lambda_handler.handler
     description: Backup orchestration for NSHM datasets
-    events:
-      - eventBridge:
-          enabled: false
-          schedule: rate(7 days)
-          description: Weekly backup trigger
-          input:
-            source: "all"
-            trigger_type: "scheduled"
-      - eventBridge:
-          enabled: false
-          schedule: rate(1 day)
-          description: Daily backup for active experiment mode
-          input:
-            source: "all"
-            trigger_type: "scheduled"
-            full_sync: false
+    # No default EventBridge triggers — schedules are managed per-source via
+    # `backup schedule add` which creates named rules targeting this Lambda.
 
 custom:
   pythonRequirements:

@@ -1,22 +1,31 @@
 """Configuration management commands."""
 
 import json
+import os
 from pathlib import Path
 
 import boto3
 import typer
 
 from nzshm_backup.config import ConfigModel, load_config, save_config
-from nzshm_backup.config.loader import load_config_from_ssm
+from nzshm_backup.config.loader import (
+    CONFIG_PATH_ENV_VAR,
+    DEFAULT_CONFIG_PATH,
+    load_config_from_ssm,
+)
 from nzshm_backup.state import get_state
 
 app = typer.Typer()
 
 
 def _get_config_path() -> Path:
-    """Get config file path from state or default."""
+    """Get config file path from state, BACKUP_CONFIG_PATH env var, or default."""
     state = get_state()
-    return getattr(state, "config_path", Path("backup-config.yaml"))
+    config_path: Path | None = getattr(state, "config_path", None)
+    if config_path is not None:
+        return config_path
+    env_path = os.environ.get(CONFIG_PATH_ENV_VAR)
+    return Path(env_path) if env_path else DEFAULT_CONFIG_PATH
 
 
 @app.command("show")
