@@ -1,7 +1,16 @@
 # ADR-001: THS interim CodeBuild cutover
 
-- Status: Accepted
+- Status: Superseded by ADR-002 (Implemented then unwound)
 - Date: 2026-04-21
+- Superseded: 2026-05-04
+
+> **Outcome:** The interim CodeBuild path was deployed as designed and
+> ran THS scheduled backups reliably while ADR-002's Athena pipeline
+> was built. Once Athena-based manifest prep brought runtime down to
+> ~30 seconds (well within Lambda limits), THS was moved back to
+> Lambda + Athena + S3 Inventory + S3 Batch and the CodeBuild
+> infrastructure was decommissioned. See
+> [issue #9](https://github.com/GNS-Science/nzshm-backup/issues/9).
 
 ## Context
 
