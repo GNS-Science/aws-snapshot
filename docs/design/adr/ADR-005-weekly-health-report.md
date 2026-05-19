@@ -1,7 +1,7 @@
-# ADR-005: Automated weekly health report via Slack + email
+# ADR-005: Automated daily health report + Lambda error alarm
 
 - Status: Proposed
-- Date: 2026-05-12
+- Date: 2026-05-12 (revised 2026-05-19)
 
 ## Context
 
@@ -9,8 +9,17 @@ The backup system runs daily across four production sources (50.8M objects,
 11 TB). Health validation currently requires a human to run CLI commands
 (`backup status`, `test restore`, `test integrity`) and interpret the output.
 
-We want a weekly automated health report sent to a Slack channel and email
-address so the team has visibility without manual intervention.
+On 2026-05-19 we discovered that the weka source had been failing every
+scheduled run since 2026-05-15 (Athena UNLOAD `HIVE_PATH_ALREADY_EXISTS`
+race against a leftover manifest file). The error logged at ERROR level
+on every invocation but no one was notified, so four daily runs failed
+silently. This incident drives two requirements:
+
+1. **Immediate notification** when a scheduled invocation fails — measured
+   in minutes, not days.
+2. **Scheduled aggregate visibility** so silent issues (stale inventory,
+   zero-row UNLOAD when diffs were expected, drifting object counts) get
+   surfaced even when no Lambda error fires.
 
 The notification config infrastructure already exists in
 `backup-config.production.yaml` (Slack webhook + SES) but is disabled and
@@ -18,17 +27,32 @@ unimplemented (Phase 3 of the project plan).
 
 ## Decision
 
+Two complementary notification paths:
+
+### Fast path — CloudWatch alarm on Lambda errors
+
+CloudWatch alarm on the `nzshm-backup-service-prod-backup` Lambda's
+`Errors` metric (threshold ≥ 1 over a 5-minute period) → SNS topic →
+Slack webhook subscription + email subscription. Fires within minutes
+of any failed invocation. Narrow scope: catches hard errors only, not
+silent issues.
+
+### Slow path — daily health report
+
 Extend the existing backup Lambda to accept a `health_report` task type,
-triggered weekly by a dedicated EventBridge rule. The report combines
-status checks and restore verification into a single formatted message
-sent via Slack webhook and SES email.
+triggered daily by a dedicated EventBridge rule (after the backup runs
+complete). The report combines status checks and restore verification
+into a single formatted message sent via the same Slack webhook and SES
+email destinations.
 
 ### Report contents
 
 1. **Daily run summary** — for each source: last run status (skipped/submitted/
    failed), inventory freshness, latest batch job result
-2. **Restore verification** — `test restore` on weka (canary, checksum verified)
-   and one large source (rotating weekly: ths → toshi → static)
+2. **Restore verification** — `test restore` on weka every day (canary,
+   checksum verified) plus one large source rotating through the week
+   (Mon ths → Wed toshi → Fri static), so every source gets a verified
+   restore at least weekly
 3. **DynamoDB PITR status** — for toshi: all tables PITR enabled, export
    bucket accessible
 4. **Object count summary** — source vs backup counts from inventory
@@ -36,10 +60,13 @@ sent via Slack webhook and SES email.
 ### Architecture
 
 ```
-EventBridge (weekly, e.g. Friday 14:00 NZST)
-    │
-    ▼
-Lambda (existing backup function)
+                                 ┌──── SNS topic ──── Slack webhook
+Lambda Errors metric ── alarm ──┤                 └── email
+                                 │
+EventBridge (daily, ~14:00 NZST) │
+    │                            │
+    ▼                            │
+Lambda (existing backup function)│
     │  event: {"task": "health_report"}
     │
     ├── run_health_check()        ← new module
@@ -74,11 +101,14 @@ SES from `noreply-backup@<domain>` to configured recipients.
 
 | Component | File | Effort |
 |-----------|------|--------|
+| CloudWatch alarm + SNS topic | `serverless.yml` (resources block) | Small |
+| SNS → Slack subscription | Lambda subscriber or AWS Chatbot | Small |
+| SNS → email subscription | `serverless.yml` (manual confirm step) | Trivial |
 | Health check runner | `src/nzshm_backup/health_report.py` (new) | Medium |
 | Slack sender | `src/nzshm_backup/notifications/slack.py` (new) | Small |
 | SES sender | `src/nzshm_backup/notifications/ses.py` (new) | Small |
 | Lambda handler extension | `src/nzshm_backup/lambda_handler.py` | Small |
-| EventBridge rule | `backup schedule add --source health --frequency weekly` | Trivial |
+| EventBridge rule | `backup schedule add --source health --frequency daily` | Trivial |
 | Config enablement | `backup-config.production.yaml` notifications section | Trivial |
 | SES domain verification | AWS console / CLI (one-time) | Small |
 | Slack webhook setup | Slack app config + Secrets Manager (one-time) | Small |
@@ -97,8 +127,13 @@ SES from `noreply-backup@<domain>` to configured recipients.
    loading, and cross-account session setup. More deployment surface.
 2. **CodeBuild + CLI** — runs the actual CLI commands and pipes output.
    Simpler but not serverless, harder to format for Slack/email.
-3. **CloudWatch Alarm + SNS** — monitors Lambda errors/invocations only.
-   No restore verification, no object counts, no formatted report.
+3. **CloudWatch alarm alone** — fast but narrow: only catches hard Lambda
+   errors, misses silent issues (stale inventory, zero-row UNLOAD when
+   diffs were expected, drift). Adopted as the fast path *alongside* the
+   daily report, not as an alternative.
+4. **Weekly report only** (original proposal) — rejected after the
+   2026-05-19 weka incident demonstrated that a 7-day notification gap
+   is unacceptable for a system running daily.
 
 ## Risks
 
