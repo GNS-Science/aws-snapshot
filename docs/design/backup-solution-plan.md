@@ -368,7 +368,8 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [ ] Slack webhook integration
 - [ ] Cost tracking implementation
 - [ ] Budget alerts setup
-- [ ] Automated weekly health report (see ADR-005)
+- [ ] CloudWatch Lambda error alarm → SNS → Slack + email (see ADR-005, fast path)
+- [ ] Automated daily health report (see ADR-005, slow path)
 
 ### Phase 4: Restore Functionality ✅ Substantially complete
 
