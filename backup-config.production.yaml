@@ -78,8 +78,8 @@ notifications:
     # Daily health report delivered via SNS topic + email subscription.
     # Flip enabled: true and fill address: once SNS subscription confirmed.
     email:
-      enabled: false
-      address: null
+      enabled: true
+      address: chrisbc@artisan.co.nz
   ses:
     enabled: false
     source_email: noreply-backup@example.com
