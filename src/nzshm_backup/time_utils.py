@@ -1,6 +1,7 @@
 """Shared timezone and datetime parsing utilities."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 # Offset lookup for common timezone abbreviations (matches _fmt_dt display output)
 TZ_ABBREV: dict[str, timezone] = {
@@ -10,6 +11,25 @@ TZ_ABBREV: dict[str, timezone] = {
     "AEST": timezone(timedelta(hours=10)),
     "AEDT": timezone(timedelta(hours=11)),
 }
+
+# Pacific/Auckland — DST-aware. Used for "what date is it in NZ?"
+# queries that drive daily reports and schedule weekday rotation.
+NZ_TZ = ZoneInfo("Pacific/Auckland")
+
+
+def nz_now() -> datetime:
+    """Current wall-clock time in NZ (DST-aware)."""
+    return datetime.now(tz=NZ_TZ)
+
+
+def nz_today() -> date:
+    """Current calendar date in NZ (DST-aware).
+
+    Critical for the daily health report and weekday rotation: an
+    afternoon NZ report (14:30 NZST = 02:30 UTC) needs to be stamped
+    with the NZ date, not the UTC date which is still yesterday.
+    """
+    return nz_now().date()
 
 
 def parse_datetime(ts: str) -> datetime:
