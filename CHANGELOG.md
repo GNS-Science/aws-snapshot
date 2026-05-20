@@ -31,6 +31,9 @@ All notable changes to this project will be documented here.
   `backup test restore` CLI as a pure `RestoreTestResult`-returning function.
 - `notifications/slack.py` and `notifications/sns.py` thin transport modules with
   Secrets Manager retrieval, Subject-length truncation, and structured error types.
+- `time_utils.nz_now()` and `time_utils.nz_today()` — DST-aware NZ wall-clock
+  helpers (via `zoneinfo.ZoneInfo("Pacific/Auckland")`). Used by the daily report
+  so report_date and weekday rotation reflect NZ calendar, not UTC.
 
 ### Changed
 
