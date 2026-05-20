@@ -1,7 +1,18 @@
 # ADR-005: Automated daily health report + Lambda error alarm
 
-- Status: Proposed
-- Date: 2026-05-12 (revised 2026-05-19)
+- Status: Accepted (fast path shipped 2026-05-19; slow path shipped 2026-05-20)
+- Date: 2026-05-12 (revised 2026-05-19, 2026-05-20)
+
+> **2026-05-20 revision — SES dropped in favour of SNS email.** ADR-005's
+> original design specified SES for HTML email delivery of the daily
+> report. On review, SES was rejected: it requires domain verification,
+> tight IAM scoping to a sending identity, and possibly a sandbox-mode
+> escape ticket — significant ops prerequisites for a daily ops report
+> sent to a small internal audience. The slow path now delivers email
+> via SNS (separate `nzshm-backup-reports-{stage}` topic, plain-text
+> body with a status-bearing subject line). Slack delivery is unchanged
+> and remains the rich-formatting channel. See
+> `docs/operations/enabling-notifications.md` for the post-merge runbook.
 
 ## Context
 
