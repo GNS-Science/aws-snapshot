@@ -72,6 +72,8 @@ restore:
   auto_approve_threshold: 100
   dual_approval_threshold: 500
 notifications:
+  alerts:
+    email: chrisbc@artisan.co.nz
   ses:
     enabled: false
     source_email: noreply-backup@example.com

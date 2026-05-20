@@ -4,6 +4,18 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Added
+
+- **Lambda-error alarm fast path** (ADR-005 / #16). CloudWatch alarm on the backup
+  Lambda's `Errors` metric (≥ 1 over 5 min) → SNS topic → email subscription. Routes
+  to `notifications.alerts.email` from `backup-config.{stage}.yaml`. Sandbox stage
+  skips the email subscription via a CloudFormation Condition.
+- **`backup test alert` command** — forces the alarm into `ALARM` state without a
+  real Lambda failure, so the SNS → email path can be exercised after deploy.
+  Auto-returns to OK on the next real datapoint (~5 min) with an OK notification.
+- New `AlertsConfig` Pydantic model (`notifications.alerts.email`) distinct from
+  SES recipients (slow-path daily report) and Slack (ADR-005, future).
+
 ### Changed
 
 - **Migrated from Poetry to uv** — build backend switched from `poetry-core` to
