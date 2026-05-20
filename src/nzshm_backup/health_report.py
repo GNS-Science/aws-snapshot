@@ -35,6 +35,7 @@ from nzshm_backup.notifications.slack import (
 )
 from nzshm_backup.notifications.sns import SnsDeliveryError, publish_report
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
+from nzshm_backup.time_utils import nz_today
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ def build_report(
             Defaults to ``today.weekday()``.
     """
     started = time.monotonic()
-    today = today or datetime.now(timezone.utc).date()
+    today = today or nz_today()
     weekday = weekday if weekday is not None else today.weekday()
 
     aliases = list(config.sources.keys())
