@@ -402,3 +402,54 @@ def test_build_report_flags_count_drop(
     assert src.delta_flag is True
     assert src.overall == "red"
     assert any("dropped" in n for n in src.notes)
+
+
+# ---------------------------------------------------------------------------
+# CLI: _resolve_reports_topic_arn
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_topic_arn_prefers_explicit_flag(monkeypatch):
+    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+
+    monkeypatch.setenv("BACKUP_REPORTS_TOPIC_ARN", "arn:from-env")
+    session = MagicMock()
+    arn = _resolve_reports_topic_arn("arn:from-flag", session, "prod")
+    assert arn == "arn:from-flag"
+
+
+def test_resolve_topic_arn_falls_back_to_env(monkeypatch):
+    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+
+    monkeypatch.setenv("BACKUP_REPORTS_TOPIC_ARN", "arn:from-env")
+    session = MagicMock()
+    arn = _resolve_reports_topic_arn(None, session, "prod")
+    assert arn == "arn:from-env"
+
+
+def test_resolve_topic_arn_constructs_from_session_when_no_overrides(monkeypatch):
+    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+
+    monkeypatch.delenv("BACKUP_REPORTS_TOPIC_ARN", raising=False)
+    session = MagicMock()
+    session.region_name = "ap-southeast-2"
+    sts = MagicMock()
+    sts.get_caller_identity.return_value = {"Account": "123456789012"}
+    session.client.return_value = sts
+
+    arn = _resolve_reports_topic_arn(None, session, "prod")
+    assert arn == "arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod"
+
+
+def test_resolve_topic_arn_uses_stage_in_constructed_name(monkeypatch):
+    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+
+    monkeypatch.delenv("BACKUP_REPORTS_TOPIC_ARN", raising=False)
+    session = MagicMock()
+    session.region_name = "ap-southeast-2"
+    sts = MagicMock()
+    sts.get_caller_identity.return_value = {"Account": "111"}
+    session.client.return_value = sts
+
+    arn = _resolve_reports_topic_arn(None, session, "sandbox")
+    assert arn.endswith("nzshm-backup-reports-sandbox")

@@ -19,6 +19,32 @@ from nzshm_backup.config import load_config
 app = typer.Typer(help="Generate and (optionally) deliver the daily health report.")
 
 
+def _resolve_reports_topic_arn(
+    explicit: str | None, session: boto3.Session, stage: str
+) -> str | None:
+    """Determine the SNS reports topic ARN to publish to.
+
+    Resolution order:
+        1. ``--topic-arn`` flag (explicit override).
+        2. ``$BACKUP_REPORTS_TOPIC_ARN`` env var (set by serverless on the Lambda).
+        3. Constructed from session region + account + stage — matches the
+           ``nzshm-backup-reports-{stage}`` name declared in serverless.yml.
+
+    Returns None only if all three resolutions yield empty.
+    """
+    if explicit:
+        return explicit
+    env = os.environ.get("BACKUP_REPORTS_TOPIC_ARN")
+    if env:
+        return env
+    region = session.region_name or "ap-southeast-2"
+    try:
+        account = session.client("sts").get_caller_identity()["Account"]
+    except Exception:
+        return None
+    return f"arn:aws:sns:{region}:{account}:nzshm-backup-reports-{stage}"
+
+
 @app.command("run")
 def health_report_run(
     send: bool = typer.Option(
@@ -41,9 +67,16 @@ def health_report_run(
         None,
         "--topic-arn",
         help=(
-            "SNS topic for email delivery. Defaults to "
-            "$BACKUP_REPORTS_TOPIC_ARN (set by serverless)."
+            "SNS topic ARN for email delivery. If unset, falls back to "
+            "$BACKUP_REPORTS_TOPIC_ARN (set by serverless on the Lambda), "
+            "then to the deterministic name nzshm-backup-reports-{stage}."
         ),
+    ),
+    stage: str = typer.Option(
+        "prod",
+        "--stage",
+        help="Deployment stage. Used only to derive the reports topic ARN "
+        "when --topic-arn and $BACKUP_REPORTS_TOPIC_ARN are both unset.",
     ),
 ) -> None:
     """Build the daily health report and print it; optionally deliver via Slack + SNS."""
@@ -79,7 +112,7 @@ def health_report_run(
     if not send:
         return
 
-    resolved_topic = topic_arn or os.environ.get("BACKUP_REPORTS_TOPIC_ARN")
+    resolved_topic = _resolve_reports_topic_arn(topic_arn, session, stage)
     delivery = health_report.send(
         data,
         config.notifications,
@@ -108,4 +141,4 @@ def health_report_preview(
     ),
 ) -> None:
     """Alias for ``run --dry-run`` — print without sending, skip restore tests."""
-    health_report_run(send=False, dry_run=True, weekday=weekday, topic_arn=None)
+    health_report_run(send=False, dry_run=True, weekday=weekday, topic_arn=None, stage="prod")
