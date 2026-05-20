@@ -317,7 +317,7 @@ class TestRestoreCommand:
         assert result.exit_code == 1
 
     @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test._delete_temp_bucket")
+    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
     @patch("nzshm_backup.commands.test._verify_restored_object", return_value=None)
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
@@ -722,7 +722,7 @@ def _make_restore_mocks(inventory_mode=True):
 class TestRestoreDirectCopy:
     """Test restore command with direct copy path."""
 
-    @patch("nzshm_backup.commands.test._delete_temp_bucket")
+    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
     @patch("nzshm_backup.commands.test._verify_restored_object", return_value=None)
     @patch("nzshm_backup.commands.test.append_event")
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
@@ -763,7 +763,7 @@ class TestRestoreDirectCopy:
         assert mock_s3.copy_object.call_count == 2
         mock_cleanup.assert_called_once()
 
-    @patch("nzshm_backup.commands.test._delete_temp_bucket")
+    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
     @patch("nzshm_backup.commands.test.append_event")
     @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
     @patch("nzshm_backup.commands.test.boto3")
@@ -800,7 +800,7 @@ class TestRestoreDirectCopy:
         assert "copy error" in result.output.lower()
         mock_cleanup.assert_called_once()
 
-    @patch("nzshm_backup.commands.test._delete_temp_bucket")
+    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
     @patch(
         "nzshm_backup.commands.test._verify_restored_object",
         return_value="ETag mismatch: a != b",
@@ -959,6 +959,55 @@ class TestRestoreDynamoDB:
 
         assert "PITR enabled" in result.output
         assert "export bucket accessible" in result.output
+
+
+class TestRestoreTestResult:
+    """Aggregation logic for the programmatic restore-test API."""
+
+    def test_overall_skipped_when_no_buckets(self):
+        from nzshm_backup.commands.test import RestoreTestResult
+
+        result = RestoreTestResult(source="x", mode="direct copy")
+        assert result.overall == "skipped"
+
+    def test_overall_failed_when_any_bucket_failed(self):
+        from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+
+        result = RestoreTestResult(source="x", mode="direct copy")
+        result.buckets = [
+            BucketRestoreResult(
+                source_bucket="s1", backup_bucket="b1", result="passed", sample_count=10
+            ),
+            BucketRestoreResult(
+                source_bucket="s2", backup_bucket="b2", result="failed", sample_count=0
+            ),
+        ]
+        assert result.overall == "failed"
+
+    def test_overall_passed_when_all_buckets_passed(self):
+        from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+
+        result = RestoreTestResult(source="x", mode="direct copy")
+        result.buckets = [
+            BucketRestoreResult(
+                source_bucket="s1", backup_bucket="b1", result="passed", sample_count=10
+            ),
+            BucketRestoreResult(
+                source_bucket="s2", backup_bucket="b2", result="passed", sample_count=10
+            ),
+        ]
+        assert result.overall == "passed"
+
+    def test_overall_skipped_when_all_buckets_skipped(self):
+        from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+
+        result = RestoreTestResult(source="x", mode="direct copy")
+        result.buckets = [
+            BucketRestoreResult(
+                source_bucket="s1", backup_bucket="b1", result="skipped", sample_count=0
+            ),
+        ]
+        assert result.overall == "skipped"
 
 
 class TestTestAlert:
