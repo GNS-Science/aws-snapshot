@@ -793,3 +793,158 @@ LIMIT {sample_size}
         backup_bucket,
     )
     return objects
+
+
+# ---------------------------------------------------------------------------
+# Object-count delta — daily health report (ADR-006 mitigation 1)
+# ---------------------------------------------------------------------------
+
+
+def _two_latest_inventory_partitions(
+    s3_client,
+    control_bucket: str,
+    inventory_prefix: str,
+) -> list[tuple[str, str]]:
+    """Return up to two most recent (dt, hive_root) tuples, newest first.
+
+    Same scan as _latest_inventory_partition but keeps the two newest dt
+    values for delta calculations.
+    """
+    dt_to_symlink: dict[str, str] = {}
+    prefix = f"{inventory_prefix.rstrip('/')}/"
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=control_bucket, Prefix=prefix):
+        for obj in page.get("Contents", []) or []:
+            key = obj.get("Key", "")
+            match = _SYMLINK_DT_RE.search(key)
+            if not match:
+                continue
+            dt_to_symlink[match.group(1)] = key
+
+    sorted_dts = sorted(dt_to_symlink, reverse=True)[:2]
+    out: list[tuple[str, str]] = []
+    for dt in sorted_dts:
+        symlink_key = dt_to_symlink[dt]
+        hive_root = symlink_key.split("/hive/dt=")[0] + "/hive/"
+        out.append((dt, hive_root))
+    return out
+
+
+def count_objects_for_partition(
+    session: boto3.Session,
+    source_alias: str,
+    side: str,
+    bucket: str,
+    dt: str,
+    hive_root: str,
+) -> int:
+    """COUNT(*) (non-current-version filtered) for one inventory dt partition.
+
+    Reuses the same Glue database, table name, workgroup output location,
+    and version filter as the manifest pipeline — so Athena scan-bytes
+    accounting and cost limits remain consistent.
+
+    Args:
+        side: "source" or "backup".
+    """
+    s3_client = session.client("s3")
+    athena_client = session.client("athena")
+    account_id = session.client("sts").get_caller_identity()["Account"]
+    control_bucket = f"nzshm-backup-inventory-{account_id}"
+    database = "nzshm_backup_inventory"
+    table = _table_name(source_alias, side, bucket)
+    output_location = f"s3://{control_bucket}/athena-results/{source_alias}/{bucket}/"
+
+    _ensure_inventory_table(
+        athena_client, output_location, database, table, control_bucket, hive_root
+    )
+    _ensure_partition(
+        athena_client, output_location, database, table, control_bucket, hive_root, dt
+    )
+
+    query = _build_count_query(table, f"dt = '{dt}' AND {_VERSION_FILTER}")
+    qid = _run_athena_query(athena_client, query, output_location, database=database)
+    _wait_for_athena_query(athena_client, qid)
+    exec_info = athena_client.get_query_execution(QueryExecutionId=qid)
+    result_loc = exec_info["QueryExecution"]["ResultConfiguration"]["OutputLocation"]
+    return _read_count_result(s3_client, result_loc)
+
+
+def count_delta(
+    session: boto3.Session,
+    source_alias: str,
+    side: str,
+    bucket: str,
+) -> dict[str, Any]:
+    """Return today vs yesterday object counts and the delta.
+
+    Used by the daily health report to flag large drops (ADR-006
+    mitigation 1: catches intentional source deletions that under
+    ADR-006's no-Expiration proposal would otherwise persist in backup
+    forever).
+
+    Returns::
+
+        {
+            "today_dt": str | None,
+            "today_count": int | None,
+            "yesterday_dt": str | None,
+            "yesterday_count": int | None,
+            "delta": int | None,           # today - yesterday
+            "delta_pct": float | None,     # (today - yesterday) / yesterday * 100
+            "available": bool,             # True iff both partitions queried
+        }
+
+    When fewer than two partitions exist (e.g. first day after Inventory
+    enabled), the missing fields are None and ``available`` is False.
+    """
+    s3_client = session.client("s3")
+    account_id = session.client("sts").get_caller_identity()["Account"]
+    control_bucket = f"nzshm-backup-inventory-{account_id}"
+    inventory_prefix = _expected_prefix(source_alias, side, bucket)
+
+    partitions = _two_latest_inventory_partitions(s3_client, control_bucket, inventory_prefix)
+    if not partitions:
+        return {
+            "today_dt": None,
+            "today_count": None,
+            "yesterday_dt": None,
+            "yesterday_count": None,
+            "delta": None,
+            "delta_pct": None,
+            "available": False,
+        }
+
+    today_dt, today_hive = partitions[0]
+    today_count = count_objects_for_partition(
+        session, source_alias, side, bucket, today_dt, today_hive
+    )
+
+    if len(partitions) < 2:
+        return {
+            "today_dt": today_dt,
+            "today_count": today_count,
+            "yesterday_dt": None,
+            "yesterday_count": None,
+            "delta": None,
+            "delta_pct": None,
+            "available": False,
+        }
+
+    yesterday_dt, yesterday_hive = partitions[1]
+    yesterday_count = count_objects_for_partition(
+        session, source_alias, side, bucket, yesterday_dt, yesterday_hive
+    )
+
+    delta = today_count - yesterday_count
+    delta_pct = (delta / yesterday_count * 100.0) if yesterday_count else None
+
+    return {
+        "today_dt": today_dt,
+        "today_count": today_count,
+        "yesterday_dt": yesterday_dt,
+        "yesterday_count": yesterday_count,
+        "delta": delta,
+        "delta_pct": delta_pct,
+        "available": True,
+    }
