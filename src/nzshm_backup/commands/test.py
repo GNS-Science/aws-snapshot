@@ -1,8 +1,11 @@
 """Testing and validation commands."""
 
 import random
+import time
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Literal
 
 import boto3
 import typer
@@ -17,6 +20,45 @@ from nzshm_backup.integrity import (
 from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
 from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
 from nzshm_backup.state import get_state
+
+# ---------------------------------------------------------------------------
+# Programmatic restore-test result types
+# (used by the daily health report Lambda; CLI also calls the same path)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BucketRestoreResult:
+    """Per-bucket restore-test outcome."""
+
+    source_bucket: str
+    backup_bucket: str
+    result: Literal["passed", "failed", "skipped"]
+    sample_count: int
+    sampled_keys: list[str] = field(default_factory=list)
+    copy_errors: list[str] = field(default_factory=list)
+    etag_mismatches: list[str] = field(default_factory=list)
+    note: str | None = None  # e.g. "no copyable objects" for skipped
+
+
+@dataclass
+class RestoreTestResult:
+    """All buckets for one source rolled up."""
+
+    source: str
+    mode: Literal["direct copy", "batch"]
+    buckets: list[BucketRestoreResult] = field(default_factory=list)
+    duration_seconds: float = 0.0
+
+    @property
+    def overall(self) -> Literal["passed", "failed", "skipped"]:
+        if not self.buckets:
+            return "skipped"
+        if any(b.result == "failed" for b in self.buckets):
+            return "failed"
+        if all(b.result == "skipped" for b in self.buckets):
+            return "skipped"
+        return "passed"
 
 
 def _fmt_dt(dt: datetime | str) -> str:
@@ -214,6 +256,298 @@ def test_integrity(
         raise typer.Exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Programmatic restore-test API (used by daily health report Lambda)
+# ---------------------------------------------------------------------------
+
+
+def _sample_for_restore(
+    session: boto3.Session,
+    s3_client,
+    source_config,
+    source_alias: str,
+    backup_bucket: str,
+    sample_size: int,
+) -> tuple[list[dict], int, str | None]:
+    """Sample up to ``sample_size`` keys from a backup bucket.
+
+    Returns ``(sample, archived_skipped, error_message)``. If error_message
+    is set, sample is empty and caller should mark the bucket failed.
+    """
+    use_inventory = source_config.batch_manifest_mode == "inventory"
+    if use_inventory:
+        from nzshm_backup.athena_inventory import sample_objects_via_inventory
+
+        try:
+            sample = sample_objects_via_inventory(
+                session, source_alias, backup_bucket, sample_size=sample_size
+            )
+            return sample, 0, None
+        except Exception as e:
+            return [], 0, f"Inventory unavailable for {backup_bucket}: {e}"
+
+    # Bucket-listing path
+    all_objects: list[dict] = []
+    archived = 0
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=backup_bucket):
+        for obj in page.get("Contents", []):
+            if any(obj["Key"].startswith(p) for p in OPERATIONAL_PREFIXES):
+                continue
+            if obj.get("StorageClass") in _ARCHIVED_STORAGE_CLASSES:
+                archived += 1
+            else:
+                all_objects.append(obj)
+
+    sample = (
+        random.sample(all_objects, sample_size)
+        if len(all_objects) >= sample_size
+        else all_objects
+    )
+    return sample, archived, None
+
+
+def _run_bucket_restore_test(
+    session: boto3.Session,
+    s3_client,
+    source_config,
+    source_alias: str,
+    bucket_cfg,
+    region: str,
+    account_id: str,
+    source_account_id: str,
+    sample_size: int,
+    use_batch: bool,
+    batch_role_arn: str | None,
+) -> BucketRestoreResult:
+    """Execute the sample-and-verify path for one backup bucket.
+
+    Side-effect-free with respect to stdout/stderr — captures all
+    diagnostics in the returned ``BucketRestoreResult``. The CLI is
+    expected to render the result for human display.
+    """
+    source_bucket = bucket_cfg.arn.split(":::")[-1]
+    backup_bucket = source_config.get_backup_bucket_name(
+        bucket_cfg.label, region, source_account_id, source_alias
+    )
+    sample, _archived, sample_err = _sample_for_restore(
+        session, s3_client, source_config, source_alias, backup_bucket, sample_size
+    )
+
+    if sample_err:
+        return BucketRestoreResult(
+            source_bucket=source_bucket,
+            backup_bucket=backup_bucket,
+            result="failed",
+            sample_count=0,
+            copy_errors=[sample_err],
+        )
+    if not sample:
+        # Empty sample treated as a failure: an empty backup bucket may
+        # indicate data loss (drained bucket) rather than a never-populated one.
+        return BucketRestoreResult(
+            source_bucket=source_bucket,
+            backup_bucket=backup_bucket,
+            result="failed",
+            sample_count=0,
+            copy_errors=["No copyable objects found in backup bucket"],
+        )
+
+    ts = int(datetime.now(timezone.utc).timestamp())
+    temp_bucket = f"bb-restore-test-{ts}-{account_id}"
+    try:
+        kwargs: dict = {"Bucket": temp_bucket, "ACL": "private"}
+        if region != "us-east-1":
+            kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
+        s3_client.create_bucket(**kwargs)
+        s3_client.put_bucket_tagging(
+            Bucket=temp_bucket,
+            Tagging={
+                "TagSet": [
+                    {"Key": "ManagedBy", "Value": "nzshm-backup"},
+                    {"Key": "Type", "Value": "restore-test"},
+                ]
+            },
+        )
+        if use_batch and batch_role_arn:
+            from nzshm_backup.s3_restore import apply_restore_target_policy
+
+            apply_restore_target_policy(s3_client, temp_bucket, batch_role_arn)
+    except Exception as e:
+        return BucketRestoreResult(
+            source_bucket=source_bucket,
+            backup_bucket=backup_bucket,
+            result="failed",
+            sample_count=0,
+            copy_errors=[f"Failed to create temp bucket: {e}"],
+        )
+
+    copy_errors: list[str] = []
+    etag_mismatches: list[str] = []
+    sampled_keys = [obj["Key"] for obj in sample]
+    try:
+        if use_batch:
+            assert batch_role_arn
+
+            def _sample_rows(_s: list = sample, _b: str = backup_bucket) -> Iterator[str]:
+                for obj in _s:
+                    safe_key = obj["Key"].replace('"', '""')
+                    yield f"{_b},{safe_key}\n"
+
+            from nzshm_backup.s3_batch import write_manifest_to_s3 as _write_manifest
+
+            manifest_key = (
+                f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
+            )
+            manifest_etag, manifest_row_count = _write_manifest(
+                s3_client, _sample_rows(), backup_bucket, manifest_key
+            )
+            batch_result = batch_restore_bucket(
+                session=session,
+                backup_bucket=backup_bucket,
+                target_bucket=temp_bucket,
+                batch_role_arn=batch_role_arn,
+                account_id=account_id,
+                prebuilt_manifest_key=manifest_key,
+                prebuilt_manifest_etag=manifest_etag,
+                prebuilt_manifest_row_count=manifest_row_count,
+            )
+            if batch_result.status != "SUBMITTED":
+                copy_errors.append(f"Batch job failed: {batch_result.errors}")
+            else:
+                assert batch_result.job_id
+                try:
+                    final_status = wait_for_batch_job(
+                        session, account_id, batch_result.job_id, poll_interval=10, timeout=300
+                    )
+                    if final_status != "Complete":
+                        copy_errors.append(f"Batch job ended with status: {final_status}")
+                    else:
+                        for obj in sample:
+                            key = obj["Key"]
+                            try:
+                                err = _verify_restored_object(
+                                    s3_client, backup_bucket, temp_bucket, key, obj["ETag"]
+                                )
+                                if err:
+                                    etag_mismatches.append(f"{key}: {err}")
+                            except Exception as e:
+                                copy_errors.append(f"{key}: {e}")
+                except TimeoutError as e:
+                    copy_errors.append(str(e))
+        else:
+            for obj in sample:
+                key = obj["Key"]
+                expected_etag = obj["ETag"]
+                try:
+                    s3_client.copy_object(
+                        CopySource={"Bucket": backup_bucket, "Key": key},
+                        Bucket=temp_bucket,
+                        Key=key,
+                        MetadataDirective="COPY",
+                    )
+                    err = _verify_restored_object(
+                        s3_client, backup_bucket, temp_bucket, key, expected_etag
+                    )
+                    if err:
+                        etag_mismatches.append(f"{key}: {err}")
+                except Exception as copy_err:
+                    copy_errors.append(f"{key}: {copy_err}")
+    finally:
+        cleanup_err = _delete_temp_bucket_silent(s3_client, temp_bucket)
+        if cleanup_err:
+            copy_errors.append(cleanup_err)
+
+    if copy_errors:
+        result: Literal["passed", "failed", "skipped"] = "failed"
+    elif etag_mismatches:
+        result = "failed"
+    else:
+        result = "passed"
+
+    return BucketRestoreResult(
+        source_bucket=source_bucket,
+        backup_bucket=backup_bucket,
+        result=result,
+        sample_count=len(sample),
+        sampled_keys=sampled_keys,
+        copy_errors=copy_errors,
+        etag_mismatches=etag_mismatches,
+    )
+
+
+def restore_test_source(
+    session: boto3.Session,
+    config,
+    source_alias: str,
+    sample_size: int = 10,
+    use_batch: bool = False,
+    emit_events: bool = True,
+) -> RestoreTestResult:
+    """Run the S3 sample-restore verification for one source.
+
+    Pure data-collection function: no stdout/stderr, no ``typer.Exit``.
+    The CLI ``backup test restore`` and the daily health-report Lambda
+    both call this and format the returned ``RestoreTestResult``.
+
+    Args:
+        emit_events: append a ``test_restore`` row per bucket to the
+            event log. Defaults True for parity with the existing CLI;
+            health-report callers can pass False to keep their own
+            audit trail.
+    """
+    source_config = config.sources[source_alias]
+    region = config.general.region
+    account_id = get_account_id(session)
+    source_account_id = source_config.source_account_id or account_id
+    s3_client = session.client("s3")
+    batch_role_arn = config.general.s3_batch_role_arn
+    mode: Literal["direct copy", "batch"] = "batch" if use_batch else "direct copy"
+
+    started = time.monotonic()
+    result = RestoreTestResult(source=source_alias, mode=mode)
+    for bucket_cfg in source_config.s3_buckets:
+        bucket_result = _run_bucket_restore_test(
+            session=session,
+            s3_client=s3_client,
+            source_config=source_config,
+            source_alias=source_alias,
+            bucket_cfg=bucket_cfg,
+            region=region,
+            account_id=account_id,
+            source_account_id=source_account_id,
+            sample_size=sample_size,
+            use_batch=use_batch,
+            batch_role_arn=batch_role_arn,
+        )
+        result.buckets.append(bucket_result)
+
+        if emit_events:
+            event_result = (
+                "passed"
+                if bucket_result.result == "passed"
+                else "etag_mismatch"
+                if not bucket_result.copy_errors and bucket_result.etag_mismatches
+                else "failed"
+            )
+            details: dict = {
+                "bucket": bucket_result.backup_bucket,
+                "result": event_result,
+                "mode": mode,
+                "sample_size": bucket_result.sample_count,
+            }
+            if bucket_result.copy_errors:
+                details["copy_errors"] = len(bucket_result.copy_errors)
+            if bucket_result.etag_mismatches:
+                details["etag_mismatches"] = len(bucket_result.etag_mismatches)
+            append_event(
+                session, bucket_result.backup_bucket, "test_restore", source_alias, details=details
+            )
+
+    result.duration_seconds = time.monotonic() - started
+    return result
+
+
 @app.command("restore")
 def test_restore(
     source: str = typer.Option(..., "--source", help="Source alias from config"),
@@ -280,242 +614,49 @@ def test_restore(
     mode = "batch" if use_batch else "direct copy"
     typer.echo(f"\n[{source}] Restore test  (sample_size={sample_size}, mode={mode})\n")
 
-    for bucket_cfg in source_config.s3_buckets:
-        backup_bucket = source_config.get_backup_bucket_name(
-            bucket_cfg.label, region, source_account_id, source
+    if state.dry_run:
+        for bucket_cfg in source_config.s3_buckets:
+            backup_bucket = source_config.get_backup_bucket_name(
+                bucket_cfg.label, region, source_account_id, source
+            )
+            typer.echo(f"  Sampling from: {backup_bucket}")
+            typer.echo(f"    [DRY RUN] Would copy up to {sample_size} objects and verify ETags")
+            typer.echo("")
+    else:
+        result = restore_test_source(
+            session=session,
+            config=config,
+            source_alias=source,
+            sample_size=sample_size,
+            use_batch=use_batch,
         )
-        typer.echo(f"  Sampling from: {backup_bucket}")
-
-        # Sample objects — prefer inventory (fast) over full listing (slow)
-        sample: list[dict] = []
-        use_inventory = source_config.batch_manifest_mode == "inventory"
-        if use_inventory:
-            try:
-                from nzshm_backup.athena_inventory import sample_objects_via_inventory
-
-                typer.echo("    Sampling via inventory (Athena)...")
-                sample = sample_objects_via_inventory(
-                    session,
-                    source,
-                    backup_bucket,
-                    sample_size=sample_size,
-                )
-            except (ValueError, Exception) as e:
+        for bucket_result in result.buckets:
+            typer.echo(f"  Sampling from: {bucket_result.backup_bucket}")
+            if bucket_result.result == "skipped":
                 typer.echo(
-                    f"    ✗ Inventory unavailable for {backup_bucket}: {e}\n"
-                    f"      Inventory-mode sources require inventory data for sampling.\n"
-                    f"      Wait for the next daily inventory cycle, or run:\n"
-                    f"        backup check --source {source}",
+                    f"    ⚠ {bucket_result.note or 'skipped'}",
                     err=True,
                 )
-                any_failure = True
-                continue
-
-        if not use_inventory:
-            typer.echo("    Sampling via bucket listing...")
-            all_objects: list[dict] = []
-            archived_count = 0
-            paginator = s3.get_paginator("list_objects_v2")
-            for page in paginator.paginate(Bucket=backup_bucket):
-                for obj in page.get("Contents", []):
-                    if any(obj["Key"].startswith(p) for p in OPERATIONAL_PREFIXES):
-                        continue
-                    if obj.get("StorageClass") in _ARCHIVED_STORAGE_CLASSES:
-                        archived_count += 1
-                    else:
-                        all_objects.append(obj)
-
-            if archived_count:
+            elif bucket_result.copy_errors:
                 typer.echo(
-                    f"    {archived_count} archived object(s) skipped "
-                    f"(Glacier/Deep Archive — not directly copyable)"
+                    f"    ✗ {len(bucket_result.copy_errors)} copy error(s):", err=True
                 )
-            sample = (
-                random.sample(all_objects, sample_size)
-                if len(all_objects) >= sample_size
-                else all_objects
-            )
-
-        if not sample:
-            typer.echo("    ✗ No copyable objects found in backup bucket", err=True)
-            any_failure = True
-            continue
-
-        if len(sample) < sample_size:
-            typer.echo(
-                f"    Sample reduced to {len(sample)} (fewer copyable objects than requested)"
-            )
-
-        # Create temp bucket
-        ts = int(datetime.now(timezone.utc).timestamp())
-        temp_bucket = f"bb-restore-test-{ts}-{account_id}"
-        if state.dry_run:
-            typer.echo(f"    [DRY RUN] Would create temp bucket: {temp_bucket}")
-            typer.echo(f"    [DRY RUN] Would copy {len(sample)} objects and verify ETags")
-            continue
-
-        typer.echo(f"    Creating temp bucket: {temp_bucket}")
-        try:
-            kwargs: dict = {"Bucket": temp_bucket, "ACL": "private"}
-            if region != "us-east-1":
-                kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
-            s3.create_bucket(**kwargs)
-            s3.put_bucket_tagging(
-                Bucket=temp_bucket,
-                Tagging={
-                    "TagSet": [
-                        {"Key": "ManagedBy", "Value": "nzshm-backup"},
-                        {"Key": "Type", "Value": "restore-test"},
-                    ]
-                },
-            )
-            if use_batch and batch_role_arn:
-                from nzshm_backup.s3_restore import apply_restore_target_policy
-
-                apply_restore_target_policy(s3, temp_bucket, batch_role_arn)
-        except Exception as e:
-            typer.echo(f"    ✗ Failed to create temp bucket: {e}", err=True)
-            any_failure = True
-            continue
-
-        # Copy sample to temp bucket and verify ETags
-        copy_errors: list[str] = []
-        etag_mismatches: list[str] = []
-        try:
-            if use_batch:
-                assert batch_role_arn  # guarded: use_batch requires batch_role_arn (checked above)
-
-                # Write a manifest containing only the sampled keys, then submit a Batch job
-                def _sample_rows(_s: list = sample, _b: str = backup_bucket) -> Iterator[str]:
-                    for obj in _s:
-                        safe_key = obj["Key"].replace('"', '""')
-                        yield f"{_b},{safe_key}\n"
-
-                from nzshm_backup.s3_batch import write_manifest_to_s3 as _write_manifest
-
-                manifest_key = (
-                    f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
+                for err in bucket_result.copy_errors:
+                    typer.echo(f"      - {err}", err=True)
+                any_failure = True
+            elif bucket_result.etag_mismatches:
+                typer.echo(
+                    f"    ✗ {len(bucket_result.etag_mismatches)} ETag mismatch(es) after copy:",
+                    err=True,
                 )
-                manifest_etag, manifest_row_count = _write_manifest(
-                    s3, _sample_rows(), backup_bucket, manifest_key
-                )
-                typer.echo(f"    Submitting batch job ({len(sample)} objects)...")
-                batch_result = batch_restore_bucket(
-                    session=session,
-                    backup_bucket=backup_bucket,
-                    target_bucket=temp_bucket,
-                    batch_role_arn=batch_role_arn,
-                    account_id=account_id,
-                    prebuilt_manifest_key=manifest_key,
-                    prebuilt_manifest_etag=manifest_etag,
-                    prebuilt_manifest_row_count=manifest_row_count,
-                )
-                if batch_result.status != "SUBMITTED":
-                    copy_errors.append(f"Batch job failed: {batch_result.errors}")
-                else:
-                    typer.echo(f"    Waiting for batch job {batch_result.job_id}...")
-                    assert batch_result.job_id  # set when status == "SUBMITTED"
-                    try:
-                        final_status = wait_for_batch_job(
-                            session, account_id, batch_result.job_id, poll_interval=10, timeout=300
-                        )
-                        if final_status != "Complete":
-                            copy_errors.append(f"Batch job ended with status: {final_status}")
-                        else:
-                            for obj in sample:
-                                key = obj["Key"]
-                                try:
-                                    err = _verify_restored_object(
-                                        s3,
-                                        backup_bucket,
-                                        temp_bucket,
-                                        key,
-                                        obj["ETag"],
-                                    )
-                                    if err:
-                                        etag_mismatches.append(f"{key}: {err}")
-                                except Exception as e:
-                                    copy_errors.append(f"{key}: {e}")
-                    except TimeoutError as e:
-                        copy_errors.append(str(e))
+                for key in bucket_result.etag_mismatches:
+                    typer.echo(f"      - {key}", err=True)
+                any_failure = True
             else:
-                for obj in sample:
-                    key = obj["Key"]
-                    expected_etag = obj["ETag"]
-                    try:
-                        s3.copy_object(
-                            CopySource={"Bucket": backup_bucket, "Key": key},
-                            Bucket=temp_bucket,
-                            Key=key,
-                            MetadataDirective="COPY",
-                        )
-                        err = _verify_restored_object(
-                            s3,
-                            backup_bucket,
-                            temp_bucket,
-                            key,
-                            expected_etag,
-                        )
-                        if err:
-                            etag_mismatches.append(f"{key}: {err}")
-                    except Exception as copy_err:
-                        copy_errors.append(f"{key}: {copy_err}")
-        finally:
-            # Always clean up temp bucket
-            _delete_temp_bucket(s3, temp_bucket)
-
-        if copy_errors:
-            typer.echo(f"    ✗ {len(copy_errors)} copy error(s):", err=True)
-            for err in copy_errors:
-                typer.echo(f"      - {err}", err=True)
-            any_failure = True
-            append_event(
-                session,
-                backup_bucket,
-                "test_restore",
-                source,
-                details={
-                    "bucket": backup_bucket,
-                    "result": "failed",
-                    "mode": mode,
-                    "sample_size": len(sample),
-                    "copy_errors": len(copy_errors),
-                },
-            )
-        elif etag_mismatches:
-            typer.echo(f"    ✗ {len(etag_mismatches)} ETag mismatch(es) after copy:", err=True)
-            for key in etag_mismatches:
-                typer.echo(f"      - {key}", err=True)
-            any_failure = True
-            append_event(
-                session,
-                backup_bucket,
-                "test_restore",
-                source,
-                details={
-                    "bucket": backup_bucket,
-                    "result": "etag_mismatch",
-                    "mode": mode,
-                    "sample_size": len(sample),
-                    "etag_mismatches": len(etag_mismatches),
-                },
-            )
-        else:
-            typer.echo(f"    ✓ {len(sample)} objects copied and verified")
-            append_event(
-                session,
-                backup_bucket,
-                "test_restore",
-                source,
-                details={
-                    "bucket": backup_bucket,
-                    "result": "passed",
-                    "mode": mode,
-                    "sample_size": len(sample),
-                },
-            )
-
-        typer.echo("")
+                typer.echo(
+                    f"    ✓ {bucket_result.sample_count} objects copied and verified"
+                )
+            typer.echo("")
 
     # ------------------------------------------------------------------
     # DynamoDB tables — check PITR enabled + export bucket accessible
@@ -572,8 +713,12 @@ def test_restore(
         raise typer.Exit(1)
 
 
-def _delete_temp_bucket(s3_client, bucket_name: str) -> None:
-    """Delete all objects then the bucket. Failures are logged, not raised."""
+def _delete_temp_bucket_silent(s3_client, bucket_name: str) -> str | None:
+    """Delete all objects then the bucket. Returns error message or None.
+
+    Used by both the CLI (which echoes the error) and the programmatic
+    ``restore_test_source`` (which captures it in the result).
+    """
     try:
         paginator = s3_client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket_name):
@@ -581,8 +726,16 @@ def _delete_temp_bucket(s3_client, bucket_name: str) -> None:
             if objects:
                 s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
         s3_client.delete_bucket(Bucket=bucket_name)
+        return None
     except Exception as e:
-        typer.echo(f"    Warning: failed to clean up temp bucket {bucket_name}: {e}", err=True)
+        return f"failed to clean up temp bucket {bucket_name}: {e}"
+
+
+def _delete_temp_bucket(s3_client, bucket_name: str) -> None:
+    """Delete all objects then the bucket. Failures are logged, not raised."""
+    err = _delete_temp_bucket_silent(s3_client, bucket_name)
+    if err:
+        typer.echo(f"    Warning: {err}", err=True)
 
 
 @app.command("full-drill")
