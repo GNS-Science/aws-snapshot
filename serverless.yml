@@ -15,6 +15,7 @@ provider:
   environment:
     NZSHM_STAGE: ${sls:stage}
     PYTHONPATH: /var/task/src
+    BACKUP_REPORTS_TOPIC_ARN: !Ref BackupReportsTopic
   iam:
     role:
       statements:
@@ -101,6 +102,17 @@ provider:
             - glue:UpdatePartition
             - glue:BatchDeletePartition
           Resource: "*"
+        # Daily health-report delivery (ADR-005 slow path)
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - !Ref BackupReportsTopic
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - arn:aws:secretsmanager:${aws:region}:${aws:accountId}:secret:backup-slack-webhook-*
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:
@@ -134,6 +146,8 @@ custom:
     sandbox: backup-config.sandbox.yaml
   config: ${file(${self:custom.configFiles.${sls:stage}, 'backup-config.production.yaml'})}
   alertEmail: ${self:custom.config.notifications.alerts.email, ''}
+  reportEmail: ${self:custom.config.notifications.reports.email.address, ''}
+  reportEmailEnabled: ${self:custom.config.notifications.reports.email.enabled, false}
   pythonRequirements:
     dockerizePip: true
     slim: true
@@ -145,6 +159,15 @@ resources:
         - Fn::Equals:
             - ${self:custom.alertEmail}
             - ''
+    HasReportEmail:
+      Fn::And:
+        - Fn::Not:
+            - Fn::Equals:
+                - ${self:custom.reportEmail}
+                - ''
+        - Fn::Equals:
+            - ${self:custom.reportEmailEnabled}
+            - true
   Resources:
     BackupAlertsTopic:
       Type: AWS::SNS::Topic
@@ -180,6 +203,22 @@ resources:
           - !Ref BackupAlertsTopic
         OKActions:
           - !Ref BackupAlertsTopic
+
+    # ADR-005 slow path: daily health report delivered via SNS -> email.
+    # Separate topic so report subscribers are distinct from alarm subscribers.
+    BackupReportsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: nzshm-backup-reports-${sls:stage}
+        DisplayName: NSHM Backup Daily Reports (${sls:stage})
+
+    BackupReportEmailSubscription:
+      Type: AWS::SNS::Subscription
+      Condition: HasReportEmail
+      Properties:
+        TopicArn: !Ref BackupReportsTopic
+        Protocol: email
+        Endpoint: ${self:custom.reportEmail}
 
 package:
   individually: true

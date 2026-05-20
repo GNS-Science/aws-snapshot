@@ -75,6 +75,13 @@ notifications:
   # Email is consumed at deploy time by serverless.yml -> SNS subscription.
   alerts:
     email: oncall@example.com
+  # reports: slow-path daily health report delivered via SNS -> email.
+  # Distinct from alerts so a wider audience (mailing list) can subscribe
+  # to reports without being paged on every Lambda error.
+  reports:
+    email:
+      enabled: true
+      address: backup-reports@example.com
   ses:
     enabled: true
     source_email: noreply-backup@example.com

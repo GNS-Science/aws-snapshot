@@ -66,18 +66,37 @@ class AlertsConfig(BaseModel):
     """Lambda error alarm fast-path configuration.
 
     Drives the CloudWatch alarm -> SNS -> email subscription declared in
-    serverless.yml. Distinct from SESConfig: alerts fire on Lambda
-    invocation errors and route to on-call; SES recipients receive the
-    daily health report.
+    serverless.yml. Distinct from ReportsEmailConfig: alerts fire on
+    Lambda invocation errors and route to on-call; reports recipients
+    receive the daily health report.
     """
 
     email: str | None = None
+
+
+class ReportsEmailConfig(BaseModel):
+    """SNS-based email delivery for the daily health report.
+
+    Drives the BackupReportsTopic + email subscription declared in
+    serverless.yml. SES is deliberately not used — see ADR-005
+    (revised) for the rationale.
+    """
+
+    enabled: bool = False
+    address: str | None = None
+
+
+class ReportsConfig(BaseModel):
+    """Daily-report delivery configuration."""
+
+    email: ReportsEmailConfig = Field(default_factory=ReportsEmailConfig)
 
 
 class NotificationConfig(BaseModel):
     """Notification configuration."""
 
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    reports: ReportsConfig = Field(default_factory=ReportsConfig)
     ses: SESConfig = Field(default_factory=SESConfig)
     slack: SlackConfig | None = None
 
