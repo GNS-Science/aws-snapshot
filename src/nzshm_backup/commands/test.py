@@ -595,3 +595,31 @@ def test_full_drill(
 ):
     """Run quarterly full disaster recovery drill."""
     typer.echo(f"Full DR drill - coming soon for {source}")
+
+
+@app.command("alert")
+def test_alert(
+    stage: str = typer.Option("prod", help="Deployment stage matching `sls deploy --stage`"),
+    region: str = typer.Option("ap-southeast-2", help="AWS region of the alarm"),
+) -> None:
+    """Force the Lambda-error alarm into ALARM state to test the fast-path notification.
+
+    Fires the alarm's SNS actions (email/Slack subscribers) without requiring the
+    backup Lambda to actually fail. The alarm auto-returns to OK on the next real
+    metric datapoint (~5 min). See ADR-005 / docs/design/adr/ADR-005-*.md.
+    """
+    alarm_name = f"nzshm-backup-lambda-errors-{stage}"
+    typer.echo(f"Forcing alarm to ALARM state: {alarm_name}  (region={region})")
+
+    cw = boto3.client("cloudwatch", region_name=region)
+    cw.set_alarm_state(
+        AlarmName=alarm_name,
+        StateValue="ALARM",
+        StateReason="Manual test via `backup test alert`",
+    )
+
+    typer.echo("  ✓ Alarm state set to ALARM.")
+    typer.echo("  → SNS actions fired; subscribed recipients should receive notification")
+    typer.echo("    within ~30 seconds.")
+    typer.echo("  → Alarm auto-returns to OK on the next real datapoint (~5 min).")
+    typer.echo("    An OK notification will also be delivered (OKActions wired).")
