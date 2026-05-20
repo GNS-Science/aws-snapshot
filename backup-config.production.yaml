@@ -74,6 +74,12 @@ restore:
 notifications:
   alerts:
     email: chrisbc@artisan.co.nz
+  reports:
+    # Daily health report delivered via SNS topic + email subscription.
+    # Flip enabled: true and fill address: once SNS subscription confirmed.
+    email:
+      enabled: false
+      address: null
   ses:
     enabled: false
     source_email: noreply-backup@example.com
