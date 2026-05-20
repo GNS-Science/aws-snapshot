@@ -312,13 +312,28 @@ def status(
     typer.echo("")
 
 
-def _print_json_status(
+def get_status_dict(
     sources: list[str],
     config,
     session: boto3.Session,
     selected_job: dict[str, Any] | None = None,
-) -> None:
-    out = {}
+) -> dict[str, Any]:
+    """Assemble per-source backup status as a plain dict.
+
+    Pure data-collection function with no I/O beyond the AWS API calls
+    that `backup status` already makes. Used by both the CLI
+    (`_print_json_status`) and the daily health report (#16).
+
+    Returns a dict keyed by source alias, value shape::
+
+        {
+            "dynamodb_tables": {table_name: [...exports...]},
+            "s3_batches": [{source_bucket, backup_bucket, last_run,
+                            inventory, recent_jobs} ...],
+            "selected_job": {...}  # optional
+        }
+    """
+    out: dict[str, Any] = {}
     account_id = get_account_id(session)
     s3control = session.client("s3control", region_name=config.general.region)
     for alias in sources:
@@ -397,4 +412,13 @@ def _print_json_status(
             payload["selected_job"] = _job_json(selected_job)
 
         out[alias] = payload
-    typer.echo(json.dumps(out, indent=2))
+    return out
+
+
+def _print_json_status(
+    sources: list[str],
+    config,
+    session: boto3.Session,
+    selected_job: dict[str, Any] | None = None,
+) -> None:
+    typer.echo(json.dumps(get_status_dict(sources, config, session, selected_job), indent=2))

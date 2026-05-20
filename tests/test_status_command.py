@@ -399,3 +399,50 @@ def test_status_text_with_job_id_prints_selected_job(s3_batch_config, monkeypatc
     assert "Selected S3 Batch job" in result.output
     assert "job/abcd1234-5678-abcd-efgh-1234567890ab" in result.output
     assert "50.0% done" in result.output
+
+
+# ---------------------------------------------------------------------------
+# get_status_dict() — programmatic API for the daily health report
+# ---------------------------------------------------------------------------
+
+
+def test_get_status_dict_returns_dynamodb_data(dynamo_config, monkeypatch):
+    """get_status_dict assembles per-source DynamoDB export data without CLI."""
+    from nzshm_backup.commands.status import get_status_dict
+    from nzshm_backup.config import load_config
+
+    monkeypatch.chdir(dynamo_config)
+    config = load_config("backup-config.yaml")
+    mock_session = MagicMock()
+    mock_export = {
+        "ExportArn": "arn:aws:dynamodb:::export/abc",
+        "ExportStatus": "COMPLETED",
+        "ExportTime": TS,
+    }
+
+    with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
+        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]):
+            out = get_status_dict(["toshi"], config, mock_session)
+
+    assert "toshi" in out
+    assert "TestTable" in out["toshi"]["dynamodb_tables"]
+    assert out["toshi"]["dynamodb_tables"]["TestTable"][0]["status"] == "COMPLETED"
+    assert out["toshi"]["s3_batches"] == []
+
+
+def test_get_status_dict_no_typer_echo(dynamo_config, monkeypatch, capsys):
+    """get_status_dict must not emit any stdout/stderr — pure data return."""
+    from nzshm_backup.commands.status import get_status_dict
+    from nzshm_backup.config import load_config
+
+    monkeypatch.chdir(dynamo_config)
+    config = load_config("backup-config.yaml")
+    mock_session = MagicMock()
+
+    with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
+        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[]):
+            get_status_dict(["toshi"], config, mock_session)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
