@@ -279,6 +279,7 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
     config.sources = {"weka": source_cfg, "toshi": source_cfg}
     config.general.region = "ap-southeast-2"
+    config.notifications.reports.health = None  # use module-default thresholds
 
     mock_status.return_value = {"weka": {}, "toshi": {}}
     mock_inv.return_value = {
@@ -332,6 +333,7 @@ def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
     source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
     config.sources = {"weka": source_cfg, "ths": source_cfg, "toshi": source_cfg}
     config.general.region = "ap-southeast-2"
+    config.notifications.reports.health = None  # use module-default thresholds
 
     mock_status.return_value = {"weka": {}, "ths": {}, "toshi": {}}
     mock_inv.return_value = {
@@ -382,6 +384,7 @@ def test_build_report_flags_count_drop(
     source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
     config.sources = {"toshi": source_cfg}
     config.general.region = "ap-southeast-2"
+    config.notifications.reports.health = None  # use module-default thresholds
 
     mock_status.return_value = {"toshi": {}}
     mock_inv.return_value = {

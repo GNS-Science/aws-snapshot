@@ -85,10 +85,33 @@ class ReportsEmailConfig(BaseModel):
     address: str | None = None
 
 
+class HealthReportConfig(BaseModel):
+    """Tunable thresholds and rotation for the daily health report.
+
+    All fields are optional with defaults that match the previously-
+    hardcoded values in src/nzshm_backup/health_report.py.
+
+    Map keys are ISO weekday numbers (0=Mon … 6=Sun). Add or remove
+    entries to change which large source gets restore-tested on which
+    day; default: Mon=ths, Wed=toshi, Fri=static (other days only the
+    canary runs).
+    """
+
+    canary_source: str = "weka"
+    rotation_by_weekday: dict[int, str] = Field(
+        default_factory=lambda: {0: "ths", 2: "toshi", 4: "static"}
+    )
+    freshness_threshold_hours: float = 30.0
+    delta_pct_threshold: float = -5.0  # source-count drop ≥ 5% (negative) → red
+    delta_abs_threshold: int = -10_000  # source-count drop ≥ 10k objects → red
+    restore_sample_size: int = 10
+
+
 class ReportsConfig(BaseModel):
-    """Daily-report delivery configuration."""
+    """Daily-report delivery + tuning configuration."""
 
     email: ReportsEmailConfig = Field(default_factory=ReportsEmailConfig)
+    health: HealthReportConfig = Field(default_factory=HealthReportConfig)
 
 
 class NotificationConfig(BaseModel):
