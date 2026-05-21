@@ -34,6 +34,16 @@ All notable changes to this project will be documented here.
 - `time_utils.nz_now()` and `time_utils.nz_today()` — DST-aware NZ wall-clock
   helpers (via `zoneinfo.ZoneInfo("Pacific/Auckland")`). Used by the daily report
   so report_date and weekday rotation reflect NZ calendar, not UTC.
+- **Multi-recipient notification subscriptions managed from YAML.**
+  `notifications.alerts.emails` and `notifications.reports.email.addresses`
+  are now lists of strings (was: singular `email` / `address`).
+  New `backup notifications apply` command reconciles each SNS topic's
+  email subscriptions to match the YAML lists — `+` Subscribe for new
+  addresses, `-` Unsubscribe for removed, leaves pending confirmations
+  alone. `backup notifications show` lists current state.
+  `serverless.yml` no longer manages individual subscriptions (the
+  topics themselves are still CloudFormation-owned); recipient changes
+  no longer require `sls deploy`.
 - **Daily health-report trigger** (ADR-005 / #16, PR B half).
   `BackupTask.task_type: Literal["backup","health_report"] = "backup"` discriminates
   Lambda invocations. New handler branch calls `health_report.build_report` +
