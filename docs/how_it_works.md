@@ -216,3 +216,67 @@ Dry-run output is prefixed with `[DRY RUN]`.
 
 For Lambda runtime, config is passed as a JSON environment variable
 (`BACKUP_CONFIG`) set during `serverless deploy`.
+
+## Daily health report
+
+Independent task type on the same backup Lambda, covering the failure
+modes the per-invocation CloudWatch alarm can't catch (stale inventory,
+silent source-count drops, restore-path failures). See ADR-005 (revised)
+for the full design rationale and the
+[Daily Health Report user guide](user-guide/health-report.md) for the
+operator-facing walkthrough.
+
+### Two notification paths
+
+```
+   ┌──────────────── Lambda Errors metric ────────────────┐
+   │                                                       │
+EventBridge (daily 14:30 NZST,                CloudWatch alarm
+ post-PR-B)                                    (≥1 error / 5 min)
+   │                                                       │
+   ▼                                                       ▼
+nzshm-backup-service-prod-backup            BackupAlertsTopic (SNS)
+ Lambda handler                                            │
+   │  task.task_type=="health_report"                      │
+   │                                                       │
+   ├── build_report() — status + freshness + delta         │
+   │   + restore (canary + rotation) + PITR                │
+   │                                                       │
+   ├── send() ─────► Slack webhook (Block Kit)             │
+   │       └─────► BackupReportsTopic (SNS) ──► email      │
+   │                                                       │
+   └── append_event("health_report_run")                   │
+                                                           │
+                                                  Subscribers (email)
+```
+
+The same Lambda runs both per-source backups and the health report;
+`BackupTask.task_type` (added in PR B) discriminates. The SNS
+**reports** topic is separate from the **alerts** topic so subscribers
+of one don't automatically get the other: alerts → on-call (urgent,
+per-failure); reports → broader audience (daily summary).
+
+### What runs each day
+
+For every source: a programmatic `backup status` (run state + recent
+batch jobs + DynamoDB exports), an inventory-freshness check, and an
+Athena `COUNT(*)` delta against yesterday's inventory partition.
+
+For one or two sources (the canary every day plus a Mon/Wed/Fri rotated
+large source): a 10-object sampled restore test that copies into a
+temporary bucket and verifies checksums or ETags. Provides the
+operator's only continuously-verified evidence that the restore path
+still works end-to-end.
+
+The classifier maps the signals to **green / yellow / red**; the report
+delivery itself acts as a daily heartbeat — its absence is the operator
+signal that something has gone deeply wrong (the alarm path covers
+Lambda-level errors but not a misconfigured EventBridge rule).
+
+### Schedule lives in EventBridge, not config
+
+The cron expression and trigger live on an AWS EventBridge rule, not in
+`backup-config.yaml`. Managed via `backup schedule add --task-type
+health_report ...` (PR B). The tunable thresholds (canary, rotation,
+freshness, delta, sample size) **are** in config under
+`notifications.reports.health` — see the user guide for the table.
