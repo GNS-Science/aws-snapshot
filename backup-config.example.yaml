@@ -81,6 +81,18 @@ notifications:
     email:
       enabled: true
       address: backup-reports@example.com
+    # Tunable thresholds for the daily health report. All fields are
+    # optional — omit to accept defaults baked into health_report.py.
+    health:
+      canary_source: weka
+      rotation_by_weekday:    # ISO weekday → source to restore-test that day
+        0: ths                # Monday
+        2: toshi              # Wednesday
+        4: static             # Friday
+      freshness_threshold_hours: 30.0
+      delta_pct_threshold: -5.0     # source-count drop ≥ 5% → red (must be negative)
+      delta_abs_threshold: -10000   # OR drop ≥ 10k objects → red (whichever first)
+      restore_sample_size: 10
   ses:
     enabled: true
     source_email: noreply-backup@example.com
