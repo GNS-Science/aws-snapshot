@@ -32,7 +32,6 @@ def sample_config_dict():
         "retention": {
             "hot_days": 30,
             "warm_days": 90,
-            "cold_days": 365,
             "max_age_days": 365,
         },
     }
@@ -90,7 +89,6 @@ def test_retention_config_defaults():
 
     assert config.hot_days == 30
     assert config.warm_days == 120
-    assert config.cold_days == 365
     assert config.max_age_days == 365
 
 

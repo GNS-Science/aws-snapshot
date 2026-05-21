@@ -44,7 +44,6 @@ class LifecycleConfig:
 
     hot_days: int = 30
     warm_days: int = 120
-    cold_days: int = 365
     max_age_days: int = 365
     version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 

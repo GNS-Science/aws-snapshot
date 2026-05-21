@@ -17,7 +17,6 @@ class RetentionConfig(BaseModel):
 
     hot_days: int = 30
     warm_days: int = 120  # must be >= hot_days + 90 (AWS constraint for GLACIER_IR → DEEP_ARCHIVE)
-    cold_days: int = 365
     max_age_days: int = 365
     version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 
@@ -114,41 +113,6 @@ class CostTrackingConfig(BaseModel):
     export_to_s3: str | None = None
 
 
-class TestingConfig(BaseModel):
-    """Automated testing configuration."""
-
-    class WeeklyTest(BaseModel):
-        enabled: bool = True
-        day: str = "wednesday"
-        time: str = "10:00"
-        sample_size_mb: int = 100
-
-    class MonthlyRestore(BaseModel):
-        enabled: bool = True
-        day: str = "first-monday"
-        time: str = "09:00"
-        table: str = "ToshiAPI-FileTable"
-
-    class QuarterlyDrill(BaseModel):
-        enabled: bool = True
-        months: list[Literal["january", "april", "july", "october"]] = [
-            "january",
-            "april",
-            "july",
-            "october",
-        ]
-        day: int = 15
-        isolated_environment: bool = True
-
-    weekly_small_test: WeeklyTest = Field(default_factory=lambda: TestingConfig.WeeklyTest())
-    monthly_table_restore: MonthlyRestore = Field(
-        default_factory=lambda: TestingConfig.MonthlyRestore()
-    )
-    quarterly_full_drill: QuarterlyDrill = Field(
-        default_factory=lambda: TestingConfig.QuarterlyDrill()
-    )
-
-
 class SourceConfig(BaseModel):
     """Configuration for a single backup source."""
 
@@ -221,7 +185,6 @@ class ConfigModel(BaseModel):
     restore: RestoreConfig = Field(default_factory=lambda: RestoreConfig())
     notifications: NotificationConfig = Field(default_factory=lambda: NotificationConfig())
     cost_tracking: CostTrackingConfig = Field(default_factory=lambda: CostTrackingConfig())
-    testing: TestingConfig = Field(default_factory=lambda: TestingConfig())
 
     @model_validator(mode="after")
     def validate_batch_config(self) -> "ConfigModel":

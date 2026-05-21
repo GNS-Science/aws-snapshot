@@ -60,7 +60,6 @@ sources:
 retention:
   hot_days: 30
   warm_days: 120  # must be >= hot_days + 90 (AWS constraint: GLACIER_IR → DEEP_ARCHIVE gap)
-  cold_days: 365
   max_age_days: 365
 
 restore:
@@ -102,24 +101,3 @@ cost_tracking:
   budget_alerts: true
   monthly_budget: 700
   export_to_s3: null
-
-testing:
-  weekly_small_test:
-    enabled: true
-    day: wednesday
-    time: "10:00"
-    sample_size_mb: 100
-  monthly_table_restore:
-    enabled: true
-    day: first-monday
-    time: "09:00"
-    table: ToshiFileObject-PROD
-  quarterly_full_drill:
-    enabled: true
-    months:
-      - january
-      - april
-      - july
-      - october
-    day: 15
-    isolated_environment: true
