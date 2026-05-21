@@ -61,13 +61,72 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         }
 
     logger.info(
-        "Starting backup task: "
-        f"source={task.source}, dry_run={task.dry_run}, prepare_only={task.prepare_only}"
+        "Starting task: "
+        f"task_type={task.task_type}, source={task.source}, dry_run={task.dry_run}"
     )
 
     try:
         config = get_config()
         session = boto3.Session()
+
+        # ADR-005 slow path: build + deliver the daily health report.
+        # `source` is a sentinel for this task type and is ignored.
+        if task.task_type == "health_report":
+            import os
+
+            from nzshm_backup import health_report
+            from nzshm_backup.event_log import append_event
+
+            data = health_report.build_report(session, config)
+            topic_arn = os.environ.get("BACKUP_REPORTS_TOPIC_ARN")
+            delivery = health_report.send(data, config.notifications, session, topic_arn)
+
+            # Audit-trail entry on the canary's backup bucket — keeps the
+            # health_report_run event collocated with the same source that
+            # was actually exercised.
+            try:
+                canary_alias = data.canary_source
+                canary_cfg = config.sources.get(canary_alias)
+                if canary_cfg and canary_cfg.s3_buckets:
+                    bucket_cfg = canary_cfg.s3_buckets[0]
+                    account_id = canary_cfg.source_account_id or session.client(
+                        "sts"
+                    ).get_caller_identity()["Account"]
+                    canary_bucket = canary_cfg.get_backup_bucket_name(
+                        bucket_cfg.label,
+                        config.general.region,
+                        account_id,
+                        canary_alias,
+                    )
+                    append_event(
+                        session,
+                        canary_bucket,
+                        "health_report_run",
+                        canary_alias,
+                        details={
+                            "overall": data.overall,
+                            "healthy": data.healthy_count,
+                            "total": len(data.sources),
+                            "slack_ok": delivery.slack_ok,
+                            "sns_ok": delivery.sns_ok,
+                        },
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"health_report_run event append failed: {e}")
+
+            return {
+                "statusCode": 200,
+                "body": json.dumps(
+                    {
+                        "task": task.model_dump(),
+                        "overall": data.overall,
+                        "healthy_count": data.healthy_count,
+                        "total_sources": len(data.sources),
+                        "slack_ok": delivery.slack_ok,
+                        "sns_ok": delivery.sns_ok,
+                    }
+                ),
+            }
 
         results = {}
 
