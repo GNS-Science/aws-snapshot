@@ -34,6 +34,18 @@ All notable changes to this project will be documented here.
 - `time_utils.nz_now()` and `time_utils.nz_today()` — DST-aware NZ wall-clock
   helpers (via `zoneinfo.ZoneInfo("Pacific/Auckland")`). Used by the daily report
   so report_date and weekday rotation reflect NZ calendar, not UTC.
+- **Daily health-report trigger** (ADR-005 / #16, PR B half).
+  `BackupTask.task_type: Literal["backup","health_report"] = "backup"` discriminates
+  Lambda invocations. New handler branch calls `health_report.build_report` +
+  `send` when `task_type == "health_report"`, then appends a `health_report_run`
+  event to the canary's backup bucket. The `backup schedule add/remove/enable/disable`
+  CLI now accepts `--task-type health_report` — health-report rules use the fixed
+  name `nzshm-backup-health-report-{frequency}` and carry the task_type in their
+  EventBridge target Input. Operator deploy:
+  ```
+  backup schedule add --source _health --task-type health_report \
+      --frequency daily --time 14:30-NZST
+  ```
 
 ### Changed
 

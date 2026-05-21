@@ -231,8 +231,8 @@ operator-facing walkthrough.
 ```
    ┌──────────────── Lambda Errors metric ────────────────┐
    │                                                       │
-EventBridge (daily 14:30 NZST,                CloudWatch alarm
- post-PR-B)                                    (≥1 error / 5 min)
+EventBridge (daily 14:30 NZST)                CloudWatch alarm
+                                               (≥1 error / 5 min)
    │                                                       │
    ▼                                                       ▼
 nzshm-backup-service-prod-backup            BackupAlertsTopic (SNS)
@@ -251,10 +251,10 @@ nzshm-backup-service-prod-backup            BackupAlertsTopic (SNS)
 ```
 
 The same Lambda runs both per-source backups and the health report;
-`BackupTask.task_type` (added in PR B) discriminates. The SNS
-**reports** topic is separate from the **alerts** topic so subscribers
-of one don't automatically get the other: alerts → on-call (urgent,
-per-failure); reports → broader audience (daily summary).
+`BackupTask.task_type` discriminates. The SNS **reports** topic is
+separate from the **alerts** topic so subscribers of one don't
+automatically get the other: alerts → on-call (urgent, per-failure);
+reports → broader audience (daily summary).
 
 ### What runs each day
 
@@ -277,6 +277,6 @@ Lambda-level errors but not a misconfigured EventBridge rule).
 
 The cron expression and trigger live on an AWS EventBridge rule, not in
 `backup-config.yaml`. Managed via `backup schedule add --task-type
-health_report ...` (PR B). The tunable thresholds (canary, rotation,
+health_report ...`. The tunable thresholds (canary, rotation,
 freshness, delta, sample size) **are** in config under
 `notifications.reports.health` — see the user guide for the table.

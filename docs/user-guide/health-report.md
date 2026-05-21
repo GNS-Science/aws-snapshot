@@ -9,7 +9,7 @@ issues that don't throw exceptions.
 | | Fast path (alarm) | Slow path (this report) |
 |---|---|---|
 | Source | CloudWatch alarm on Lambda `Errors` | Daily Lambda task |
-| Cadence | Within minutes of failure | Once per day (manual today; 14:30 NZST after PR B) |
+| Cadence | Within minutes of failure | Once per day (14:30 NZST) |
 | Catches | Hard Lambda invocation errors | Stale inventory, count drops, restore failures, PITR disabled |
 
 ---
@@ -140,26 +140,39 @@ delivered.
 
 ## Cadence
 
-**Today (PR A — current state):** manual only. Operator runs
-`backup health-report run --send` whenever they want a delivery, e.g.
-during incident response, smoke-test after a deploy, or just to verify
-the channel is alive.
+EventBridge fires the Lambda once a day at **14:30 NZST** (= 02:30 UTC).
+That's 1h25m after the daily backup schedules fire at 13:05 NZST,
+giving the largest S3 Batch jobs time to complete so the report sees
+post-run state.
 
-**After PR B lands:** EventBridge rule fires the Lambda once a day at
-**14:30 NZST** (= 02:30 UTC). That's 1h25m after the daily backup
-schedules fire at 13:05 NZST, giving the largest S3 Batch jobs time to
-complete so the report sees post-run state.
-
-The cron expression and rule itself are not in `backup-config.yaml` —
-they're AWS resources managed by `backup schedule add` (see PR B). To
-change the time after PR B ships:
+The cron expression and rule live as AWS resources, not in
+`backup-config.yaml`. Manage them via the `backup schedule` CLI:
 
 ```bash
-backup schedule remove --source _health
+# Create / replace the daily schedule
 backup schedule add --source _health --task-type health_report \
-    --frequency daily --time 15:00-NZST
-sls deploy --stage prod   # if the rule definition itself changed
+    --frequency daily --time 14:30-NZST
+
+# Inspect
+backup schedule show
+
+# Pause without deleting
+backup schedule disable --source _health --task-type health_report --frequency daily
+
+# Re-enable
+backup schedule enable --source _health --task-type health_report --frequency daily
+
+# Remove
+backup schedule remove --source _health --task-type health_report --frequency daily
 ```
+
+`--source _health` is a sentinel — the schema requires `source` but the
+health-report dispatch path ignores it. The rule name is fixed at
+`nzshm-backup-health-report-daily` regardless of the value passed.
+
+Manual invocation (e.g. for incident response or post-deploy smoke
+test) is always available too — see [Manual invocation](#manual-invocation)
+below.
 
 ---
 
@@ -266,8 +279,8 @@ Lambda's IAM role at runtime. The deployed Lambda has both.
 | Object-count delta query | `src/nzshm_backup/athena_inventory.py` (`count_delta`) |
 | Restore test reuse | `src/nzshm_backup/commands/test.py` (`restore_test_source`) |
 | AWS infrastructure (SNS topic, IAM) | `serverless.yml` (`BackupReportsTopic`) |
-| Lambda dispatch (PR B) | `src/nzshm_backup/lambda_handler.py`, `src/nzshm_backup/lambda_schema.py` |
-| EventBridge schedule (PR B) | `src/nzshm_backup/commands/schedule.py` |
+| Lambda dispatch | `src/nzshm_backup/lambda_handler.py`, `src/nzshm_backup/lambda_schema.py` |
+| EventBridge schedule CLI | `src/nzshm_backup/commands/schedule.py` (`--task-type` flag) |
 
 ---
 
