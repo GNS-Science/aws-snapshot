@@ -33,7 +33,6 @@ def temp_config(tmp_path):
         "retention": {
             "hot_days": 30,
             "warm_days": 90,
-            "cold_days": 365,
             "max_age_days": 365,
         },
     }
