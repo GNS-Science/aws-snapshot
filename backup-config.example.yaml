@@ -70,17 +70,20 @@ restore:
   dual_approval_threshold: 500
 
 notifications:
-  # alerts: fast-path Lambda error alarm via CloudWatch -> SNS -> email.
-  # Email is consumed at deploy time by serverless.yml -> SNS subscription.
+  # Email recipients are list-of-strings; manage them with:
+  #   uv run backup notifications apply
+  # which reconciles SNS subscriptions on each topic to match these lists.
   alerts:
-    email: oncall@example.com
-  # reports: slow-path daily health report delivered via SNS -> email.
-  # Distinct from alerts so a wider audience (mailing list) can subscribe
-  # to reports without being paged on every Lambda error.
+    # CloudWatch-Lambda-error alarm recipients (fast path)
+    emails:
+      - oncall@example.com
   reports:
+    # Daily health-report delivery — distinct topic so the report audience
+    # can differ from the alarm audience (e.g. broader vs on-call only).
     email:
       enabled: true
-      address: backup-reports@example.com
+      addresses:
+        - backup-reports@example.com
     # Tunable thresholds for the daily health report. All fields are
     # optional — omit to accept defaults baked into health_report.py.
     health:

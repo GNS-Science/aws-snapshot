@@ -145,43 +145,21 @@ custom:
     prod: backup-config.production.yaml
     sandbox: backup-config.sandbox.yaml
   config: ${file(${self:custom.configFiles.${sls:stage}, 'backup-config.production.yaml'})}
-  alertEmail: ${self:custom.config.notifications.alerts.email, ''}
-  reportEmail: ${self:custom.config.notifications.reports.email.address, ''}
-  reportEmailEnabled: ${self:custom.config.notifications.reports.email.enabled, false}
   pythonRequirements:
     dockerizePip: true
     slim: true
 
+# Subscriptions are NOT managed here — `backup notifications apply`
+# reconciles the topic subscriptions to match the lists in
+# backup-config.{stage}.yaml. This keeps backup-config as the single
+# source of truth for who gets which channel.
 resources:
-  Conditions:
-    HasAlertEmail:
-      Fn::Not:
-        - Fn::Equals:
-            - ${self:custom.alertEmail}
-            - ''
-    HasReportEmail:
-      Fn::And:
-        - Fn::Not:
-            - Fn::Equals:
-                - ${self:custom.reportEmail}
-                - ''
-        - Fn::Equals:
-            - ${self:custom.reportEmailEnabled}
-            - true
   Resources:
     BackupAlertsTopic:
       Type: AWS::SNS::Topic
       Properties:
         TopicName: nzshm-backup-alerts-${sls:stage}
         DisplayName: NSHM Backup Alerts (${sls:stage})
-
-    BackupAlertEmailSubscription:
-      Type: AWS::SNS::Subscription
-      Condition: HasAlertEmail
-      Properties:
-        TopicArn: !Ref BackupAlertsTopic
-        Protocol: email
-        Endpoint: ${self:custom.alertEmail}
 
     BackupLambdaErrorAlarm:
       Type: AWS::CloudWatch::Alarm
@@ -211,14 +189,6 @@ resources:
       Properties:
         TopicName: nzshm-backup-reports-${sls:stage}
         DisplayName: NSHM Backup Daily Reports (${sls:stage})
-
-    BackupReportEmailSubscription:
-      Type: AWS::SNS::Subscription
-      Condition: HasReportEmail
-      Properties:
-        TopicArn: !Ref BackupReportsTopic
-        Protocol: email
-        Endpoint: ${self:custom.reportEmail}
 
 package:
   individually: true

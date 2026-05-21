@@ -1,12 +1,14 @@
-# Enabling notifications (post-merge runbook)
+# Managing notification recipients
 
-The daily health-report code path is in place but ships **disabled** so
-the merge has no operational surface. This runbook walks through the
-one-time setup to turn on Slack and/or SNS-email delivery.
+Both notification channels (CloudWatch alarm → SNS, daily report → SNS)
+are driven by lists in `backup-config.production.yaml`. The
+`backup notifications apply` command reconciles each topic's actual SNS
+subscriptions to match the YAML.
 
-There are two channels and they're independent — you can enable one,
-the other, or both. Recommended order: Slack first (fastest to test),
-SNS email second.
+Single source of truth → no double-bookkeeping between repo and AWS.
+
+There's also a Slack channel (incoming webhook) which is a one-time
+setup, separate from the SNS list workflow.
 
 ---
 
@@ -15,170 +17,225 @@ SNS email second.
 - `AWS_PROFILE=<aws-profile>` SSO session in the backup account
   (`123456789012`).
 - Edit access to `backup-config.production.yaml`.
-- Permission to deploy via `npx sls deploy --stage prod`.
+- Permission to deploy via `npx sls deploy --stage prod` (only needed
+  for code/CloudFormation changes — recipient changes do not require a
+  deploy).
 
 ---
 
-## Channel 1 — Slack webhook
+## Adding / removing recipients (SNS email channels)
 
-### One-time setup
+### 1. Edit the lists in `backup-config.production.yaml`
 
-1. Create a Slack incoming webhook in the GNS workspace pointing at the
-   target channel (#nshm-backups or wherever the team agrees).
-2. Copy the webhook URL.
-3. Store it in AWS Secrets Manager with the name `backup-slack-webhook`
-   (matches `notifications.slack.webhook_url_secret` in the config):
+```yaml
+notifications:
+  alerts:
+    emails:
+      - oncall1@example.com         # add/remove freely
+      - oncall2@example.com
+  reports:
+    email:
+      enabled: true                 # gate the daily report channel
+      addresses:
+        - reports-list@example.com
+        - me@example.com
+```
 
-   ```bash
-   aws secretsmanager create-secret \
-     --name backup-slack-webhook \
-     --secret-string 'https://hooks.slack.com/services/...your-real-url...' \
-     --description 'Slack incoming webhook for NSHM backup health reports'
-   ```
+The two lists are independent — somebody can be on alerts but not
+reports, or vice versa.
+
+### 2. Apply
+
+```bash
+uv run backup notifications apply
+```
+
+The command:
+
+1. Reads both lists from YAML.
+2. Lists the actual SNS subscriptions on `nzshm-backup-alerts-prod`
+   and `nzshm-backup-reports-prod`.
+3. Computes the diff per topic.
+4. Calls `sns:Subscribe` for new addresses, `sns:Unsubscribe` for
+   removed ones.
+5. Prints a per-channel summary plus a per-email line: `+` added,
+   `-` removed, `=` kept, `~` still pending confirmation.
+
+Example output:
+
+```
+[alerts] nzshm-backup-alerts-prod
+  topic: arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-alerts-prod
+  desired=2  current=2  add=1  remove=1  pending=0
+  + subscribed oncall2@example.com  (awaiting confirmation email)
+  - unsubscribed old-oncall@example.com
+  = oncall1@example.com
+
+[reports] nzshm-backup-reports-prod
+  ...
+
+Subscriptions updated. New subscribers must click the confirmation
+email link before delivery starts.
+```
+
+### 3. New subscribers click the confirmation link
+
+Anyone newly subscribed receives a "Subscription Confirmation" email
+from `no-reply@sns.amazonaws.com`. They click the link inside.
+Until they do, their `SubscriptionArn` reads `PendingConfirmation`
+and they get no real messages. Re-running `apply` for a
+still-pending address is a no-op — AWS doesn't let you re-issue the
+confirmation; either it gets clicked, or the pending subscription
+expires after ~3 days and a fresh `apply` will create a new one.
+
+### 4. Inspect current state without changing anything
+
+```bash
+uv run backup notifications show
+```
+
+Lists every email subscription on both topics with its `confirmed` /
+`pending` state. Useful for sanity-checking after edits.
+
+### 5. Dry-run before applying
+
+```bash
+uv run backup notifications apply --dry-run
+```
+
+Prints exactly what `apply` would do without calling Subscribe /
+Unsubscribe. Helpful for reviewing a large list change.
+
+### Filter to one channel
+
+```bash
+uv run backup notifications apply --only reports
+uv run backup notifications apply --only alerts
+```
+
+---
+
+## Live verify after a recipient change
+
+```bash
+# Force the alarm to test the alerts path
+uv run backup test alert
+
+# Build + deliver the daily report to exercise the reports path
+uv run backup health-report run --send
+```
+
+Both should land in the inbox of every confirmed subscriber on the
+relevant list.
+
+---
+
+## Slack channel (separate from SNS)
+
+Slack delivery is a single webhook, not a list — the membership of the
+target channel is managed inside Slack. One-time setup:
+
+### Create the webhook
+
+1. https://api.slack.com/apps → "Create New App" → "From scratch"
+2. Choose workspace, name the app (e.g. "NSHM Backup Reports").
+3. **Incoming Webhooks** → toggle On.
+4. **Add New Webhook to Workspace** → pick the channel
+   (e.g. `#cwg-automata-notices`).
+5. Copy the Webhook URL — it is the credential. Treat like a password.
+
+### Store in Secrets Manager
+
+```bash
+aws secretsmanager create-secret \
+  --name backup-slack-webhook \
+  --secret-string 'https://hooks.slack.com/services/...your-real-url...'
+```
+
+(If the secret already exists, use `put-secret-value --secret-id`.)
 
 ### Enable
-
-In `backup-config.production.yaml`:
 
 ```yaml
 notifications:
   slack:
-    enabled: true              # <-- was false
+    enabled: true                    # was false
     webhook_url_secret: backup-slack-webhook
-    channel: '#nshm-backups'   # informational; webhook routes the channel
+    channel: '#cwg-automata-notices' # informational only
 ```
 
-Push the config update if your project uses `backup config push`, then
-no deploy needed for the Slack path — the Lambda reads the config at
-invocation time.
+`backup config push --stage prod` if you maintain the SSM-stored copy.
+Lambda picks up the change on the next invocation — no
+`sls deploy` required.
 
-### Test
+### Verify
 
 ```bash
 uv run backup health-report run --send
 ```
 
-A formatted Block Kit message should appear in the configured channel.
-Run output prints `Slack: ok` under the Delivery summary.
+Expect `Slack: ok` in the Delivery summary.
 
----
+### Rotating the webhook
 
-## Channel 2 — SNS email
-
-### Edit config
-
-In `backup-config.production.yaml`:
-
-```yaml
-notifications:
-  reports:
-    email:
-      enabled: true                                # <-- was false
-      address: backup-reports@your-team-list.example.com   # <-- was null
-```
-
-### Deploy
-
-The SNS subscription is managed by CloudFormation (see
-`serverless.yml` → `BackupReportEmailSubscription`), so you do need a
-deploy to create or update it:
+If the webhook URL ever leaks, regenerate it in the Slack app UI then:
 
 ```bash
-AWS_PROFILE=<aws-profile> npx sls deploy --stage prod
+aws secretsmanager put-secret-value \
+  --secret-id backup-slack-webhook \
+  --secret-string 'https://hooks.slack.com/services/<new>'
 ```
 
-CloudFormation creates the topic (`nzshm-backup-reports-prod`) and a
-pending subscription for the address above.
-
-### Confirm subscription
-
-AWS sends a "Subscription Confirmation" email from
-`no-reply@sns.amazonaws.com` to the configured address. **Click the
-Confirm subscription link.** Until you do, the subscription stays in
-`PendingConfirmation` state and no daily reports are delivered.
-
-Verify:
-
-```bash
-aws sns list-subscriptions-by-topic \
-  --topic-arn arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod
-```
-
-The `SubscriptionArn` field should be a real ARN (not the literal
-`PendingConfirmation`).
-
-### Test
-
-```bash
-uv run backup health-report run --send
-```
-
-A plain-text report should appear in the inbox of the configured
-address. Run output prints `SNS: ok (MessageId=...)`.
-
----
-
-## What runs when
-
-| Command | What it does | Hits AWS? |
-|---|---|---|
-| `backup health-report preview` | Skip restore tests, print only | Yes (status + Athena counts + inventory listing) |
-| `backup health-report run` | Full report (incl. restore tests), print only | Yes (everything; ~30s + ~30s per source restore-tested) |
-| `backup health-report run --send` | As above, also delivers via configured channels | Yes |
-| `backup health-report run --weekday N` | Force rotation for that weekday (0=Mon … 6=Sun) | Yes |
-
-PR B will add the daily EventBridge schedule that fires
-`backup health-report run --send` automatically at 14:30 NZST.
-
----
-
-## Subscribing additional recipients
-
-For the SNS path: add another subscription to the reports topic via the
-AWS console or CLI. No code change needed.
-
-```bash
-aws sns subscribe \
-  --topic-arn arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod \
-  --protocol email \
-  --notification-endpoint another-person@example.com
-# AWS emails them a confirmation link; they click it.
-```
-
-For Slack: add the webhook to another channel via the Slack app
-configuration, or post the same message to multiple channels by storing
-multiple webhook URLs (currently the code only resolves one — extend
-the senders if this is needed).
+No further action needed.
 
 ---
 
 ## Disabling
 
-Reverse the flow:
+To temporarily snooze one channel:
 
-- Slack: set `notifications.slack.enabled: false` in the config and
-  refresh.
-- SNS email: set `notifications.reports.email.enabled: false` and
-  redeploy — CloudFormation will remove the email subscription. The
-  topic itself stays so any other subscribers (e.g., separately added
-  via the CLI above) are not affected.
+```yaml
+notifications:
+  slack:
+    enabled: false       # Lambda stops posting; subscriptions untouched
+  reports:
+    email:
+      enabled: false     # Lambda stops publishing to reports topic
+```
+
+`backup notifications apply` does not change subscriptions when the
+channel is disabled — it still reads the lists. To clear the lists
+when disabling permanently:
+
+```yaml
+notifications:
+  alerts:
+    emails: []
+  reports:
+    email:
+      enabled: false
+      addresses: []
+```
+
+Then `backup notifications apply` removes everyone from the topics.
 
 ---
 
-## Why not SES?
+## Why this design (SES rejected, not used)
 
-ADR-005 originally specified SES for HTML email. Reviewed and rejected
-on 2026-05-20 — see ADR-005's revision note. Summary: SES requires
-domain verification, IAM scoping to a sending identity, and possibly a
-sandbox-mode escape ticket. For a daily ops report sent to a small
-internal audience, SNS-driven plain-text email is sufficient and ships
-with no DNS prerequisites.
+ADR-005 originally specified SES for HTML email. Rejected after review:
+SES requires domain verification, a sandbox-mode escape ticket, and
+tight IAM scoping to a sending identity — significant ops prerequisites
+for a daily report sent to a small internal audience. SNS email
+subscription is the same subscribe-and-confirm flow whether the recipient
+is one person or a mailing list, with no DNS prerequisites.
 
 ---
 
 ## Related
 
 - ADR-005 (revised) — design rationale
-- ADR-006 mit. 1 — object-count delta check (folded into the report)
-- ADR-007 mit. 4 — inventory freshness watchdog (folded into the report)
+- ADR-006 mit. 1 — object-count delta check
+- ADR-007 mit. 4 — freshness watchdog
+- `docs/user-guide/health-report.md` — operator-facing report walkthrough
 - `docs/operations/inventory-bucket-recovery.md` — sibling runbook
