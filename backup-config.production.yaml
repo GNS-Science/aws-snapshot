@@ -83,15 +83,15 @@ notifications:
     # the current defaults — explicit here so operators can tweak in one
     # place without code changes.
     health:
-      canary_source: weka
-      rotation_by_weekday:    # ISO weekday → source restore-tested that day
+      canary_source: weka     # small source restore-tested every day
+      rotation_by_weekday:    # ISO weekday → additional source restore-tested that day
         0: ths                # Monday
         2: toshi              # Wednesday
         4: static             # Friday
-      freshness_threshold_hours: 30.0
+      freshness_threshold_hours: 30.0  # inventory older than this flags YELLOW (pipeline lagging, not the backup itself)
       delta_pct_threshold: -5.0     # source-count drop ≥ 5% → red
       delta_abs_threshold: -10000   # OR drop ≥ 10k objects → red (whichever first)
-      restore_sample_size: 10
+      restore_sample_size: 10       # how many objects to restore for each test
   ses:
     enabled: false
     source_email: noreply-backup@example.com
