@@ -68,6 +68,7 @@ nav:
     - Backup Operations: user-guide/backup.md
     - Restore Operations: user-guide/restore.md
     - Testing & Validation: user-guide/testing.md
+    - Daily Health Report: user-guide/health-report.md
     - Cost Management: user-guide/costs.md
     - Scheduling: user-guide/scheduling.md
   - CLI Reference: cli-reference.md
