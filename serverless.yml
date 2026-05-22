@@ -36,6 +36,17 @@ provider:
             - s3:GetBucketAcl
           Resource:
             - "*"
+        # Restore-test temp buckets (bb-restore-test-<ts>-<account>) are
+        # created and deleted by the Lambda each run. Scoped delete so
+        # the no-delete guarantee on real backup buckets (bb-<source>-*)
+        # is preserved.
+        - Effect: Allow
+          Action:
+            - s3:DeleteObject
+            - s3:DeleteBucket
+          Resource:
+            - "arn:aws:s3:::bb-restore-test-*"
+            - "arn:aws:s3:::bb-restore-test-*/*"
         - Effect: Allow
           Action:
             - sts:GetCallerIdentity
