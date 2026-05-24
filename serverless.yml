@@ -125,9 +125,61 @@ functions:
     # `backup schedule add` which creates named rules targeting this Lambda.
 
 custom:
+  # Stage name (prod, sandbox) does not match the config file suffix
+  # (production, sandbox). Map explicitly here rather than renaming
+  # files — the existing names are referenced by deploy runbooks and
+  # BACKUP_CONFIG_PATH.
+  configFiles:
+    prod: backup-config.production.yaml
+    sandbox: backup-config.sandbox.yaml
+  config: ${file(${self:custom.configFiles.${sls:stage}, 'backup-config.production.yaml'})}
+  alertEmail: ${self:custom.config.notifications.alerts.email, ''}
   pythonRequirements:
     dockerizePip: true
     slim: true
+
+resources:
+  Conditions:
+    HasAlertEmail:
+      Fn::Not:
+        - Fn::Equals:
+            - ${self:custom.alertEmail}
+            - ''
+  Resources:
+    BackupAlertsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: nzshm-backup-alerts-${sls:stage}
+        DisplayName: NSHM Backup Alerts (${sls:stage})
+
+    BackupAlertEmailSubscription:
+      Type: AWS::SNS::Subscription
+      Condition: HasAlertEmail
+      Properties:
+        TopicArn: !Ref BackupAlertsTopic
+        Protocol: email
+        Endpoint: ${self:custom.alertEmail}
+
+    BackupLambdaErrorAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: nzshm-backup-lambda-errors-${sls:stage}
+        AlarmDescription: Backup Lambda invocation errors (ADR-005 fast path)
+        Namespace: AWS/Lambda
+        MetricName: Errors
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref BackupLambdaFunction
+        Statistic: Sum
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref BackupAlertsTopic
+        OKActions:
+          - !Ref BackupAlertsTopic
 
 package:
   individually: true

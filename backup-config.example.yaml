@@ -71,6 +71,10 @@ restore:
   dual_approval_threshold: 500
 
 notifications:
+  # alerts: fast-path Lambda error alarm via CloudWatch -> SNS -> email.
+  # Email is consumed at deploy time by serverless.yml -> SNS subscription.
+  alerts:
+    email: oncall@example.com
   ses:
     enabled: true
     source_email: noreply-backup@example.com

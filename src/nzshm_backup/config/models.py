@@ -62,9 +62,22 @@ class SESConfig(BaseModel):
     recipients: list[str] = []
 
 
+class AlertsConfig(BaseModel):
+    """Lambda error alarm fast-path configuration.
+
+    Drives the CloudWatch alarm -> SNS -> email subscription declared in
+    serverless.yml. Distinct from SESConfig: alerts fire on Lambda
+    invocation errors and route to on-call; SES recipients receive the
+    daily health report.
+    """
+
+    email: str | None = None
+
+
 class NotificationConfig(BaseModel):
     """Notification configuration."""
 
+    alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     ses: SESConfig = Field(default_factory=SESConfig)
     slack: SlackConfig | None = None
 
