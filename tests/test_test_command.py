@@ -959,3 +959,46 @@ class TestRestoreDynamoDB:
 
         assert "PITR enabled" in result.output
         assert "export bucket accessible" in result.output
+
+
+class TestTestAlert:
+    """`backup test alert` exercises the CloudWatch alarm fast path."""
+
+    @patch("nzshm_backup.commands.test.boto3")
+    def test_default_stage_calls_set_alarm_state(self, mock_boto):
+        from typer.testing import CliRunner
+
+        from nzshm_backup.commands.test import app
+
+        cw = MagicMock()
+        mock_boto.client.return_value = cw
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["alert"])
+
+        assert result.exit_code == 0
+        mock_boto.client.assert_called_once_with("cloudwatch", region_name="ap-southeast-2")
+        cw.set_alarm_state.assert_called_once()
+        kwargs = cw.set_alarm_state.call_args.kwargs
+        assert kwargs["AlarmName"] == "nzshm-backup-lambda-errors-prod"
+        assert kwargs["StateValue"] == "ALARM"
+        assert "Manual test" in kwargs["StateReason"]
+
+    @patch("nzshm_backup.commands.test.boto3")
+    def test_custom_stage_and_region(self, mock_boto):
+        from typer.testing import CliRunner
+
+        from nzshm_backup.commands.test import app
+
+        cw = MagicMock()
+        mock_boto.client.return_value = cw
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app, ["alert", "--stage", "sandbox", "--region", "us-east-1"]
+        )
+
+        assert result.exit_code == 0
+        mock_boto.client.assert_called_once_with("cloudwatch", region_name="us-east-1")
+        kwargs = cw.set_alarm_state.call_args.kwargs
+        assert kwargs["AlarmName"] == "nzshm-backup-lambda-errors-sandbox"
