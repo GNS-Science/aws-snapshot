@@ -1512,3 +1512,67 @@ End-to-end verification:
 uv run backup health-report run --send   # GREEN 4/4, Slack ok, SNS ok
 uv run backup test alert                  # alarm email arrives
 ```
+
+---
+
+## Step 17 — Scoped s3:Delete* IAM for restore-test temp buckets ✅ 2026-05-22
+
+**Symptom:** the first automated 14:30 NZST fire of the daily health
+report (2026-05-22 02:30 UTC) produced a GREEN report on Slack/SNS but
+both restore tests inside reported as **failed**.
+
+**Root cause:** the Lambda role intentionally lacks `s3:DeleteObject` /
+`s3:DeleteBucket` ("backup buckets are delete-protected"). The
+restore-test workflow creates a temp bucket
+(`bb-restore-test-<ts>-<account>`), copies + verifies the sample, then
+deletes the bucket. Locally this worked because admin SSO credentials
+are unrestricted; on the deployed Lambda, the cleanup `delete_objects`
++ `delete_bucket` calls failed with AccessDenied. The error was
+captured in `BucketRestoreResult.copy_errors` and classified as
+failure — even though the actual copy + checksum verify had succeeded.
+
+**Evidence:** two orphan temp buckets after the run:
+
+```
+bb-restore-test-1779417137-737696831915  (static, 02:32:20 UTC)
+bb-restore-test-1779417175-737696831915  (weka,   02:32:57 UTC)
+```
+
+**Fix:** name-pattern-scoped Allow on `bb-restore-test-*`, keeping
+the no-delete guarantee on real backup buckets.
+
+```yaml
+- Effect: Allow
+  Action:
+    - s3:DeleteObject
+    - s3:DeleteBucket
+  Resource:
+    - "arn:aws:s3:::bb-restore-test-*"
+    - "arn:aws:s3:::bb-restore-test-*/*"
+```
+
+**Deploy sequence:**
+
+```bash
+# 1. Clean up the two orphans with admin credentials
+for B in bb-restore-test-1779417137-737696831915 bb-restore-test-1779417175-737696831915; do
+  aws s3 rm "s3://$B" --recursive
+  aws s3api delete-bucket --bucket "$B"
+done
+
+# 2. Deploy the IAM change
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+
+# 3. Verify via direct Lambda invoke
+aws lambda invoke --function-name nzshm-backup-service-prod-backup \
+  --payload '{"source":"_health","task_type":"health_report"}' \
+  --invocation-type Event \
+  --cli-binary-format raw-in-base64-out /dev/null
+# Wait ~3 min, then:
+aws s3api list-buckets --query 'Buckets[?starts_with(Name, `bb-restore-test-`)].Name'
+# expected: empty
+```
+
+Post-fix verification: zero temp buckets after each subsequent
+invocation. The 2026-05-23 14:30 NZST scheduled fire reported
+GREEN 4/4 with `restore=passed`.

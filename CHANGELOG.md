@@ -4,6 +4,18 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Fixed
+
+- **Lambda IAM: scoped `s3:DeleteObject` / `s3:DeleteBucket` for restore-test
+  temp buckets** (2026-05-22). The role's deliberate "no delete on backup
+  buckets" stance meant the daily health-report Lambda silently failed to
+  clean up the temp buckets it created during sampled restore tests, leaving
+  one bucket per restored source per day. Fix: name-pattern-scoped Allow on
+  the `bb-restore-test-*` prefix only; the no-delete guarantee on real
+  backup buckets (`bb-<source>-*`) is preserved. Two orphans from the
+  2026-05-22 02:30 UTC fire were cleaned up with admin credentials before
+  redeploy.
+
 ### Added
 
 - **Lambda-error alarm fast path** (ADR-005 / #16). CloudWatch alarm on the backup
