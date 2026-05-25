@@ -1576,3 +1576,79 @@ aws s3api list-buckets --query 'Buckets[?starts_with(Name, `bb-restore-test-`)].
 Post-fix verification: zero temp buckets after each subsequent
 invocation. The 2026-05-23 14:30 NZST scheduled fire reported
 GREEN 4/4 with `restore=passed`.
+
+## Step 18 — ADR-006 lifecycle re-apply on deployed buckets (#27) ✅ 2026-05-26
+
+**Context:** PR #25 landed the ADR-006 two-tier lifecycle code change
+on `pre-release` earlier today, but `apply_lifecycle_policy` is only
+called inside `ensure_backup_bucket_ready` at *bucket creation* — it
+short-circuits on existing buckets. So the production buckets were
+still carrying the old 3-tier policy (Standard → GLACIER_IR @ 30d →
+DEEP_ARCHIVE @ 120d → Expiration @ 365d) and no CLI path existed to
+re-apply.
+
+**Tool added (PR #27):** `backup setup lifecycle [--source <alias|all>]
+[--dry-run]` walks the configured backup buckets, builds
+`LifecycleConfig` from `config.retention`, and pushes via the existing
+`apply_lifecycle_policy` helper.
+
+**Bug caught at first dry-run against prod:** bucket-name derivation
+was using `get_account_id(session)` (backup-account caller,
+`737696831915`) instead of `source_account_id` from each
+`SourceConfig` (`461564345538`). Every apply would have 404'd.
+Fixed before the live apply — see `backup_engine.py:72,81` for the
+authoritative naming convention. Commit: `8327ef8`.
+
+**Pre-deploy snapshot (BEFORE):**
+
+| Bucket | Lifecycle |
+|---|---|
+| `bb-toshi-s3-api-prod-…` | **NoSuchLifecycleConfiguration** (never set) |
+| `bb-ths-s3-dataset-prod-…` | **NoSuchLifecycleConfiguration** (never set) |
+| `bb-static-s3-static-reports-…` | 3-tier (GIR @ 30d → DA @ 120d, exp 365d, NCV 365d) |
+| `bb-weka-s3-weka-ui-prod-…` | 3-tier |
+| `bb-toshi-dynamo-…` | 3-tier |
+
+Two of the largest buckets had **no lifecycle policy at all** — likely
+created before the lifecycle path was wired in (or the bucket re-create
+sequence skipped that step). All accumulated objects were sitting in
+S3 Standard.
+
+**Deploy sequence:**
+
+```bash
+aws sso login --profile nshm-backup-admin
+eval "$(aws configure export-credentials --profile nshm-backup-admin --format env)"
+unset AWS_PROFILE
+
+# Dry-run first — verifies bucket names, prints intended JSON
+uv run backup setup lifecycle --source all \
+  --config backup-config.production.yaml --dry-run
+
+# Apply
+uv run backup setup lifecycle --source all \
+  --config backup-config.production.yaml
+```
+
+Apply output: `[OK]` for all 5 buckets.
+
+**Verification (AFTER) — all 5 buckets:**
+
+```json
+{
+  "ID": "BackupTierTransition",
+  "Transitions": [{"Days": 30, "StorageClass": "GLACIER_IR"}],
+  "NCV": {"NoncurrentDays": 365},
+  "Expiration": null
+}
+```
+
+No `DEEP_ARCHIVE`, no `Expiration`. `NCV` = `NoncurrentVersionExpiration`
+— superseded versions age out at 365 days, which keeps the historic
+ETag-bloat tail (#24) bounded.
+
+**Cost effect:** the two buckets that had no lifecycle (toshi-api +
+ths-dataset, ~12M objects between them) will begin transitioning to
+GLACIER_IR for everything older than 30 days. Expect a one-off
+transition-request charge and a measurable monthly storage reduction
+in the next cost report — both expected and desired, not a surprise.
