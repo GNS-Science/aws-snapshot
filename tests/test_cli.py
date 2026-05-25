@@ -32,8 +32,6 @@ def temp_config(tmp_path):
         },
         "retention": {
             "hot_days": 30,
-            "warm_days": 90,
-            "max_age_days": 365,
         },
     }
     config_file = tmp_path / "backup-config.yaml"
