@@ -1,7 +1,14 @@
 # ADR-006: Simplify storage tiers — drop Deep Archive, keep objects forever
 
-- Status: Proposed
+- Status: Accepted (2026-05-25, implemented under #17)
 - Date: 2026-05-19
+
+> **Implementation note (2026-05-25):** Mitigations 1 (object-count delta in
+> the daily health report) and 2 (manual-purge runbook
+> `docs/operations/purge-from-backup.md`) were moved into the ADR-009
+> implementation (#23) where the signal-classification redesign reshapes the
+> delta check and gives the runbook its proper context. #17 ships the
+> lifecycle change, the config cleanup, and the doc rewrite only.
 
 ## Context
 
