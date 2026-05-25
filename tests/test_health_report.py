@@ -20,7 +20,13 @@ def _make_src(**overrides):
         inventory_age_hours=2.0,
         inventory_stale=False,
         count_delta={"available": True, "delta": 0, "delta_pct": 0.0},
-        delta_flag=False,
+        divergence={
+            "available": True,
+            "source_minus_backup": 0,
+            "backup_minus_source": 0,
+        },
+        backup_missing_count=0,
+        backup_orphan_count=0,
         restore_test=None,
         pitr_tables={},
     )
@@ -59,10 +65,28 @@ def test_classify_red_when_pitr_disabled():
     assert hr._classify_source(s) == "red"
 
 
-def test_classify_red_when_delta_flag_set():
-    """A large source-count drop trumps everything else and goes red."""
-    s = _make_src(delta_flag=True, count_delta={"available": True, "delta": -20_000})
+def test_classify_red_when_backup_missing_source_keys():
+    """ADR-009 class-1: backup missing keys source has → red."""
+    s = _make_src(backup_missing_count=3)
     assert hr._classify_source(s) == "red"
+
+
+def test_classify_green_when_backup_has_orphans_only():
+    """ADR-009 class-2: backup orphans never colour the row."""
+    s = _make_src(backup_orphan_count=12_431, backup_missing_count=0)
+    assert hr._classify_source(s) == "green"
+
+
+def test_classify_green_despite_large_source_count_change():
+    """ADR-009 reclassifies source-count delta as informational only.
+
+    A large day-over-day drop (previously class-1 red) must not flip the
+    row to red on its own.
+    """
+    s = _make_src(
+        count_delta={"available": True, "delta": -20_000, "delta_pct": -2.0}
+    )
+    assert hr._classify_source(s) == "green"
 
 
 # ---------------------------------------------------------------------------
@@ -258,15 +282,17 @@ def test_send_sns_skipped_when_no_topic_arn():
 # ---------------------------------------------------------------------------
 
 
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
-def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
-    _mock_account, mock_status, mock_inv, mock_delta, mock_restore
-):
-    """On Tuesday (weekday=1), only weka (canary) gets a restore test."""
+_DEFAULT_DIVERGENCE = {
+    "available": True,
+    "source_minus_backup": 0,
+    "backup_minus_source": 0,
+    "source_dt": "2026-05-25-00-00",
+    "backup_dt": "2026-05-25-00-00",
+}
+
+
+def _build_report_mocks():
+    """Common config + mock return values for build_report integration tests."""
     config = MagicMock()
     bucket_cfg = MagicMock()
     bucket_cfg.arn = "arn:aws:s3:::src-bucket"
@@ -277,9 +303,23 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     source_cfg.source_account_id = "999"
     source_cfg.source_account_role_arn = None
     source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
-    config.sources = {"weka": source_cfg, "toshi": source_cfg}
     config.general.region = "ap-southeast-2"
     config.notifications.reports.health = None  # use module-default thresholds
+    return config, source_cfg
+
+
+@patch("nzshm_backup.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
+    _mock_account, mock_status, mock_inv, mock_delta, mock_restore, _mock_div
+):
+    """On Tuesday (weekday=1), only weka (canary) gets a restore test."""
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"weka": source_cfg, "toshi": source_cfg}
 
     mock_status.return_value = {"weka": {}, "toshi": {}}
     mock_inv.return_value = {
@@ -312,28 +352,18 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     assert called_alias == "weka"
 
 
+@patch("nzshm_backup.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
 @patch("nzshm_backup.health_report.restore_test_source")
 @patch("nzshm_backup.health_report.count_delta")
 @patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
 def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
-    _mock_account, mock_status, mock_inv, mock_delta, mock_restore
+    _mock_account, mock_status, mock_inv, mock_delta, mock_restore, _mock_div
 ):
     """On Monday (weekday=0), weka + ths both get restore-tested."""
-    config = MagicMock()
-    bucket_cfg = MagicMock()
-    bucket_cfg.arn = "arn:aws:s3:::src-bucket"
-    bucket_cfg.label = "main"
-    source_cfg = MagicMock()
-    source_cfg.s3_buckets = [bucket_cfg]
-    source_cfg.dynamodb_tables = []
-    source_cfg.source_account_id = "999"
-    source_cfg.source_account_role_arn = None
-    source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
+    config, source_cfg = _build_report_mocks()
     config.sources = {"weka": source_cfg, "ths": source_cfg, "toshi": source_cfg}
-    config.general.region = "ap-southeast-2"
-    config.notifications.reports.health = None  # use module-default thresholds
 
     mock_status.return_value = {"weka": {}, "ths": {}, "toshi": {}}
     mock_inv.return_value = {
@@ -363,28 +393,55 @@ def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
     assert aliases == {"weka", "ths"}
 
 
+@patch("nzshm_backup.health_report.divergence_counts")
 @patch("nzshm_backup.health_report.restore_test_source")
 @patch("nzshm_backup.health_report.count_delta")
 @patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
-def test_build_report_flags_count_drop(
-    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore
+def test_build_report_classifies_red_on_backup_missing(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore, mock_div
 ):
-    """A large source-count drop should set delta_flag and classify red."""
-    config = MagicMock()
-    bucket_cfg = MagicMock()
-    bucket_cfg.arn = "arn:aws:s3:::src-bucket"
-    bucket_cfg.label = "main"
-    source_cfg = MagicMock()
-    source_cfg.s3_buckets = [bucket_cfg]
-    source_cfg.dynamodb_tables = []
-    source_cfg.source_account_id = "999"
-    source_cfg.source_account_role_arn = None
-    source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
+    """ADR-009 class-1: source has keys backup doesn't → red + warning note."""
+    config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
-    config.general.region = "ap-southeast-2"
-    config.notifications.reports.health = None  # use module-default thresholds
+
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {
+        "available": True, "delta": 0, "delta_pct": 0.0,
+    }
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 3,
+        "backup_minus_source": 0,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+
+    session = MagicMock()
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.backup_missing_count == 3
+    assert src.overall == "red"
+    assert any("missing 3 source keys" in n for n in src.notes)
+
+
+@patch("nzshm_backup.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_source_count_drop_is_class2_informational_only(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore, _mock_div
+):
+    """ADR-009 reclassification: a large source-count drop is info-only, not red."""
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
     mock_inv.return_value = {
@@ -402,9 +459,46 @@ def test_build_report_flags_count_drop(
     report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
 
     src = report.sources[0]
-    assert src.delta_flag is True
-    assert src.overall == "red"
-    assert any("dropped" in n for n in src.notes)
+    assert src.overall == "green"          # not red — count delta no longer alarms
+    assert any("dropped" in n for n in src.info_notes)
+    assert not any("dropped" in n for n in src.notes)
+
+
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_orphan_count_is_class2_info(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore, mock_div
+):
+    """ADR-009 class-2: backup orphans appear as info, don't colour the row."""
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
+
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {
+        "available": True, "delta": 0, "delta_pct": 0.0,
+    }
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 0,
+        "backup_minus_source": 12_431,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+
+    session = MagicMock()
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.backup_orphan_count == 12_431
+    assert src.overall == "green"
+    assert any("orphans" in n for n in src.info_notes)
 
 
 # ---------------------------------------------------------------------------

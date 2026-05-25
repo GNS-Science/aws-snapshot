@@ -6,6 +6,23 @@ All notable changes to this project will be documented here.
 
 ### Changed (breaking — config schema)
 
+- **Daily health report — class-1 backup-missing-source-keys signal + class-2
+  reclassification of source-count delta** (ADR-009 / #23). Single Athena
+  `FULL OUTER JOIN` query (`divergence_counts`) returns both directions of
+  source-vs-backup divergence in one scan. `source_minus_backup > 0` is now
+  the class-1 red signal that means the backup system has actually failed;
+  `backup_minus_source > 0` is class-2 informational (orphans from
+  source-side deletions retained per ADR-006). The previous day-over-day
+  source-count delta is reclassified from red to class-2 informational,
+  and the `delta_pct_threshold` / `delta_abs_threshold` keys are removed
+  from `HealthReportConfig` and the production YAML — they no longer apply.
+  Report layout grows distinct `⚠` (warnings) and `ℹ` (informational)
+  sub-lines per source row.
+- **New runbook**: `docs/operations/purge-from-backup.md` — out-of-band
+  procedure for removing class-2 orphans when retention is no longer
+  desired. Small-list (`aws s3api delete-objects`) and large-list
+  (S3 Batch with version-scoped manifest) paths; #24 is a candidate
+  large-list use case.
 - **Simplify backup-bucket lifecycle to two tiers, no expiry** (ADR-006 / #17).
   The lifecycle policy now has a single Standard → Glacier Instant Retrieval
   transition at `hot_days` (default 30) and backup objects are retained
@@ -16,8 +33,8 @@ All notable changes to this project will be documented here.
 - **Removed retention config keys**: `warm_days`, `cold_days`, and
   `max_age_days` no longer exist on `RetentionConfig` or `LifecycleConfig`.
   Remove them from any `backup-config.*.yaml`. ADR-006 mitigations
-  (object-count delta health signal, manual-purge runbook) are tracked under
-  ADR-009 / #23.
+  (object-count delta health signal, manual-purge runbook) have been
+  implemented under ADR-009 / #23 (see above).
 
 ### Fixed
 

@@ -948,3 +948,153 @@ def count_delta(
         "delta_pct": delta_pct,
         "available": True,
     }
+
+
+def _build_divergence_count_query(
+    source_table: str,
+    source_filter: str,
+    backup_table: str,
+    backup_filter: str,
+) -> str:
+    """One-scan query returning ``source - backup`` and ``backup - source`` key counts.
+
+    A FULL OUTER JOIN on key lets a single Athena scan satisfy both
+    directions of the divergence — class-1 (backup-missing) and class-2
+    (backup-orphans) for ADR-009. Reusing the manifest pipeline's prefix
+    exclusions on the backup side keeps operational keys (`_state/`,
+    `_manifests/`, `_events/`, `_inventory/`) out of both counts.
+    """
+    return f"""
+WITH src AS (
+  SELECT key
+  FROM {source_table}
+  WHERE {source_filter}
+),
+bkp AS (
+  SELECT key
+  FROM {backup_table}
+  WHERE {backup_filter}
+)
+SELECT
+  COUNT_IF(b.key IS NULL) AS source_minus_backup,
+  COUNT_IF(s.key IS NULL) AS backup_minus_source
+FROM src s
+FULL OUTER JOIN bkp b ON s.key = b.key
+""".strip()
+
+
+def _read_two_count_result(s3_client, result_location: str) -> tuple[int, int]:
+    """Read the (source_minus_backup, backup_minus_source) row from a 2-col Athena result."""
+    bucket, key = _parse_s3_uri(result_location)
+    body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+    lines = [ln for ln in body.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        raise RuntimeError(f"Unexpected Athena divergence result at {result_location}: {body!r}")
+    # Skip header line; data row is "smb,bms" (quoted ints).
+    data = lines[1].replace('"', "").split(",")
+    return int(data[0]), int(data[1])
+
+
+def divergence_counts(
+    session: boto3.Session,
+    source_alias: str,
+    source_bucket: str,
+    backup_bucket: str,
+) -> dict[str, Any]:
+    """Source-vs-backup key divergence in both directions (ADR-009).
+
+    Compares the latest source-side inventory partition against the
+    latest backup-side inventory partition for the configured
+    ``source_alias`` and returns::
+
+        {
+            "source_dt": str | None,
+            "backup_dt": str | None,
+            "source_minus_backup": int | None,   # class-1 (red): backup is missing these keys
+            "backup_minus_source": int | None,   # class-2 (info): backup-side orphans
+            "available": bool,                   # True iff both partitions queried
+        }
+
+    When either side has no inventory partition yet, ``available`` is
+    ``False`` and the count fields are ``None``.
+
+    Reuses the same Glue database, table naming, workgroup output
+    location, version filter and operational-prefix exclusion list as
+    the manifest pipeline (``build_inventory_manifest_via_athena``), so
+    scan-bytes accounting and cost caps stay consistent.
+    """
+    s3_client = session.client("s3")
+    athena_client = session.client("athena")
+    account_id = session.client("sts").get_caller_identity()["Account"]
+    control_bucket = f"nzshm-backup-inventory-{account_id}"
+    database = "nzshm_backup_inventory"
+    output_location = (
+        f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
+    )
+
+    source_prefix = _expected_prefix(source_alias, "source", source_bucket)
+    backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
+
+    try:
+        source_dt, source_hive = _latest_inventory_partition(
+            s3_client, control_bucket, source_prefix
+        )
+    except ValueError:
+        source_dt, source_hive = None, None
+    try:
+        backup_dt, backup_hive = _latest_inventory_partition(
+            s3_client, control_bucket, backup_prefix
+        )
+    except ValueError:
+        backup_dt, backup_hive = None, None
+
+    if source_dt is None or backup_dt is None:
+        return {
+            "source_dt": source_dt,
+            "backup_dt": backup_dt,
+            "source_minus_backup": None,
+            "backup_minus_source": None,
+            "available": False,
+        }
+    assert source_hive is not None and backup_hive is not None  # for type narrowing
+
+    source_table = _table_name(source_alias, "source", source_bucket)
+    backup_table = _table_name(source_alias, "backup", backup_bucket)
+
+    _ensure_inventory_table(
+        athena_client, output_location, database, source_table, control_bucket, source_hive
+    )
+    _ensure_inventory_table(
+        athena_client, output_location, database, backup_table, control_bucket, backup_hive
+    )
+    _ensure_partition(
+        athena_client, output_location, database, source_table, control_bucket,
+        source_hive, source_dt,
+    )
+    _ensure_partition(
+        athena_client, output_location, database, backup_table, control_bucket,
+        backup_hive, backup_dt,
+    )
+
+    prefix_exclusions = " AND ".join(f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES)
+    source_filter = f"dt = '{source_dt}' AND {_VERSION_FILTER}"
+    backup_filter = (
+        f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {prefix_exclusions}"
+    )
+
+    query = _build_divergence_count_query(
+        source_table, source_filter, backup_table, backup_filter
+    )
+    qid = _run_athena_query(athena_client, query, output_location, database=database)
+    _wait_for_athena_query(athena_client, qid)
+    exec_info = athena_client.get_query_execution(QueryExecutionId=qid)
+    result_loc = exec_info["QueryExecution"]["ResultConfiguration"]["OutputLocation"]
+    smb, bms = _read_two_count_result(s3_client, result_loc)
+
+    return {
+        "source_dt": source_dt,
+        "backup_dt": backup_dt,
+        "source_minus_backup": smb,
+        "backup_minus_source": bms,
+        "available": True,
+    }
