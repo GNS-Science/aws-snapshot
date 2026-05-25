@@ -71,10 +71,7 @@ sources:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `hot_days` | 30 | Days in S3 Standard |
-| `warm_days` | 120 | Days in S3 Glacier Instant (must be ≥ hot_days + 90 due to AWS constraint) |
-| `cold_days` | 365 | Days in S3 Glacier Deep Archive |
-| `max_age_days` | 365 | Delete objects older than this |
+| `hot_days` | 30 | Days in S3 Standard before transition to Glacier Instant Retrieval (objects then kept forever — see [ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)) |
 | `version_retention_days` | 365 | How long superseded object versions are kept; 0 = forever |
 
 ### `restore`

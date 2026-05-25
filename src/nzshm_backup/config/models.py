@@ -13,11 +13,14 @@ class S3BucketConfig(BaseModel):
 
 
 class RetentionConfig(BaseModel):
-    """Retention policy configuration."""
+    """Retention policy configuration.
+
+    Backup objects transition Standard → Glacier Instant Retrieval at
+    ``hot_days`` and are kept forever (ADR-006). Superseded object
+    versions are expired by ``version_retention_days`` (0 = keep forever).
+    """
 
     hot_days: int = 30
-    warm_days: int = 120  # must be >= hot_days + 90 (AWS constraint for GLACIER_IR → DEEP_ARCHIVE)
-    max_age_days: int = 365
     version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 
 

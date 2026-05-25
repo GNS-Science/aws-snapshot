@@ -9,7 +9,7 @@
 | **backup Lambda** | Backup account | Executes `backup run` on a schedule; same code as the CLI |
 | **pitr-watcher Lambda** | Backup account | Polls every 5 min for completed DynamoDB restores; re-enables PITR and applies tags |
 | **SSM Parameter Store** | Backup account | Stores config (`/nzshm-backup/dev/config`) and pending restore list (`/nzshm-backup/pending-restores`) |
-| **S3 backup buckets** | Backup account | Receive incremental S3 copies; tiered Standard → Glacier Instant → Deep Archive |
+| **S3 backup buckets** | Backup account | Receive incremental S3 copies; tiered Standard (0–30d) → Glacier Instant Retrieval (forever) — see [ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md) |
 | **DynamoDB export buckets** | Backup account | Receive `ExportTableToPointInTime` parquet/JSON snapshots |
 | **`nzshm-backup-reader` IAM role** | Source account | Assumed by backup Lambda; read-only S3 + DynamoDB export access |
 | **`nzshm-backup-restore` IAM role** | Source account | Assumed by restore CLI and pitr-watcher; DynamoDB PITR restore + PITR re-enable + tagging |
@@ -189,8 +189,8 @@ sequenceDiagram
 | DynamoDB export | `bb-{source}-dynamo-{region}-{source-acct}` | `bb-arkivalist-dynamo-ap-southeast-2-816711409078` |
 
 All backup buckets are tagged `ManagedBy: nzshm-backup`, protected against deletion
-(no `s3:DeleteObject` in Lambda IAM), and tiered Standard (30d) → Glacier Instant (90d)
-→ Deep Archive (365d).
+(no `s3:DeleteObject` in Lambda IAM), and tiered Standard (0–30d) → Glacier Instant
+Retrieval (30d+, forever — see [ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)).
 
 ---
 
