@@ -15,6 +15,25 @@ All notable changes to this project will be documented here.
   Auto-returns to OK on the next real datapoint (~5 min) with an OK notification.
 - New `AlertsConfig` Pydantic model (`notifications.alerts.email`) distinct from
   SES recipients (slow-path daily report) and Slack (ADR-005, future).
+- **Daily health-report slow path** (ADR-005 / #16). `health_report.py` orchestrator
+  combines `get_status_dict` (per-source state), `restore_test_source` (weka canary
+  daily + Mon/Wed/Fri rotation through ths/toshi/static), inventory freshness check
+  (>30h → yellow), and the new `athena_inventory.count_delta` (>=5% drop or >=10k
+  absolute → red). Delivers via Slack Block Kit webhook **and** plain-text email
+  through a separate `nzshm-backup-reports-{stage}` SNS topic. Configurable via
+  `notifications.slack.enabled` and `notifications.reports.email.{enabled,address}`;
+  ships disabled — see `docs/operations/enabling-notifications.md` for turn-on
+  procedure. Lambda picks up the topic ARN via `$BACKUP_REPORTS_TOPIC_ARN`.
+- **`backup health-report run|preview`** CLI for exercising the slow path locally
+  (with prod credentials) before the scheduled Lambda is wired up in PR B.
+- Reusable programmatic APIs: `commands.status.get_status_dict` extracted from
+  `_print_json_status`; `commands.test.restore_test_source` extracted from the
+  `backup test restore` CLI as a pure `RestoreTestResult`-returning function.
+- `notifications/slack.py` and `notifications/sns.py` thin transport modules with
+  Secrets Manager retrieval, Subject-length truncation, and structured error types.
+- `time_utils.nz_now()` and `time_utils.nz_today()` — DST-aware NZ wall-clock
+  helpers (via `zoneinfo.ZoneInfo("Pacific/Auckland")`). Used by the daily report
+  so report_date and weekday rotation reflect NZ calendar, not UTC.
 
 ### Changed
 

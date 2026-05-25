@@ -702,3 +702,167 @@ def test_build_inventory_manifest_zero_rows():
     assert etag is None
     assert count == 0
     assert src_dt == "2026-04-25-01-00"
+
+
+# ---------------------------------------------------------------------------
+# count_delta — object-count delta for daily health report
+# ---------------------------------------------------------------------------
+
+
+def _make_two_partition_s3_mock():
+    """S3 paginator returning two dt symlink entries."""
+    s3 = MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [
+        {
+            "Contents": [
+                {
+                    "Key": (
+                        "inventory/ths/source/ths-dataset-prod/"
+                        "hive/dt=2026-05-19-01-00/symlink.txt"
+                    )
+                },
+                {
+                    "Key": (
+                        "inventory/ths/source/ths-dataset-prod/"
+                        "hive/dt=2026-05-20-01-00/symlink.txt"
+                    )
+                },
+            ]
+        }
+    ]
+    return s3
+
+
+def test_two_latest_inventory_partitions_returns_newest_first():
+    s3 = _make_two_partition_s3_mock()
+    out = ai._two_latest_inventory_partitions(s3, "ctl-bucket", "inventory/ths/source/x")
+    assert len(out) == 2
+    assert out[0][0] == "2026-05-20-01-00"
+    assert out[1][0] == "2026-05-19-01-00"
+
+
+def test_two_latest_inventory_partitions_empty():
+    s3 = MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [{"Contents": []}]
+    assert ai._two_latest_inventory_partitions(s3, "b", "p/") == []
+
+
+def test_count_delta_returns_unavailable_when_no_partitions():
+    session = MagicMock()
+    s3 = MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [{"Contents": []}]
+    sts = MagicMock()
+    sts.get_caller_identity.return_value = {"Account": "999"}
+    session.client.side_effect = lambda svc, **kw: {"s3": s3, "sts": sts}[svc]
+    out = ai.count_delta(session, "ths", "source", "ths-dataset-prod")
+    assert out["available"] is False
+    assert out["today_count"] is None
+    assert out["delta"] is None
+
+
+def test_count_delta_handles_single_partition():
+    """First day after Inventory enabled — only one dt available."""
+    session = MagicMock()
+    s3 = MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [
+        {
+            "Contents": [
+                {
+                    "Key": (
+                        "inventory/ths/source/ths-dataset-prod/"
+                        "hive/dt=2026-05-20-01-00/symlink.txt"
+                    )
+                }
+            ]
+        }
+    ]
+    sts = MagicMock()
+    sts.get_caller_identity.return_value = {"Account": "999"}
+    athena = MagicMock()
+    athena.start_query_execution.return_value = {"QueryExecutionId": "qid-1"}
+    athena.get_query_execution.return_value = {
+        "QueryExecution": {
+            "Status": {"State": "SUCCEEDED"},
+            "ResultConfiguration": {"OutputLocation": "s3://b/r.csv"},
+        }
+    }
+    count_body = MagicMock()
+    count_body.read.return_value = b'"cnt"\n"42"\n'
+    s3.get_object.return_value = {"Body": count_body}
+
+    def client_factory(svc, **kw):
+        return {"s3": s3, "athena": athena, "sts": sts}[svc]
+
+    session.client.side_effect = client_factory
+
+    out = ai.count_delta(session, "ths", "source", "ths-dataset-prod")
+    assert out["available"] is False
+    assert out["today_count"] == 42
+    assert out["yesterday_count"] is None
+    assert out["delta"] is None
+
+
+def test_count_delta_computes_delta_for_two_partitions():
+    session = MagicMock()
+    s3 = _make_two_partition_s3_mock()
+    sts = MagicMock()
+    sts.get_caller_identity.return_value = {"Account": "999"}
+    athena = MagicMock()
+    athena.start_query_execution.return_value = {"QueryExecutionId": "qid"}
+    athena.get_query_execution.return_value = {
+        "QueryExecution": {
+            "Status": {"State": "SUCCEEDED"},
+            "ResultConfiguration": {"OutputLocation": "s3://b/r.csv"},
+        }
+    }
+    # First call returns today=110, second returns yesterday=100
+    today_body = MagicMock()
+    today_body.read.return_value = b'"cnt"\n"110"\n'
+    yesterday_body = MagicMock()
+    yesterday_body.read.return_value = b'"cnt"\n"100"\n'
+    s3.get_object.side_effect = [{"Body": today_body}, {"Body": yesterday_body}]
+
+    def client_factory(svc, **kw):
+        return {"s3": s3, "athena": athena, "sts": sts}[svc]
+
+    session.client.side_effect = client_factory
+
+    out = ai.count_delta(session, "ths", "source", "ths-dataset-prod")
+    assert out["available"] is True
+    assert out["today_dt"] == "2026-05-20-01-00"
+    assert out["today_count"] == 110
+    assert out["yesterday_dt"] == "2026-05-19-01-00"
+    assert out["yesterday_count"] == 100
+    assert out["delta"] == 10
+    assert out["delta_pct"] == pytest.approx(10.0)
+
+
+def test_count_delta_delta_pct_none_when_yesterday_zero():
+    """Avoid division by zero when yesterday's partition had zero rows."""
+    session = MagicMock()
+    s3 = _make_two_partition_s3_mock()
+    sts = MagicMock()
+    sts.get_caller_identity.return_value = {"Account": "999"}
+    athena = MagicMock()
+    athena.start_query_execution.return_value = {"QueryExecutionId": "qid"}
+    athena.get_query_execution.return_value = {
+        "QueryExecution": {
+            "Status": {"State": "SUCCEEDED"},
+            "ResultConfiguration": {"OutputLocation": "s3://b/r.csv"},
+        }
+    }
+    today_body = MagicMock()
+    today_body.read.return_value = b'"cnt"\n"5"\n'
+    yesterday_body = MagicMock()
+    yesterday_body.read.return_value = b'"cnt"\n"0"\n'
+    s3.get_object.side_effect = [{"Body": today_body}, {"Body": yesterday_body}]
+
+    def client_factory(svc, **kw):
+        return {"s3": s3, "athena": athena, "sts": sts}[svc]
+
+    session.client.side_effect = client_factory
+
+    out = ai.count_delta(session, "ths", "source", "ths-dataset-prod")
+    assert out["available"] is True
+    assert out["delta"] == 5
+    assert out["delta_pct"] is None

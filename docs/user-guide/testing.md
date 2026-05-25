@@ -15,6 +15,7 @@ tests to validate that backups are readable and consistent.
 | `test restore` — DynamoDB restorability | ✅ Implemented | Read-only; checks PITR + export bucket accessible |
 | Event log (`test_restore` events) | ✅ Implemented | Emits passed/failed/etag_mismatch to `_events/` |
 | `test alert` — force Lambda-error alarm to ALARM | ✅ Implemented | Fires SNS actions without a real Lambda failure; auto-returns to OK on next datapoint |
+| `health-report run/preview` — daily report | ✅ Implemented (slow path, ADR-005) | Combines status + restore + freshness + count-delta. Slack + SNS email delivery. Manual today; PR B wires the daily cron. |
 | `test full-drill` | ⏳ Not yet implemented | Planned quarterly DR drill |
 | Automated scheduling via EventBridge | ⏳ Not yet implemented | Must be triggered manually for now |
 | Glacier/Deep Archive object test path | ⏳ Not yet implemented | Archived objects are skipped in sample restore |
