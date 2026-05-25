@@ -17,7 +17,6 @@ class RetentionConfig(BaseModel):
 
     hot_days: int = 30
     warm_days: int = 120  # must be >= hot_days + 90 (AWS constraint for GLACIER_IR → DEEP_ARCHIVE)
-    cold_days: int = 365
     max_age_days: int = 365
     version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 
@@ -66,18 +65,60 @@ class AlertsConfig(BaseModel):
     """Lambda error alarm fast-path configuration.
 
     Drives the CloudWatch alarm -> SNS -> email subscription declared in
-    serverless.yml. Distinct from SESConfig: alerts fire on Lambda
-    invocation errors and route to on-call; SES recipients receive the
-    daily health report.
+    serverless.yml. Distinct from ReportsEmailConfig: alerts fire on
+    Lambda invocation errors and route to on-call; reports recipients
+    receive the daily health report.
     """
 
     email: str | None = None
+
+
+class ReportsEmailConfig(BaseModel):
+    """SNS-based email delivery for the daily health report.
+
+    Drives the BackupReportsTopic + email subscription declared in
+    serverless.yml. SES is deliberately not used — see ADR-005
+    (revised) for the rationale.
+    """
+
+    enabled: bool = False
+    address: str | None = None
+
+
+class HealthReportConfig(BaseModel):
+    """Tunable thresholds and rotation for the daily health report.
+
+    All fields are optional with defaults that match the previously-
+    hardcoded values in src/nzshm_backup/health_report.py.
+
+    Map keys are ISO weekday numbers (0=Mon … 6=Sun). Add or remove
+    entries to change which large source gets restore-tested on which
+    day; default: Mon=ths, Wed=toshi, Fri=static (other days only the
+    canary runs).
+    """
+
+    canary_source: str = "weka"
+    rotation_by_weekday: dict[int, str] = Field(
+        default_factory=lambda: {0: "ths", 2: "toshi", 4: "static"}
+    )
+    freshness_threshold_hours: float = 30.0
+    delta_pct_threshold: float = -5.0  # source-count drop ≥ 5% (negative) → red
+    delta_abs_threshold: int = -10_000  # source-count drop ≥ 10k objects → red
+    restore_sample_size: int = 10
+
+
+class ReportsConfig(BaseModel):
+    """Daily-report delivery + tuning configuration."""
+
+    email: ReportsEmailConfig = Field(default_factory=ReportsEmailConfig)
+    health: HealthReportConfig = Field(default_factory=HealthReportConfig)
 
 
 class NotificationConfig(BaseModel):
     """Notification configuration."""
 
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    reports: ReportsConfig = Field(default_factory=ReportsConfig)
     ses: SESConfig = Field(default_factory=SESConfig)
     slack: SlackConfig | None = None
 
@@ -93,41 +134,6 @@ class CostTrackingConfig(BaseModel):
     budget_alerts: bool = True
     monthly_budget: float = 700.0  # NZD
     export_to_s3: str | None = None
-
-
-class TestingConfig(BaseModel):
-    """Automated testing configuration."""
-
-    class WeeklyTest(BaseModel):
-        enabled: bool = True
-        day: str = "wednesday"
-        time: str = "10:00"
-        sample_size_mb: int = 100
-
-    class MonthlyRestore(BaseModel):
-        enabled: bool = True
-        day: str = "first-monday"
-        time: str = "09:00"
-        table: str = "ToshiAPI-FileTable"
-
-    class QuarterlyDrill(BaseModel):
-        enabled: bool = True
-        months: list[Literal["january", "april", "july", "october"]] = [
-            "january",
-            "april",
-            "july",
-            "october",
-        ]
-        day: int = 15
-        isolated_environment: bool = True
-
-    weekly_small_test: WeeklyTest = Field(default_factory=lambda: TestingConfig.WeeklyTest())
-    monthly_table_restore: MonthlyRestore = Field(
-        default_factory=lambda: TestingConfig.MonthlyRestore()
-    )
-    quarterly_full_drill: QuarterlyDrill = Field(
-        default_factory=lambda: TestingConfig.QuarterlyDrill()
-    )
 
 
 class SourceConfig(BaseModel):
@@ -202,7 +208,6 @@ class ConfigModel(BaseModel):
     restore: RestoreConfig = Field(default_factory=lambda: RestoreConfig())
     notifications: NotificationConfig = Field(default_factory=lambda: NotificationConfig())
     cost_tracking: CostTrackingConfig = Field(default_factory=lambda: CostTrackingConfig())
-    testing: TestingConfig = Field(default_factory=lambda: TestingConfig())
 
     @model_validator(mode="after")
     def validate_batch_config(self) -> "ConfigModel":
