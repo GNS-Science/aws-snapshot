@@ -58,9 +58,7 @@ sources:
     use_s3_batch: false  # small scale — direct copy_object is fine
 
 retention:
-  hot_days: 30
-  warm_days: 120  # must be >= hot_days + 90 (AWS constraint: GLACIER_IR → DEEP_ARCHIVE gap)
-  max_age_days: 365
+  hot_days: 30  # Standard → Glacier Instant Retrieval at this age; objects kept forever (ADR-006)
 
 restore:
   default_destination_type: temporary

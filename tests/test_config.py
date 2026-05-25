@@ -31,8 +31,6 @@ def sample_config_dict():
         },
         "retention": {
             "hot_days": 30,
-            "warm_days": 90,
-            "max_age_days": 365,
         },
     }
 
@@ -88,8 +86,7 @@ def test_retention_config_defaults():
     config = RetentionConfig()
 
     assert config.hot_days == 30
-    assert config.warm_days == 120
-    assert config.max_age_days == 365
+    assert config.version_retention_days == 365
 
 
 def test_source_config_backup_bucket_name():

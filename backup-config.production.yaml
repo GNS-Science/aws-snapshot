@@ -62,8 +62,6 @@ sources:
     batch_manifest_mode: inventory
 retention:
   hot_days: 30
-  warm_days: 120
-  max_age_days: 365
 restore:
   default_destination_type: temporary
   temporary_retention_days: 7
