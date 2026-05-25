@@ -1410,7 +1410,7 @@ uv run backup test alert     # expect ALARM email + ~5 min later OK email
 
 ---
 
-## Step 15 — Daily health report slow path (ADR-005 PR A) ✅ 2026-05-20
+## Step 15 — Daily health report slow path (ADR-005, PR #21) ✅ 2026-05-20
 
 Slow-path complement to Step 14. Daily Lambda task combining:
 
@@ -1454,7 +1454,7 @@ code via the CLI only at this point. (Step 16 wires the cron.)
 
 Two related changes deployed together:
 
-### 16a. Lambda + EventBridge schedule (ADR-005 PR B)
+### 16a. Lambda + EventBridge schedule (ADR-005, PR #22)
 
 - `BackupTask.task_type: Literal["backup","health_report"] = "backup"`
   schema field (default keeps existing rules valid).

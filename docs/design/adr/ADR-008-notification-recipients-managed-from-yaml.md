@@ -5,7 +5,7 @@
 
 ## Context
 
-PR #20 (ADR-005 fast path, 2026-05-19) and PR A (ADR-005 slow path,
+PR #20 (ADR-005 fast path, 2026-05-19) and PR #21 (ADR-005 slow path,
 2026-05-20) shipped an asymmetric notification design:
 
 - The first email recipient per channel lived in

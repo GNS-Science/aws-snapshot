@@ -37,7 +37,8 @@ All notable changes to this project will be documented here.
   ships disabled — see `docs/operations/enabling-notifications.md` for turn-on
   procedure. Lambda picks up the topic ARN via `$BACKUP_REPORTS_TOPIC_ARN`.
 - **`backup health-report run|preview`** CLI for exercising the slow path locally
-  (with prod credentials) before the scheduled Lambda is wired up in PR B.
+  (with prod credentials). The scheduled Lambda dispatch path lands in the same
+  release (see *Daily health-report trigger* entry below).
 - Reusable programmatic APIs: `commands.status.get_status_dict` extracted from
   `_print_json_status`; `commands.test.restore_test_source` extracted from the
   `backup test restore` CLI as a pure `RestoreTestResult`-returning function.
@@ -56,7 +57,7 @@ All notable changes to this project will be documented here.
   `serverless.yml` no longer manages individual subscriptions (the
   topics themselves are still CloudFormation-owned); recipient changes
   no longer require `sls deploy`.
-- **Daily health-report trigger** (ADR-005 / #16, PR B half).
+- **Daily health-report trigger** (ADR-005 / #16; Lambda dispatch + EventBridge schedule).
   `BackupTask.task_type: Literal["backup","health_report"] = "backup"` discriminates
   Lambda invocations. New handler branch calls `health_report.build_report` +
   `send` when `task_type == "health_report"`, then appends a `health_report_run`

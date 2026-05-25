@@ -165,7 +165,7 @@ def test_get_config_uses_env_when_no_stage(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Health-report dispatch (PR B)
+# Health-report dispatch (task_type='health_report')
 # ---------------------------------------------------------------------------
 
 
