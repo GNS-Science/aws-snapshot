@@ -105,8 +105,6 @@ class HealthReportConfig(BaseModel):
         default_factory=lambda: {0: "ths", 2: "toshi", 4: "static"}
     )
     freshness_threshold_hours: float = 30.0
-    delta_pct_threshold: float = -5.0  # source-count drop ≥ 5% (negative) → red
-    delta_abs_threshold: int = -10_000  # source-count drop ≥ 10k objects → red
     restore_sample_size: int = 10
 
 

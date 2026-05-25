@@ -1,7 +1,16 @@
 # ADR-009: Health-check measurement model
 
-- Status: Proposed
+- Status: Accepted (2026-05-25, implemented under #23)
 - Date: 2026-05-25
+
+> **Implementation note (2026-05-25):** Class-1 backup-missing signal,
+> class-2 reclassification of the source-count delta, the orphan-count
+> signal, and the manual-purge runbook (`docs/operations/purge-from-backup.md`)
+> all ship together. Source-vs-backup divergence is computed by a single
+> Athena query (`_build_divergence_count_query`) that returns both
+> directions in one scan. `delta_pct_threshold` / `delta_abs_threshold`
+> were removed from `HealthReportConfig` and the production YAML — they
+> no longer apply once the signal is informational.
 
 ## Context
 

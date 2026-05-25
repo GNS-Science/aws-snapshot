@@ -113,6 +113,12 @@ source, the most recent inventory report under
 flag loud in Slack and email. This is the corruption-detection signal —
 a silently stale inventory bucket no longer goes unnoticed.
 
+> **Per [ADR-009](ADR-009-health-check-measurement-model.md):** this
+> signal is *class 3* (forward-looking risk → yellow), distinct from the
+> class-1 (red) signals that mean the backup system has actually failed.
+> An entirely missing inventory remains class 1 (the health report
+> cannot determine state), but mere staleness is yellow.
+
 ### 5. Document the recovery runbook
 
 Write `docs/operations/inventory-bucket-recovery.md` covering both

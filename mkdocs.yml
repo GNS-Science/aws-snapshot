@@ -77,6 +77,7 @@ nav:
     - Operator Cheatsheet: operations/cheatsheet.md
     - Enabling Notifications: operations/enabling-notifications.md
     - Inventory Bucket Recovery: operations/inventory-bucket-recovery.md
+    - Manual Purge from Backup: operations/purge-from-backup.md
   - Development:
     - Contributing: development/contributing.md
     - Testing: development/testing.md

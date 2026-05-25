@@ -1,10 +1,24 @@
-"""Daily health-report orchestrator (ADR-005 slow path).
+"""Daily health-report orchestrator (ADR-005 slow path, ADR-009 signal model).
 
-Builds a per-source picture combining:
+Per-source signal classes (see ADR-009):
+
+* **Class 1 — backup-system correctness** (red):
+  restore-test failure, DynamoDB PITR disabled, inventory missing entirely,
+  or backup-missing-source-keys (``divergence_counts.source_minus_backup``).
+* **Class 2 — operational news** (informational, never red):
+  source-count change vs yesterday, backup orphan accumulation
+  (``divergence_counts.backup_minus_source``).
+* **Class 3 — forward-looking risk** (yellow):
+  inventory freshness > 30h.
+
+Inputs:
 
 - backup state from ``commands.status.get_status_dict``
 - inventory freshness from ``inventory_state.inventory_health_for_bucket_pair``
-- object-count delta from ``athena_inventory.count_delta`` (ADR-006 mit. 1)
+- source-vs-backup divergence from ``athena_inventory.divergence_counts``
+  (one Athena scan returns both directions per ADR-009)
+- day-over-day source count from ``athena_inventory.count_delta``
+  (informational only after ADR-009)
 - restore verification from ``commands.test.restore_test_source`` (weka
   daily canary + rotating large source Mon/Wed/Fri)
 - DynamoDB PITR status (queried directly here; small enough that an
@@ -24,7 +38,7 @@ from typing import Any, Literal
 
 import boto3
 
-from nzshm_backup.athena_inventory import count_delta
+from nzshm_backup.athena_inventory import count_delta, divergence_counts
 from nzshm_backup.commands.status import get_status_dict
 from nzshm_backup.commands.test import RestoreTestResult, restore_test_source
 from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
@@ -52,8 +66,6 @@ _ROTATION_BY_WEEKDAY: dict[int, str] = {
     4: "static",   # Friday
 }
 _FRESHNESS_THRESHOLD_HOURS = 30.0   # ADR-007 mit. 4
-_DELTA_PCT_THRESHOLD = -5.0         # ADR-006 mit. 1: ≥5% drop → red
-_DELTA_ABS_THRESHOLD = -10_000      # ADR-006 mit. 1: ≥10k objects → red
 _RESTORE_SAMPLE_SIZE = 10
 
 Status = Literal["green", "yellow", "red"]
@@ -71,11 +83,18 @@ class SourceHealthData:
     inventory_age_hours: float | None  # None if no inventory present
     inventory_stale: bool
     count_delta: dict[str, Any] | None  # None if delta unavailable
-    delta_flag: bool                    # True if a notable drop was seen
+    divergence: dict[str, Any] | None   # None if not computed (e.g. no inventory)
+    # Class-1 alert: backup is missing source keys (system has actually failed).
+    backup_missing_count: int | None    # None if divergence unavailable
+    # Class-2 info: backup carries keys source no longer has.
+    backup_orphan_count: int | None
     restore_test: RestoreTestResult | None  # None if not tested this run
     pitr_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     overall: Status = "green"
+    # Operational errors and class-1/3 detail strings (warning glyph).
     notes: list[str] = field(default_factory=list)
+    # Class-2 informational lines (info glyph; never colours the row).
+    info_notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -88,8 +107,6 @@ class HealthReportData:
     canary_source: str = "weka"
     rotation_by_weekday: dict[int, str] = field(default_factory=dict)
     freshness_threshold_hours: float = 30.0
-    delta_pct_threshold: float = -5.0
-    delta_abs_threshold: int = -10_000
 
     @property
     def overall(self) -> Status:
@@ -139,12 +156,20 @@ def _check_dynamodb_pitr(
 
 
 def _classify_source(s: SourceHealthData) -> Status:
-    """Map signals → green / yellow / red.
+    """Map signals → green / yellow / red per ADR-009.
 
-    - red: restore-test failure, PITR disabled on any configured DDB table,
-      inventory missing entirely, or a notable count drop (delta_flag).
-    - yellow: inventory stale but present.
-    - green: otherwise.
+    Class 1 → red (any of):
+      - restore-test failure
+      - PITR disabled on any configured DynamoDB table
+      - inventory missing entirely
+      - backup is missing keys that source has
+        (``backup_missing_count`` > 0)
+
+    Class 3 → yellow (and no class 1):
+      - inventory present but stale (> threshold)
+
+    Class 2 signals (source-count delta, backup orphan accumulation) never
+    affect colour; they appear in the report body via ``info_notes``.
     """
     if s.restore_test and s.restore_test.overall == "failed":
         return "red"
@@ -152,7 +177,7 @@ def _classify_source(s: SourceHealthData) -> Status:
         return "red"
     if s.inventory_age_hours is None:
         return "red"
-    if s.delta_flag:
+    if s.backup_missing_count and s.backup_missing_count > 0:
         return "red"
     if s.inventory_stale:
         return "yellow"
@@ -183,8 +208,6 @@ def build_report(
     freshness_threshold_hours = getattr(
         h_cfg, "freshness_threshold_hours", _FRESHNESS_THRESHOLD_HOURS
     )
-    delta_pct_threshold = getattr(h_cfg, "delta_pct_threshold", _DELTA_PCT_THRESHOLD)
-    delta_abs_threshold = getattr(h_cfg, "delta_abs_threshold", _DELTA_ABS_THRESHOLD)
     restore_sample_size = getattr(h_cfg, "restore_sample_size", _RESTORE_SAMPLE_SIZE)
 
     aliases = list(config.sources.keys())
@@ -201,8 +224,6 @@ def build_report(
         canary_source=canary,
         rotation_by_weekday=rotation_map,
         freshness_threshold_hours=freshness_threshold_hours,
-        delta_pct_threshold=delta_pct_threshold,
-        delta_abs_threshold=delta_abs_threshold,
     )
     now_utc = datetime.now(timezone.utc)
 
@@ -210,16 +231,21 @@ def build_report(
         source_config = config.sources[alias]
         source_account_id = source_config.source_account_id or account_id
         notes: list[str] = []
+        info_notes: list[str] = []
 
-        # Inventory freshness
-        inv_age: float | None = None
-        inv_stale = False
+        source_bucket: str | None = None
+        backup_bucket: str | None = None
         if source_config.s3_buckets:
             bucket_cfg = source_config.s3_buckets[0]
             source_bucket = bucket_cfg.arn.split(":::")[-1]
             backup_bucket = source_config.get_backup_bucket_name(
                 bucket_cfg.label, config.general.region, source_account_id, alias
             )
+
+        # Inventory freshness (class 3 — yellow when present-but-stale).
+        inv_age: float | None = None
+        inv_stale = False
+        if source_bucket and backup_bucket:
             source_session = (
                 get_cross_account_session(session, source_config.source_account_role_arn)
                 if source_config.source_account_role_arn
@@ -238,29 +264,48 @@ def build_report(
             except Exception as e:
                 notes.append(f"inventory health check failed: {e}")
 
-        # Object-count delta (ADR-006 mitigation 1) — only source side; the
-        # backup side is supposed to mirror but won't catch the user-deletion
-        # case.
+        # Day-over-day source count (class 2 — informational only).
         delta: dict[str, Any] | None = None
-        delta_flag = False
-        if source_config.s3_buckets:
-            bucket_cfg = source_config.s3_buckets[0]
-            source_bucket = bucket_cfg.arn.split(":::")[-1]
+        if source_bucket:
             try:
                 delta = count_delta(session, alias, "source", source_bucket)
                 if delta.get("available"):
-                    abs_drop = delta.get("delta") or 0
-                    pct_drop = delta.get("delta_pct") or 0
-                    if abs_drop <= delta_abs_threshold or pct_drop <= delta_pct_threshold:
-                        delta_flag = True
-                        notes.append(
-                            f"object count dropped by {abs_drop:,} "
-                            f"({pct_drop:.1f}%) vs yesterday"
+                    d = delta.get("delta") or 0
+                    pct = delta.get("delta_pct")
+                    if d != 0:
+                        pct_str = f" ({pct:+.1f}%)" if pct is not None else ""
+                        verb = "grew" if d > 0 else "dropped"
+                        info_notes.append(
+                            f"source {verb} by {abs(d):,} objects vs yesterday{pct_str}"
                         )
             except Exception as e:
                 notes.append(f"count delta check failed: {e}")
 
-        # Restore verification (canary + rotation)
+        # Source-vs-backup divergence (class 1 backup-missing + class 2 orphans).
+        divergence: dict[str, Any] | None = None
+        backup_missing: int | None = None
+        backup_orphans: int | None = None
+        if source_bucket and backup_bucket:
+            try:
+                divergence = divergence_counts(
+                    session, alias, source_bucket, backup_bucket
+                )
+                if divergence.get("available"):
+                    backup_missing = divergence["source_minus_backup"]
+                    backup_orphans = divergence["backup_minus_source"]
+                    if backup_missing and backup_missing > 0:
+                        notes.append(
+                            f"backup is missing {backup_missing:,} source keys"
+                        )
+                    if backup_orphans and backup_orphans > 0:
+                        info_notes.append(
+                            f"backup has {backup_orphans:,} orphans "
+                            "(source-side deletions retained per ADR-006)"
+                        )
+            except Exception as e:
+                notes.append(f"divergence check failed: {e}")
+
+        # Restore verification (canary + rotation).
         restore_result: RestoreTestResult | None = None
         if alias in sources_to_restore_test:
             try:
@@ -285,10 +330,13 @@ def build_report(
             inventory_age_hours=inv_age,
             inventory_stale=inv_stale,
             count_delta=delta,
-            delta_flag=delta_flag,
+            divergence=divergence,
+            backup_missing_count=backup_missing,
+            backup_orphan_count=backup_orphans,
             restore_test=restore_result,
             pitr_tables=pitr,
             notes=notes,
+            info_notes=info_notes,
         )
         src.overall = _classify_source(src)
         report.sources.append(src)
@@ -332,26 +380,20 @@ def format_email_text(data: HealthReportData) -> str:
             if s.inventory_age_hours is not None
             else "n/a"
         )
-        delta_str = "n/a"
-        if s.count_delta and s.count_delta.get("available"):
-            d = s.count_delta["delta"]
-            pct = s.count_delta.get("delta_pct")
-            if pct is not None:
-                delta_str = f"{d:+,} ({pct:+.1f}%)"
-            else:
-                delta_str = f"{d:+,}"
         rt = "—"
         if s.restore_test:
             rt = s.restore_test.overall
         lines.append(
-            f"  {icon} {s.alias:<10}  inventory_age={age:<8}  delta={delta_str:<20}  restore={rt}"
+            f"  {icon} {s.alias:<10}  inventory_age={age:<8}  restore={rt}"
         )
         for note in s.notes:
-            lines.append(f"        ↳ {note}")
+            lines.append(f"        ⚠ {note}")
         if s.pitr_tables:
             failing = [t for t, v in s.pitr_tables.items() if not v.get("enabled")]
             if failing:
-                lines.append(f"        ↳ DynamoDB PITR disabled: {', '.join(failing)}")
+                lines.append(f"        ⚠ DynamoDB PITR disabled: {', '.join(failing)}")
+        for info in s.info_notes:
+            lines.append(f"        ℹ {info}")
     lines.append("")
     lines.append("Configuration:")
     lines.append(f"  Canary (daily): {data.canary_source}")
@@ -360,10 +402,6 @@ def format_email_text(data: HealthReportData) -> str:
         f"{data.rotation_by_weekday.get(data.report_date.weekday(), '—')}"
     )
     lines.append(f"  Freshness threshold: {data.freshness_threshold_hours}h")
-    lines.append(
-        f"  Delta thresholds: {data.delta_abs_threshold:,} absolute or "
-        f"{data.delta_pct_threshold}% (whichever crossed first)"
-    )
     return "\n".join(lines)
 
 
@@ -388,23 +426,19 @@ def format_slack(data: HealthReportData) -> list[dict[str, Any]]:
             details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
         else:
             details.append("inventory_age=n/a")
-        if s.count_delta and s.count_delta.get("available"):
-            d = s.count_delta["delta"]
-            pct = s.count_delta.get("delta_pct")
-            details.append(
-                f"delta={d:+,}" + (f" ({pct:+.1f}%)" if pct is not None else "")
-            )
         if s.restore_test:
             details.append(f"restore={s.restore_test.overall}")
         if details:
             line += "   " + "   ".join(details)
         lines.append(line)
         for note in s.notes:
-            lines.append(f"   _• {note}_")
+            lines.append(f"   ⚠ _{note}_")
         if s.pitr_tables:
             failing = [t for t, v in s.pitr_tables.items() if not v.get("enabled")]
             if failing:
-                lines.append(f"   _• DynamoDB PITR disabled: {', '.join(failing)}_")
+                lines.append(f"   ⚠ _DynamoDB PITR disabled: {', '.join(failing)}_")
+        for info in s.info_notes:
+            lines.append(f"   ℹ _{info}_")
         blocks.append(
             {
                 "type": "section",

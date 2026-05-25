@@ -134,6 +134,34 @@ def test_build_count_query_incremental_diff():
     assert "strpos" in q  # smart ETag comparison
 
 
+def test_build_divergence_count_query_returns_both_directions_in_one_scan():
+    """ADR-009: source-vs-backup divergence in a single Athena scan.
+
+    Single FULL OUTER JOIN with two COUNT_IF columns is what makes the
+    extra report-time signal cheap (~$0.01/run/source vs $0.02 for two
+    separate queries).
+    """
+    q = ai._build_divergence_count_query(
+        "inv_src", "dt = '2026-05-25'",
+        "inv_dst", "dt = '2026-05-25'",
+    )
+    assert "FULL OUTER JOIN" in q
+    assert "source_minus_backup" in q
+    assert "backup_minus_source" in q
+    assert "COUNT_IF(b.key IS NULL)" in q
+    assert "COUNT_IF(s.key IS NULL)" in q
+
+
+def test_read_two_count_result_parses_quoted_csv():
+    """Athena writes its two-column COUNT_IF result as a 2-row CSV."""
+    s3 = MagicMock()
+    body = b'"source_minus_backup","backup_minus_source"\n"3","12431"\n'
+    s3.get_object.return_value = {"Body": MagicMock(read=lambda: body)}
+    smb, bms = ai._read_two_count_result(s3, "s3://ctrl/athena-results/x.csv")
+    assert smb == 3
+    assert bms == 12_431
+
+
 # ---------------------------------------------------------------------------
 # S3 multipart-copy concatenation
 # ---------------------------------------------------------------------------
