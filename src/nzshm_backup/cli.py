@@ -73,6 +73,7 @@ from nzshm_backup.commands.config import app as config_app  # noqa: E402
 from nzshm_backup.commands.costs import app as costs_app  # noqa: E402
 from nzshm_backup.commands.events import app as events_app  # noqa: E402
 from nzshm_backup.commands.health_report import app as health_report_app  # noqa: E402
+from nzshm_backup.commands.notifications import app as notifications_app  # noqa: E402
 from nzshm_backup.commands.report import app as report_app  # noqa: E402
 from nzshm_backup.commands.restore import app as restore_app  # noqa: E402
 from nzshm_backup.commands.run_backup import app as run_app  # noqa: E402
@@ -94,6 +95,11 @@ app.add_typer(
     health_report_app,
     name="health-report",
     help="Run the daily health report (ADR-005 slow path).",
+)
+app.add_typer(
+    notifications_app,
+    name="notifications",
+    help="Manage SNS topic subscriptions from backup-config.yaml.",
 )
 app.add_typer(costs_app, name="costs", help="Manage and report backup costs. (TODO)")
 app.add_typer(config_app, name="config", help="Manage backup configuration.")

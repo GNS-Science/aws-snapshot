@@ -205,6 +205,58 @@ def test_add_creates_daily_rule(events_client):
     assert "30" in rules[0]["ScheduleExpression"]
 
 
+def test_add_health_report_uses_fixed_rule_name_and_payload(events_client):
+    """`--task-type health_report` overrides rule name + adds task_type to target Input."""
+    # Create a real Lambda in Moto so add_permission (called after put_targets) succeeds.
+    lambda_client = boto3.client("lambda", region_name=REGION)
+    iam_client = boto3.client("iam", region_name=REGION)
+    iam_client.create_role(
+        RoleName="lambda-exec",
+        AssumeRolePolicyDocument='{"Version":"2012-10-17","Statement":[]}',
+    )
+    fn = lambda_client.create_function(
+        FunctionName="backup",
+        Runtime="python3.10",
+        Role=iam_client.get_role(RoleName="lambda-exec")["Role"]["Arn"],
+        Handler="h.handler",
+        Code={"ZipFile": b"def handler(e,c): pass"},
+    )
+
+    with patch("nzshm_backup.commands.schedule.load_config") as mock_load:
+        cfg = MagicMock()
+        cfg.general.lambda_arn = fn["FunctionArn"]
+        mock_load.return_value = cfg
+
+        result = runner.invoke(
+            app,
+            [
+                "add",
+                "--source",
+                "_health",
+                "--frequency",
+                "daily",
+                "--time",
+                "02:30",
+                "--task-type",
+                "health_report",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    rules = events_client.list_rules(NamePrefix="nzshm-backup-health-report-daily")["Rules"]
+    assert len(rules) == 1
+    assert rules[0]["Name"] == "nzshm-backup-health-report-daily"
+
+    targets = events_client.list_targets_by_rule(Rule="nzshm-backup-health-report-daily")[
+        "Targets"
+    ]
+    assert len(targets) == 1
+    payload = json.loads(targets[0]["Input"])
+    assert payload["task_type"] == "health_report"
+    assert payload["source"] == "_health"
+    assert payload["trigger_type"] == "scheduled"
+
+
 def test_add_creates_hourly_rule(events_client):
     """add --frequency hourly should create a rule with '*' for the hour field."""
     result = runner.invoke(

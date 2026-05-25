@@ -1,7 +1,7 @@
 # ADR-005: Automated daily health report + Lambda error alarm
 
-- Status: Accepted (fast path shipped 2026-05-19; slow path shipped 2026-05-20)
-- Date: 2026-05-12 (revised 2026-05-19, 2026-05-20)
+- Status: Fully implemented (fast path shipped 2026-05-19; slow path code shipped 2026-05-20; daily trigger shipped 2026-05-22)
+- Date: 2026-05-12 (revised 2026-05-19, 2026-05-20, 2026-05-22)
 
 > **2026-05-20 revision — SES dropped in favour of SNS email.** ADR-005's
 > original design specified SES for HTML email delivery of the daily

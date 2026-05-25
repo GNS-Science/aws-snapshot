@@ -1,9 +1,10 @@
 """``backup health-report`` CLI — exercise the daily-report path from a laptop.
 
-Same code path the Lambda will eventually invoke; PR B wires the
-EventBridge schedule + Lambda dispatch. For now this is the developer
-and operator-facing way to verify Slack / SNS delivery end-to-end after
-deploy.
+Same code path the Lambda invokes on the EventBridge schedule
+(``backup schedule add --task-type health_report``). This module is the
+developer- and operator-facing way to verify Slack / SNS delivery
+end-to-end after deploy, run ad-hoc previews, or reproduce an alert
+under prod credentials.
 """
 
 from __future__ import annotations
