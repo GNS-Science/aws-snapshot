@@ -4,6 +4,18 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Fixed
+
+- **Lambda IAM: scoped `s3:DeleteObject` / `s3:DeleteBucket` for restore-test
+  temp buckets** (2026-05-22). The role's deliberate "no delete on backup
+  buckets" stance meant the daily health-report Lambda silently failed to
+  clean up the temp buckets it created during sampled restore tests, leaving
+  one bucket per restored source per day. Fix: name-pattern-scoped Allow on
+  the `bb-restore-test-*` prefix only; the no-delete guarantee on real
+  backup buckets (`bb-<source>-*`) is preserved. Two orphans from the
+  2026-05-22 02:30 UTC fire were cleaned up with admin credentials before
+  redeploy.
+
 ### Added
 
 - **Lambda-error alarm fast path** (ADR-005 / #16). CloudWatch alarm on the backup
@@ -25,7 +37,8 @@ All notable changes to this project will be documented here.
   ships disabled — see `docs/operations/enabling-notifications.md` for turn-on
   procedure. Lambda picks up the topic ARN via `$BACKUP_REPORTS_TOPIC_ARN`.
 - **`backup health-report run|preview`** CLI for exercising the slow path locally
-  (with prod credentials) before the scheduled Lambda is wired up in PR B.
+  (with prod credentials). The scheduled Lambda dispatch path lands in the same
+  release (see *Daily health-report trigger* entry below).
 - Reusable programmatic APIs: `commands.status.get_status_dict` extracted from
   `_print_json_status`; `commands.test.restore_test_source` extracted from the
   `backup test restore` CLI as a pure `RestoreTestResult`-returning function.
@@ -34,6 +47,28 @@ All notable changes to this project will be documented here.
 - `time_utils.nz_now()` and `time_utils.nz_today()` — DST-aware NZ wall-clock
   helpers (via `zoneinfo.ZoneInfo("Pacific/Auckland")`). Used by the daily report
   so report_date and weekday rotation reflect NZ calendar, not UTC.
+- **Multi-recipient notification subscriptions managed from YAML.**
+  `notifications.alerts.emails` and `notifications.reports.email.addresses`
+  are now lists of strings (was: singular `email` / `address`).
+  New `backup notifications apply` command reconciles each SNS topic's
+  email subscriptions to match the YAML lists — `+` Subscribe for new
+  addresses, `-` Unsubscribe for removed, leaves pending confirmations
+  alone. `backup notifications show` lists current state.
+  `serverless.yml` no longer manages individual subscriptions (the
+  topics themselves are still CloudFormation-owned); recipient changes
+  no longer require `sls deploy`.
+- **Daily health-report trigger** (ADR-005 / #16; Lambda dispatch + EventBridge schedule).
+  `BackupTask.task_type: Literal["backup","health_report"] = "backup"` discriminates
+  Lambda invocations. New handler branch calls `health_report.build_report` +
+  `send` when `task_type == "health_report"`, then appends a `health_report_run`
+  event to the canary's backup bucket. The `backup schedule add/remove/enable/disable`
+  CLI now accepts `--task-type health_report` — health-report rules use the fixed
+  name `nzshm-backup-health-report-{frequency}` and carry the task_type in their
+  EventBridge target Input. Operator deploy:
+  ```
+  backup schedule add --source _health --task-type health_report \
+      --frequency daily --time 14:30-NZST
+  ```
 
 ### Changed
 

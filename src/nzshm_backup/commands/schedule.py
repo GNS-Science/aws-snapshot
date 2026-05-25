@@ -384,6 +384,16 @@ def add_schedule(
         None,
         help="IAM role ARN EventBridge assumes to invoke target (required for codebuild)",
     ),
+    task_type: Literal["backup", "health_report"] = typer.Option(
+        "backup",
+        "--task-type",
+        help=(
+            "Which Lambda task this rule dispatches to. 'backup' is the default and "
+            "matches existing rules. 'health_report' dispatches to the daily-report "
+            "code path (ADR-005); --source becomes a sentinel ('_health' is conventional). "
+            "Health-report rules use a fixed name 'nzshm-backup-health-report-{frequency}'."
+        ),
+    ),
 ):
     """Add (create or update) an EventBridge schedule rule for a backup source.
 
@@ -411,7 +421,10 @@ def add_schedule(
         else:  # hourly
             cron_expr = f"cron({mm_int} * * * ? *)"
 
-    rule_name = _rule_name(source, frequency)
+    if task_type == "health_report":
+        rule_name = f"nzshm-backup-health-report-{frequency}"
+    else:
+        rule_name = _rule_name(source, frequency)
     session = boto3.Session()
     events = session.client("events")
 
@@ -482,13 +495,17 @@ def add_schedule(
         )
         return
 
+    target_input: dict = {"source": source, "trigger_type": "scheduled"}
+    if task_type != "backup":
+        target_input["task_type"] = task_type
+
     events.put_targets(
         Rule=rule_name,
         Targets=[
             {
                 "Id": "backup-lambda",
                 "Arn": lambda_arn,
-                "Input": json.dumps({"source": source, "trigger_type": "scheduled"}),
+                "Input": json.dumps(target_input),
             }
         ],
     )
@@ -522,12 +539,21 @@ def remove_schedule(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be done without executing"
     ),
+    task_type: Literal["backup", "health_report"] = typer.Option(
+        "backup",
+        "--task-type",
+        help="Match the rule name used by `schedule add`. Pass health_report to remove "
+        "the daily-report rule (rule name 'nzshm-backup-health-report-{frequency}').",
+    ),
 ):
     """Remove an EventBridge schedule rule and deregister its Lambda target."""
     state = get_state()
     if dry_run:
         state.dry_run = True
-    rule_name = _rule_name(source, frequency)
+    if task_type == "health_report":
+        rule_name = f"nzshm-backup-health-report-{frequency}"
+    else:
+        rule_name = _rule_name(source, frequency)
     if state.dry_run:
         typer.echo(f"[DRY RUN] Would delete rule '{rule_name}' and its targets")
         return
@@ -580,6 +606,14 @@ def remove_schedule(
             raise
 
 
+def _resolve_rule_name(
+    source: str, frequency: str, task_type: str
+) -> str:
+    if task_type == "health_report":
+        return f"nzshm-backup-health-report-{frequency}"
+    return _rule_name(source, frequency)
+
+
 @app.command("enable")
 def enable(
     source: str = typer.Option(..., help="Data source"),
@@ -589,6 +623,11 @@ def enable(
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be done without executing"
+    ),
+    task_type: Literal["backup", "health_report"] = typer.Option(
+        "backup",
+        "--task-type",
+        help="Match the rule name used by `schedule add`.",
     ),
 ):
     """Enable backup EventBridge schedule rule(s) for a source."""
@@ -600,7 +639,7 @@ def enable(
     events = session.client("events")
 
     for freq in frequencies:
-        rule_name = _rule_name(source, freq)
+        rule_name = _resolve_rule_name(source, freq, task_type)
         if state.dry_run:
             typer.echo(f"[DRY RUN] Would enable: {rule_name}")
             continue
@@ -624,6 +663,11 @@ def disable(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be done without executing"
     ),
+    task_type: Literal["backup", "health_report"] = typer.Option(
+        "backup",
+        "--task-type",
+        help="Match the rule name used by `schedule add`.",
+    ),
 ):
     """Disable backup EventBridge schedule rule(s) for a source."""
     state = get_state()
@@ -634,7 +678,7 @@ def disable(
     events = session.client("events")
 
     for freq in frequencies:
-        rule_name = _rule_name(source, freq)
+        rule_name = _resolve_rule_name(source, freq, task_type)
         if state.dry_run:
             typer.echo(f"[DRY RUN] Would disable: {rule_name}")
             continue

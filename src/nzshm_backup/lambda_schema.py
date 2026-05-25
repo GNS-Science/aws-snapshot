@@ -25,6 +25,15 @@ class BackupTask(BaseModel):
         False,
         description="Build S3 Batch manifest only; skip job submission",
     )
+    task_type: Literal["backup", "health_report"] = Field(
+        "backup",
+        description=(
+            "Which task this event invokes. Defaults to backup so existing "
+            "EventBridge rules created before this discriminator (which omit "
+            "the field) continue to dispatch as before. Health-report rules "
+            "pass task_type='health_report' and a sentinel source value."
+        ),
+    )
 
     def is_scheduled(self) -> bool:
         """Check if this is a scheduled (vs manual) backup."""

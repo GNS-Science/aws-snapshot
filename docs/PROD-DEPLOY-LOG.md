@@ -1386,3 +1386,193 @@ Updated config and pushed to SSM.
 eval $(aws configure export-credentials --profile nshm-backup-admin --format env)
 BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
 ```
+
+---
+
+## Step 14 — Notification fast path: Lambda-error alarm + email (#20 / ADR-005) ✅ 2026-05-19
+
+Closed the silent-failure gap that hid 4 days of weka backup failures
+(2026-05-15 → 2026-05-19). CloudWatch alarm on the backup Lambda's
+`Errors` metric (≥1 over 5 min) → SNS topic `nzshm-backup-alerts-prod`
+→ email subscription to `chrisbc@artisan.co.nz`. Test command
+`backup test alert` forces ALARM to verify end-to-end.
+
+Deployed from branch `feature/notifications` (PR #20 not yet merged at
+that point). Confirmed subscription, then validated via
+`aws sns publish` (test 1) and `backup test alert` (test 2) —
+both emails arrived ~30s.
+
+```bash
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+# AWS sent subscription confirmation email — click link
+uv run backup test alert     # expect ALARM email + ~5 min later OK email
+```
+
+---
+
+## Step 15 — Daily health report slow path (ADR-005, PR #21) ✅ 2026-05-20
+
+Slow-path complement to Step 14. Daily Lambda task combining:
+
+- `backup status` snapshot (per-source run state, batch jobs, DDB exports)
+- inventory freshness (ADR-007 mit. 4 — >30h flags yellow)
+- object-count delta vs yesterday's S3 Inventory partition (ADR-006
+  mit. 1 — ≥5% or ≥10k drop flags red)
+- sampled restore verification (weka canary daily + Mon/Wed/Fri large-
+  source rotation through ths/toshi/static)
+
+Delivers via Slack Block Kit webhook **and** plain-text email through a
+separate SNS topic `nzshm-backup-reports-prod`. ADR-005 originally
+specified SES — rejected in favour of SNS during review (domain
+verification + sandbox-mode escape too heavy for an internal report).
+
+Deploy sequence:
+
+```bash
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+# Confirm SNS subscription via emailed link
+uv run backup health-report run --send  # live verify
+```
+
+First successful end-to-end send: 2026-05-20 (weka canary passed,
+GREEN 4/4). Slack webhook stored as Secrets Manager
+`backup-slack-webhook`; production yaml flipped to
+`notifications.slack.enabled: true` and
+`notifications.reports.email.enabled: true`.
+
+The 5 health-report tuning knobs (canary, rotation map, freshness
+threshold, delta thresholds, sample size) added under
+`notifications.reports.health` so operators can adjust without code
+changes.
+
+Note: no Lambda dispatch or EventBridge schedule yet — exercising the
+code via the CLI only at this point. (Step 16 wires the cron.)
+
+---
+
+## Step 16 — Daily-report trigger + multi-recipient subscriptions ✅ 2026-05-22
+
+Two related changes deployed together:
+
+### 16a. Lambda + EventBridge schedule (ADR-005, PR #22)
+
+- `BackupTask.task_type: Literal["backup","health_report"] = "backup"`
+  schema field (default keeps existing rules valid).
+- Lambda handler branches on `task.task_type == "health_report"` and
+  calls `health_report.build_report` + `send`.
+- `backup schedule add --task-type health_report ...` creates the
+  EventBridge rule.
+
+```bash
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+uv run backup schedule add --source _health --task-type health_report \
+    --frequency daily --time "14:30 NZST"
+```
+
+Rule `nzshm-backup-health-report-daily` created. Cron
+`cron(30 2 * * ? *)` UTC → 14:30 NZST daily. Target payload:
+`{"source": "_health", "trigger_type": "scheduled", "task_type": "health_report"}`.
+First scheduled fire: 2026-05-23 14:30 NZST.
+
+### 16b. Notification recipients managed from YAML (ADR-008)
+
+Removed the asymmetry where the first recipient lived in YAML and
+additional recipients had to be added via raw `aws-cli`. Now both
+recipient lists (`notifications.alerts.emails`,
+`notifications.reports.email.addresses`) are lists in
+`backup-config.production.yaml`, reconciled by
+`backup notifications apply`. CloudFormation no longer manages
+individual subscriptions; the two topics + the CloudWatch alarm remain
+CFN-owned.
+
+Three subscribers configured on both topics:
+
+| Address | alerts | reports |
+|---|---|---|
+| chrisbc@artisan.co.nz | confirmed | confirmed |
+| cjdicaprio@proton.me | pending | pending |
+| chris.dicaprio@earthsciences.nz | pending | pending |
+
+Deploy + apply sequence:
+
+```bash
+BACKUP_CONFIG_PATH=backup-config.production.yaml uv run backup config push --stage prod
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod  # CFN drops old per-CFN subscriptions
+uv run backup notifications apply                          # subscribes the 3 addresses on both topics
+uv run backup notifications show                           # check confirmed/pending
+```
+
+Pending confirmations must be clicked by the recipient — AWS expires
+unconfirmed subscriptions after ~3 days. A fresh `apply` re-issues for
+expired pending if still in YAML.
+
+End-to-end verification:
+
+```bash
+uv run backup health-report run --send   # GREEN 4/4, Slack ok, SNS ok
+uv run backup test alert                  # alarm email arrives
+```
+
+---
+
+## Step 17 — Scoped s3:Delete* IAM for restore-test temp buckets ✅ 2026-05-22
+
+**Symptom:** the first automated 14:30 NZST fire of the daily health
+report (2026-05-22 02:30 UTC) produced a GREEN report on Slack/SNS but
+both restore tests inside reported as **failed**.
+
+**Root cause:** the Lambda role intentionally lacks `s3:DeleteObject` /
+`s3:DeleteBucket` ("backup buckets are delete-protected"). The
+restore-test workflow creates a temp bucket
+(`bb-restore-test-<ts>-<account>`), copies + verifies the sample, then
+deletes the bucket. Locally this worked because admin SSO credentials
+are unrestricted; on the deployed Lambda, the cleanup `delete_objects`
++ `delete_bucket` calls failed with AccessDenied. The error was
+captured in `BucketRestoreResult.copy_errors` and classified as
+failure — even though the actual copy + checksum verify had succeeded.
+
+**Evidence:** two orphan temp buckets after the run:
+
+```
+bb-restore-test-1779417137-737696831915  (static, 02:32:20 UTC)
+bb-restore-test-1779417175-737696831915  (weka,   02:32:57 UTC)
+```
+
+**Fix:** name-pattern-scoped Allow on `bb-restore-test-*`, keeping
+the no-delete guarantee on real backup buckets.
+
+```yaml
+- Effect: Allow
+  Action:
+    - s3:DeleteObject
+    - s3:DeleteBucket
+  Resource:
+    - "arn:aws:s3:::bb-restore-test-*"
+    - "arn:aws:s3:::bb-restore-test-*/*"
+```
+
+**Deploy sequence:**
+
+```bash
+# 1. Clean up the two orphans with admin credentials
+for B in bb-restore-test-1779417137-737696831915 bb-restore-test-1779417175-737696831915; do
+  aws s3 rm "s3://$B" --recursive
+  aws s3api delete-bucket --bucket "$B"
+done
+
+# 2. Deploy the IAM change
+AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+
+# 3. Verify via direct Lambda invoke
+aws lambda invoke --function-name nzshm-backup-service-prod-backup \
+  --payload '{"source":"_health","task_type":"health_report"}' \
+  --invocation-type Event \
+  --cli-binary-format raw-in-base64-out /dev/null
+# Wait ~3 min, then:
+aws s3api list-buckets --query 'Buckets[?starts_with(Name, `bb-restore-test-`)].Name'
+# expected: empty
+```
+
+Post-fix verification: zero temp buckets after each subsequent
+invocation. The 2026-05-23 14:30 NZST scheduled fire reported
+GREEN 4/4 with `restore=passed`.

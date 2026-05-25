@@ -72,13 +72,22 @@ restore:
   dual_approval_threshold: 500
 notifications:
   alerts:
-    email: chrisbc@artisan.co.nz
+    # Recipients of CloudWatch-Lambda-error alarms (fast path).
+    # Managed by `backup notifications apply` — edit, then run apply.
+    emails:
+      - chrisbc@artisan.co.nz
+      - cjdicaprio@proton.me
+      - chris.dicaprio@earthsciences.nz
   reports:
-    # Daily health report delivered via SNS topic + email subscription.
-    # Flip enabled: true and fill address: once SNS subscription confirmed.
+    # Daily health report delivered via SNS topic.
     email:
       enabled: true
-      address: chrisbc@artisan.co.nz
+      # Recipients of the daily health report (slow path).
+      # Same apply workflow as alerts.emails above.
+      addresses:
+        - chrisbc@artisan.co.nz
+        - cjdicaprio@proton.me
+        - chris.dicaprio@earthsciences.nz
     # Tunable thresholds for the daily health report. Values shown are
     # the current defaults — explicit here so operators can tweak in one
     # place without code changes.

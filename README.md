@@ -11,12 +11,12 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 | Phase 1 Step 1 | ✅ Complete | CLI skeleton with Typer |
 | Phase 1 Step 2 | ✅ Complete | Config system + S3 backup operations |
 | Phase 2        | ✅ Complete | DynamoDB PITR export + EventBridge scheduling |
-| Phase 3        | ⏳ Not started | Notifications (SES/Slack) + cost reporting |
+| Phase 3        | ✅ Complete (notifications); cost reporting outstanding | Slack + SNS-email; daily health report; Lambda-error alarm (ADR-005) |
 | Phase 4        | ✅ Substantially complete | Restore (S3 + DynamoDB, cross-account) |
 | Phase 5        | ✅ Core done | Testing, validation, event audit log |
 | Phase 6        | 🔄 In progress | Parallel run, NSHM cutover (arkivalist done) |
 
-**Tests:** 200 passing · **Coverage:** 62% · **Lint:** ruff clean
+**Tests:** 403 passing · **Coverage:** 77% · **Lint:** ruff clean
 
 ---
 
@@ -30,6 +30,9 @@ and DynamoDB Point-in-Time exports (~$618 NZD/month target).
 - **Restore**: S3 (direct copy + S3 Batch Operations) and DynamoDB PITR restore with async status tracking
 - **Testing**: `backup test integrity` (ETag diff + PITR check) and `backup test restore` (sample restore)
 - **Event audit log**: Append-only JSONL log in backup bucket (`_events/`) — all backup/restore events recorded
+- **Daily health report** (`backup health-report`): per-source status + inventory freshness + object-count delta + sampled restore verification, delivered to Slack and SNS-email. Fires automatically at 14:30 NZST; canary (weka) tested daily, large sources rotated through Mon/Wed/Fri. See [docs/user-guide/health-report.md](docs/user-guide/health-report.md).
+- **Lambda-error alarm**: CloudWatch alarm on backup Lambda `Errors` → SNS → email, fires within ~5 min of any hard failure. Complementary to the daily report (ADR-005 fast path).
+- **YAML-managed notification recipients**: `notifications.alerts.emails` + `notifications.reports.email.addresses` lists in `backup-config.yaml`; `backup notifications apply` reconciles SNS subscriptions to match. See [docs/operations/enabling-notifications.md](docs/operations/enabling-notifications.md).
 - **Dry-run mode**: All mutating operations support `--dry-run`
 - **JSON output**: `--output json` for scripting
 - **Localised timestamps**: CLI input/output in NZDT/NZST/AEST/AEDT
@@ -86,6 +89,10 @@ backup schedule add --source toshi --frequency weekly --time '2026-03-29 12:15 N
 backup schedule add --source toshi --frequency daily  --time '01:00 NZST'
 backup schedule add --source toshi --frequency hourly --time '00:30'       # :30 past each hour
 
+# Daily health report (ADR-005 slow path) — dispatched via the same Lambda
+backup schedule add --source _health --task-type health_report \
+    --frequency daily --time '14:30 NZST'
+
 backup schedule enable --source toshi                      # Enable all rules for toshi
 backup schedule enable --source toshi --frequency weekly   # Enable weekly only
 backup schedule disable --source toshi                     # Disable all rules for toshi
@@ -103,10 +110,32 @@ backup restore status --source toshi
 ### Testing
 
 ```bash
-backup test integrity --source toshi          # ETag diff + PITR check
-backup test restore --source toshi            # Sample restore (direct copy)
-backup test restore --source toshi --use-batch  # Sample restore via S3 Batch Operations
+backup test integrity --source toshi             # ETag diff + PITR check
+backup test restore --source toshi               # Sample restore (direct copy)
+backup test restore --source toshi --use-batch   # Sample restore via S3 Batch Operations
+backup test alert                                # Force Lambda-error alarm to verify alarm path
 ```
+
+### Daily health report (ADR-005 slow path)
+
+```bash
+backup health-report preview                     # Build + print, skip restore tests
+backup health-report run                         # Full report (incl. restore tests)
+backup health-report run --send                  # Build + deliver via Slack + SNS-email
+backup health-report run --weekday 0             # Force rotation (0=Mon … 6=Sun)
+```
+
+Operator guide: [docs/user-guide/health-report.md](docs/user-guide/health-report.md).
+
+### Notification subscriptions
+
+```bash
+backup notifications show                        # List confirmed/pending subscribers
+backup notifications apply                       # Reconcile SNS to match backup-config.yaml lists
+backup notifications apply --dry-run             # Preview without changing SNS
+```
+
+Recipient runbook: [docs/operations/enabling-notifications.md](docs/operations/enabling-notifications.md).
 
 ### Event audit log
 
@@ -115,12 +144,14 @@ backup events --source toshi                  # Show recent backup/restore event
 backup events --source toshi --limit 50
 ```
 
-### Status & reporting (Phase 3 — not yet implemented)
+### Status & reporting
 
 ```bash
-backup status
-backup report --period 30d
-backup costs predict
+backup status                                  # Live per-source backup state (implemented)
+backup status --source toshi --output json     # Machine-readable status
+backup events --source toshi                   # Recent backup/restore event log
+backup report --period 30d                     # Aggregate report (stub — coming soon)
+backup costs predict                           # Cost forecasting (stub — coming soon)
 ```
 
 ---
@@ -153,8 +184,7 @@ sources:
 
 retention:
   hot_days: 30      # S3 Standard
-  warm_days: 90     # Glacier Instant
-  cold_days: 365    # Deep Archive
+  warm_days: 120    # Glacier Instant (must be >= hot_days + 90; Deep Archive transition derived from this)
   max_age_days: 365
 
 restore:
@@ -234,23 +264,40 @@ uv run pytest tests/test_foo.py   # single file
 ## Architecture
 
 ```
-EventBridge (cron) → Lambda (nzshm-backup)
-                         ├── S3 sync → backup bucket (Standard → Glacier → Deep Archive)
-                         └── DynamoDB PITR export → export bucket (same lifecycle)
+EventBridge (cron)
+  ├── per-source backup at 13:05 NZST → Lambda → S3 sync + DynamoDB PITR export
+  └── daily health-report at 14:30 NZST → Lambda → Slack + SNS-email
+
+CloudWatch alarm on Lambda Errors → SNS alerts topic → email subscribers
 ```
 
-**Backup bucket naming:**
-- S3: `{source-bucket}-backup-{region}-{account_id}`
-- DynamoDB export: `nzshm-dynamo-backup-{source}-{region}-{account_id}`
+**Backup bucket naming** (in the backup account, region-suffixed):
+- S3: `bb-{source}-s3-{label}-{region}-{source_account_id}`
+- DynamoDB export: `bb-{source}-dynamo-{region}-{source_account_id}`
 
-**IAM:** Lambda has no `s3:DeleteObject` permission. Lifecycle expiration still fires.
-DynamoDB restores always go to a new table (never overwrite in-place).
+**IAM:** the Lambda role denies `s3:DeleteObject` and `s3:DeleteBucket` on real
+backup buckets (delete-protected; lifecycle expiration still fires). Scoped Allow
+for both on the `bb-restore-test-*` name pattern so the restore-test workflow can
+clean up its temp buckets. DynamoDB restores always go to a new table (never
+overwrite in-place).
 
 ---
 
 ## Documentation
 
+**Operations:**
+- [Operator Cheatsheet](docs/operations/cheatsheet.md) — "to change X, do Y"
+- [Daily Health Report (user guide)](docs/user-guide/health-report.md)
+- [Enabling Notifications (runbook)](docs/operations/enabling-notifications.md)
+- [Inventory Bucket Recovery (runbook)](docs/operations/inventory-bucket-recovery.md)
+- [Production Deployment Log](docs/PROD-DEPLOY-LOG.md) — chronological deploy
+  history with verification commands
+
+**Architecture / design:**
 - [Design Plan & Cost Analysis](docs/design/backup-solution-plan.md)
+- [How It Works](docs/how_it_works.md)
+- [CLI Reference](docs/cli-reference.md)
+- [Architecture Decision Records](docs/design/adr/)
 - [Typer rationale](docs/design/TYPER_RATIONALE.md)
 
 ## License

@@ -72,6 +72,10 @@ nav:
     - Cost Management: user-guide/costs.md
     - Scheduling: user-guide/scheduling.md
   - CLI Reference: cli-reference.md
+  - Operations:
+    - Operator Cheatsheet: operations/cheatsheet.md
+    - Enabling Notifications: operations/enabling-notifications.md
+    - Inventory Bucket Recovery: operations/inventory-bucket-recovery.md
   - Development:
     - Contributing: development/contributing.md
     - Testing: development/testing.md
