@@ -13,16 +13,21 @@ that cannot be replaced with cheaper lifecycle tiers:
 | AWS Backup vault (warm) | ~$0.079 |
 | AWS Backup vault (cold, best case) | ~$0.008 |
 | S3 Standard | $0.036 |
-| S3 Glacier Instant | $0.007 |
-| **S3 Glacier Deep Archive** | **$0.0017** |
+| **S3 Glacier Instant** | **$0.007** |
 
-For 9 TB of largely static, write-once BLOB data that ages into Deep Archive:
+For 11.7 TB of largely static, write-once BLOB data that ages into Glacier
+Instant Retrieval:
 
-| Approach | 9 TB steady-state cost (NZD/month) |
-|----------|------------------------------------|
-| AWS Backup vault (cold, best case) | ~$720 |
-| Custom solution (Deep Archive, aged) | ~$14–20 |
-| **Ratio** | **~36–50×** |
+| Approach | 11.7 TB steady-state cost (NZD/month) |
+|----------|----------------------------------------|
+| AWS Backup vault (cold, best case) | ~$960 |
+| Custom solution (Glacier Instant, aged) | ~$82 |
+| **Ratio** | **~12×** |
+
+Per [ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)
+we no longer use Deep Archive — the ~$60/month it would save is outweighed by
+the operational cost of building and maintaining the `S3InitiateRestoreObject`
+thaw flow plus the 12–48 hour DR wait.
 
 ### Can AWS Backup be reconfigured to close the gap?
 
@@ -30,15 +35,15 @@ No. The vault storage floor is fixed:
 
 | Lever | Effect |
 |-------|--------|
-| Enable cold vault tier | Still ~$720/month for 9 TB — 36× more than Deep Archive |
-| Reduce retention window | Loses protection; doesn't reach Deep Archive pricing |
+| Enable cold vault tier | Still ~$960/month for 11.7 TB |
+| Reduce retention window | Loses protection; doesn't reach Glacier IR pricing |
 | Disable S3 backup, keep DynamoDB only | DynamoDB PITR is free regardless — AWS Backup adds nothing |
 | Cross-account vault | Same pricing in a different account |
 
 ### Where the custom solution's savings come from
 
-1. **Lifecycle tiering** — write-once BLOBs age through Standard → Glacier Instant
-   → Deep Archive. AWS Backup vault has no equivalent tier.
+1. **Lifecycle tiering** — write-once BLOBs age from Standard to Glacier
+   Instant Retrieval at day 30. AWS Backup vault has no equivalent tier.
 2. **Incremental ETag sync** — only copies changed objects. AWS Backup for S3
    creates full recovery points.
 3. **DynamoDB PITR is free** — enabling it directly costs nothing. AWS Backup for
@@ -50,28 +55,29 @@ No. The vault storage floor is fixed:
 
 ## Combined cost summary
 
-Steady-state costs once the full corpus has aged into Deep Archive.
-Production sources: `toshi` (8TB S3 + 18.3GB DynamoDB), `ths` (1TB), `static` (2.7TB), `weka` (80MB).
+Steady-state costs once the full corpus has aged into Glacier Instant
+Retrieval. Production sources: `toshi` (8TB S3 + 18.3GB DynamoDB), `ths`
+(1TB), `static` (2.7TB), `weka` (80MB).
 
 | Component | Method | NZD/month | NZD/year |
 |-----------|--------|-----------|---------|
 | ToshiAPI DynamoDB (18.3 GB) | PITR (free) + weekly export | ~$13 | ~$156 |
-| ToshiAPI S3 (8 TB, aged) | S3 Batch + Deep Archive | ~$14 | ~$165 |
-| THS S3 (1 TB, aged) | S3 Batch + Deep Archive | ~$2 | ~$20 |
-| Static reports S3 (2.7 TB, aged) | S3 Batch + Deep Archive | ~$5 | ~$55 |
-| Weka S3 (80 MB, aged) | Incremental + Deep Archive | <$1 | <$1 |
+| ToshiAPI S3 (8 TB, aged) | S3 Batch + Glacier IR | ~$56 | ~$672 |
+| THS S3 (1 TB, aged) | S3 Batch + Glacier IR | ~$7 | ~$84 |
+| Static reports S3 (2.7 TB, aged) | S3 Batch + Glacier IR | ~$19 | ~$228 |
+| Weka S3 (80 MB, aged) | Incremental + Glacier IR | <$1 | <$1 |
 | S3 Batch operations (weekly, all sources) | — | ~$3 | ~$36 |
 | Lambda + EventBridge | — | ~$10 | ~$120 |
-| **Total (steady-state)** | | **~$47** | **~$552** |
+| **Total (steady-state)** | | **~$108** | **~$1,300** |
 
-> **Note:** During the initial sync period (first 3 months), 11.7 TB sits in Standard
-> and Glacier Instant tiers — monthly cost is significantly higher while the corpus ages.
-> See [Retention Strategy and Costs](../design/retention-strategy-and-costs.md)
+> **Note:** During the initial sync period (first month), the corpus sits in
+> Standard before transitioning to Glacier IR — monthly cost is higher until
+> objects age. See [Retention Strategy and Costs](../design/retention-strategy-and-costs.md)
 > for the full lifecycle cost breakdown and churn-rate sensitivity table.
 >
-> **`static` source** (`nzshm22-static-reports`, ~40M objects / 2.7TB) was not included
-> in the original cost model. At steady-state it adds ~$88 NZD/year (storage + S3 Batch).
-> First-run S3 Batch cost for 40M objects: ~$63 NZD one-time.
+> The annual cost rose by ~$748 NZD versus the original three-tier model
+> ([ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md));
+> the solution remains ~16× cheaper than AWS Backup.
 
 ### Active Experiment Mode uplift
 
@@ -150,15 +156,13 @@ Full details: [Account Isolation](../design/ACCOUNT_ISOLATION.md).
 | Tier | Days in backup bucket | NZD/GB/month | Retrieval time | Retrieval cost |
 |------|----------------------|-------------|----------------|----------------|
 | S3 Standard | 0–30 | $0.036 | Immediate | — |
-| Glacier Instant | 31–90 | $0.007 | Milliseconds | $0.079/GB |
-| Glacier Deep Archive | 91–365 | $0.0017 | 12–48 hours | $0.126/GB |
-| Deleted | 365+ | — | — | — |
+| Glacier Instant | 30+ (forever) | $0.007 | Milliseconds | $0.079/GB |
 
-For a DR restore of the full 9 TB from Deep Archive:
+For a DR restore of the full 9 TB from Glacier Instant Retrieval:
 
 | Item | Cost |
 |------|------|
-| Retrieval (9 TB × $0.126/GB) | ~$1,130 NZD (one-time, emergency only) |
+| Retrieval (9 TB × $0.079/GB) | ~$709 NZD (one-time, emergency only) |
 | Data transfer out (if needed) | $0.114/GB beyond free tier |
 
 Retrieval cost is incurred only during an actual disaster recovery — not during
@@ -169,3 +173,4 @@ See also: [Storage Tiers](storage-tiers.md) for per-tier behaviour details.
 ---
 
 **Created:** 2026-03-17
+**Updated:** 2026-05-25 (ADR-006: dropped Deep Archive tier)

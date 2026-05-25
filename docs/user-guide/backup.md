@@ -52,8 +52,10 @@ Source bucket            Backup bucket
 ```
 
 Deleted source objects are **retained** in the backup bucket — the Lambda has no
-`s3:DeleteObject` permission, so deletions never propagate. Objects expire via the
-lifecycle policy at `max_age_days` (default 365).
+`s3:DeleteObject` permission, so deletions never propagate. Backup objects are
+kept forever ([ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md));
+intentional purging of garbage is an out-of-band admin task (manual-purge
+runbook, tracked under #23).
 
 ## S3 Batch Operations (large buckets)
 

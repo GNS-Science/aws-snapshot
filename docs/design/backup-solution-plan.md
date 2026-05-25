@@ -66,11 +66,15 @@ All sources are cross-account: source account `210987654321` → backup account 
 | Tier | Duration | Storage Type | Cost (NZD/GB-month) | Access Time |
 |------|----------|--------------|---------------------|-------------|
 | Hot | 0-30 days | S3 Standard | $0.036 | Immediate |
-| Warm | 31-90 days | S3 Glacier Instant | $0.007 | Milliseconds |
-| Cold | 91-365 days | S3 Glacier Deep Archive | $0.0017 | 12-48 hours |
-| Expire | 365+ days | Delete | - | - |
+| Cold | 30+ days (forever) | S3 Glacier Instant | $0.007 | Milliseconds |
 
-**Note:** Starting with single-region (ap-southeast-2 Sydney). Cross-region can be added later for Deep Archive tier only if compliance requires.
+Backup objects are never expired (see
+[ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md) — dropped
+the original Deep Archive tier and the 365-day expiry to remove the silent
+annual re-copy and the unimplemented thaw flow). Superseded (non-current)
+versions are pruned separately via `NoncurrentVersionExpiration`.
+
+**Note:** Starting with single-region (ap-southeast-2 Sydney). Cross-region can be added later if compliance requires.
 
 ---
 
@@ -100,7 +104,8 @@ Core semantics:
 1. **Explicit run cadence** (weekly by default, optionally daily during active periods)
    creates discrete, auditable recovery checkpoints.
 2. **No delete propagation** from source to backup. Source deletions remain recoverable
-   from backup buckets until lifecycle expiry.
+   from backup buckets indefinitely; intentional purging is an out-of-band admin task
+   (manual-purge runbook, tracked under #23).
 3. **Anti-poisoning posture**: backup buckets use versioning + non-current retention,
    so source mutations do not irreversibly destroy the last known-good backup copy.
 
@@ -143,8 +148,10 @@ For current storage tier pricing, monthly cost modelling, and AWS Backup compari
 ### Summary
 
 - **Current (AWS Backup):** $1,700 NZD/month ($20,400/year)
-- **Custom solution (steady-state, aged):** ~$47 NZD/month (~$552/year)
-- **Savings:** ~97% reduction once the 11.7 TB corpus has aged into Deep Archive
+- **Custom solution (steady-state, aged):** ~$108 NZD/month (~$1,300/year)
+- **Savings:** ~94% reduction once the 11.7 TB corpus has aged into Glacier
+  Instant Retrieval (per [ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md);
+  previously projected ~97% with the discontinued Deep Archive tier)
 
 ---
 
@@ -210,8 +217,7 @@ $ backup config pull    # Read config from SSM
 | Storage Tier | Retrieval Time | Retrieval Cost | Use Case |
 |--------------|----------------|----------------|----------|
 | S3 Standard (0-30 days) | Immediate | Free | Routine restores, testing |
-| S3 Glacier Instant (31-90 days) | Milliseconds | $0.03/GB | Recent historical restores |
-| S3 Glacier Deep Archive (91-365 days) | 12-48 hours | $0.05/GB + expedite | Compliance, disasters |
+| S3 Glacier Instant (30+ days, forever) | Milliseconds | $0.079/GB | All historical restores including DR |
 
 ### Restore Destinations
 
@@ -339,7 +345,7 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] YAML config loader with validation
 - [x] Alias→ARN mapping for sources
 - [x] S3 backup module with incremental sync (hybrid approach)
-- [x] Lifecycle policy attachment (30/90/365 day tiers)
+- [x] Lifecycle policy attachment (single transition at day 30 to Glacier IR, per ADR-006)
 - [x] Globally unique backup bucket naming: `{bucket}-backup-{region}-{account_id}`
 - [x] Delete protection via IAM (no s3:DeleteObject permission)
 - [x] CloudWatch-compatible logging (JSON format option)
@@ -463,10 +469,7 @@ sources:
       timezone: Pacific/Auckland
 
 retention:
-  hot_days: 30              # S3 Standard
-  warm_days: 90             # S3 Glacier Instant
-  cold_days: 365            # S3 Glacier Deep Archive
-  max_age_days: 365         # Delete after this
+  hot_days: 30              # S3 Standard → Glacier Instant Retrieval at this age; kept forever (ADR-006)
 
 restore:
   default_destination_type: temporary
@@ -538,7 +541,7 @@ testing:
 ### Disaster Recovery
 
 - Single-region initially (ap-southeast-2)
-- Future: Cross-region replication for Deep Archive tier only
+- Future: Cross-region replication of Glacier IR backups if compliance requires
 - Runbook for full environment recovery
 - Quarterly restore drills validate DR capability
 
@@ -566,7 +569,7 @@ testing:
 | Restore success rate | 100% | Quarterly drills |
 | Data loss incidents | 0 | Incident tracking |
 | Time to restore (Standard) | < 1 hour | Test measurements |
-| Time to restore (Deep Archive) | < 48 hours | Test measurements |
+| Time to restore (Glacier IR) | bound by copy throughput; no thaw step | Test measurements |
 
 ---
 
@@ -575,7 +578,7 @@ testing:
 ### Before Implementation Starts
 
 1. ✅ Confirm data volumes (completed: 9 TB S3, 18.3 GB DynamoDB)
-2. ✅ Confirm retention policy (30/90/365 days)
+2. ✅ Confirm retention policy (single Standard → Glacier IR transition at day 30, no expiry — see ADR-006)
 3. ✅ Confirm single-region start (completed: yes)
 4. ✅ Identify S3 bucket names and DynamoDB table names (alias system implemented)
 5. ✅ Decide on Infrastructure as Code approach (Serverless Framework)

@@ -4,6 +4,21 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Changed (breaking — config schema)
+
+- **Simplify backup-bucket lifecycle to two tiers, no expiry** (ADR-006 / #17).
+  The lifecycle policy now has a single Standard → Glacier Instant Retrieval
+  transition at `hot_days` (default 30) and backup objects are retained
+  forever. This removes the silent annual re-copy at the 365-day expiration
+  boundary and eliminates the need for the unimplemented Deep Archive thaw
+  flow. DR retrieval drops from 12–48h to milliseconds; cost rises from
+  ~$47/mo to ~$108/mo (still ~16× cheaper than AWS Backup).
+- **Removed retention config keys**: `warm_days`, `cold_days`, and
+  `max_age_days` no longer exist on `RetentionConfig` or `LifecycleConfig`.
+  Remove them from any `backup-config.*.yaml`. ADR-006 mitigations
+  (object-count delta health signal, manual-purge runbook) are tracked under
+  ADR-009 / #23.
+
 ### Fixed
 
 - **Lambda IAM: scoped `s3:DeleteObject` / `s3:DeleteBucket` for restore-test

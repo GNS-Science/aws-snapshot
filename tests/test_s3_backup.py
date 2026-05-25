@@ -129,7 +129,7 @@ def test_ensure_backup_bucket_ready_existing_foreign(s3_client):
 
 
 def test_apply_lifecycle_policy(s3_client):
-    """Test lifecycle policy application."""
+    """Test lifecycle policy application (ADR-006: single GLACIER_IR transition, no expiry)."""
     bucket_name = "test-bucket"
     s3_client.create_bucket(
         Bucket=bucket_name,
@@ -140,7 +140,14 @@ def test_apply_lifecycle_policy(s3_client):
 
     lifecycle = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
     assert len(lifecycle["Rules"]) == 1
-    assert lifecycle["Rules"][0]["ID"] == "BackupTierTransition"
+    rule = lifecycle["Rules"][0]
+    assert rule["ID"] == "BackupTierTransition"
+
+    transitions = rule["Transitions"]
+    assert len(transitions) == 1
+    assert transitions[0]["Days"] == 30
+    assert transitions[0]["StorageClass"] == "GLACIER_IR"
+    assert "Expiration" not in rule
 
 
 def test_sync_bucket_incremental(s3_client, source_bucket):
