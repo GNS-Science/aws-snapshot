@@ -3,8 +3,10 @@
 ## Cost overview
 
 The custom backup solution replaces AWS Backup (~$1,700 NZD/month) with an
-S3 lifecycle + DynamoDB PITR approach. Production steady-state cost (all four sources
-aged into Deep Archive) is ~$432 NZD/year (~$36/month).
+S3 lifecycle + DynamoDB PITR approach. Production steady-state cost (all four
+sources aged into Glacier Instant Retrieval, per
+[ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md))
+is ~$1,300 NZD/year (~$108/month).
 
 For full pricing tables, tier breakdown, and AWS Backup comparison see:
 [Cost Model](../architecture/cost-model.md)
@@ -27,11 +29,12 @@ to track costs by source.
 
 | Driver | Cost | Notes |
 |--------|------|-------|
-| S3 storage (Deep Archive) | ~$0.0017/GB/month | Bulk of the 9 TB corpus after 3 months |
+| S3 storage (Glacier IR, aged) | ~$0.007/GB/month | Bulk of the 11.7 TB corpus after the first 30 days |
+| S3 storage (Standard) | ~$0.036/GB/month | First 30 days after each object is (re)written |
 | DynamoDB PITR | Free | Included in table pricing |
 | DynamoDB exports | ~$3/run | 18.3 GB × $0.16/GB |
 | Lambda + EventBridge | ~$10/month | Fixed overhead |
-| Glacier retrieval (DR only) | ~$0.126/GB | One-time, emergency only |
+| Glacier IR retrieval (DR only) | ~$0.079/GB | One-time, emergency only |
 
 ## Managing costs during Active Experiment Mode
 

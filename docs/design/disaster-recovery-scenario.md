@@ -101,10 +101,15 @@ S3KeyPrefix=dynamodb-exports/ToshiFileObject-PROD/2026/03/01 \
 
 ---
 
-## Phase 2: S3 recovery (12–48 hours, parallel with Phase 1)
+## Phase 2: S3 recovery (parallel with Phase 1)
 
 S3 is the bottleneck — 9 TB of data must be copied from backup to target.
 No native "PITR" equivalent exists for S3; the backup bucket IS the archive.
+
+Backup objects live in S3 Glacier Instant Retrieval (no Deep Archive — see
+[ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)). Reads
+return in milliseconds, so wall-clock time is bound by S3-to-S3 copy
+throughput, not an archive thaw step.
 
 ### Default: restore to `-restore` bucket (correct for DR)
 
@@ -135,9 +140,10 @@ backup restore run --source toshi --buckets toshi-api-data --original
 Jobs run server-side, handle retries automatically, and produce a per-object completion
 report. The restore target bucket is created automatically if it does not exist.
 
-**Estimated duration:** 12–48 hours depending on object count and sizes.
-S3 intra-region copy throughput varies; large BLOB files (HDF5, NetCDF) copy
-faster per-GB than many small objects.
+**Estimated duration:** dominated by S3-to-S3 copy throughput at scale (no
+archive thaw delay — Glacier IR returns objects in milliseconds). Order-of-
+magnitude: hours rather than days for the 9 TB corpus. Large BLOB files
+(HDF5, NetCDF) copy faster per-GB than many small objects.
 
 ---
 
@@ -227,12 +233,15 @@ with a config change alone.
 | Component | PITR path | Export path |
 |-----------|-----------|-------------|
 | DynamoDB (all tables) | 4–8 hours | 6–12 hours |
-| S3 ToshiBucket (8 TB) | 12–48 hours | 12–48 hours |
-| S3 THS (1 TB) | 2–6 hours | 2–6 hours |
+| S3 ToshiBucket (8 TB) | hours (copy-bound, no archive thaw) | hours (copy-bound) |
+| S3 THS (1 TB) | 1–3 hours | 1–3 hours |
 | Account lockdown + audit | 2–4 hours | 2–4 hours |
-| **Total RTO** | **~24–48 hours** | **~24–48 hours** |
+| **Total RTO** | **~10–24 hours** | **~10–24 hours** |
 
 S3 copy dominates in both cases. DynamoDB completes well before S3.
+Previous estimates included a 12–48 hour Deep Archive thaw window; that
+phase is gone now that backups live in Glacier Instant Retrieval
+([ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)).
 
 ---
 

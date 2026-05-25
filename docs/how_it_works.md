@@ -105,8 +105,9 @@ ever overwritten or deleted by the tool:
 | Object deleted from source | Remains in backup bucket (no delete propagation) |
 
 This means the backup bucket is a **superset** of the source at any point in
-time. Data deleted from the source is retained in the backup until the lifecycle
-policy expires it (365 days by default).
+time. Data deleted from the source is retained in the backup indefinitely;
+intentional removal of garbage from a backup bucket is an out-of-band admin
+task (manual-purge runbook, tracked under #23).
 
 ## Delete protection
 
@@ -170,19 +171,18 @@ not the account running the backup Lambda. This means:
 
 ## S3 lifecycle tiers
 
-All backup buckets (both S3 sync and DynamoDB export) get a three-tier
-lifecycle policy applied at creation:
+All backup buckets (both S3 sync and DynamoDB export) get a two-tier
+lifecycle policy applied at creation
+([ADR-006](design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)):
 
 | Tier | Days | Storage class | Access time |
 |------|------|--------------|-------------|
 | Hot | 0–30 | S3 Standard | Immediate |
-| Warm | 31–120 | S3 Glacier Instant (`GLACIER_IR`) | Milliseconds |
-| Cold | 121–365 | S3 Glacier Deep Archive (`DEEP_ARCHIVE`) | 12–48 hours |
-| Expire | 365+ | Deleted | — |
+| Cold | 30+ (forever) | S3 Glacier Instant (`GLACIER_IR`) | Milliseconds |
 
-> **AWS constraint:** The Deep Archive transition must be at least 90 days after
-> the Glacier IR transition. The code enforces this automatically:
-> `deep_archive_days = max(warm_days, hot_days + 90)`.
+Current object versions are never expired. Superseded (non-current) versions
+are expired separately by `NoncurrentVersionExpiration` after
+`version_retention_days` (default 365; set to 0 to keep forever).
 
 ## DynamoDB export is asynchronous
 

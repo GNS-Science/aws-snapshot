@@ -35,16 +35,16 @@ for each data source. All costs in NZD (1 USD ≈ 1.57 NZD, Feb 2026).
 
 ### Frequency vs cost
 
-| Frequency | Exports/year | Export fees/year | Storage (Deep Archive) | Total/year |
+| Frequency | Exports/year | Export fees/year | Storage (Glacier IR) | Total/year |
 |-----------|-------------|-----------------|----------------------|------------|
-| Weekly | 52 | $152 | ~$4 | **~$156 NZD** |
-| Fortnightly | 26 | $76 | ~$4 | **~$80 NZD** |
-| Monthly | 12 | $35 | ~$4 | **~$39 NZD** |
+| Weekly | 52 | $152 | ~$18 | **~$170 NZD** |
+| Fortnightly | 26 | $76 | ~$11 | **~$87 NZD** |
+| Monthly | 12 | $35 | ~$7 | **~$42 NZD** |
 | Quarterly | 4 | $12 | ~$4 | **~$16 NZD** |
 | PITR only | 0 | $0 | $0 | **$0** (35-day window only) |
 
-Storage cost is negligible — 18.3 GB × 9 copies × $0.0017/GB ≈ $0.28/month regardless
-of export frequency.
+Storage now in Glacier IR forever (no expiry) — for weekly exports the pool
+grows linearly: ~1 TB after 1 year × $0.007/GB ≈ ~$7/month (peak in year 1+).
 
 ### Recommended strategy: PITR + monthly export
 
@@ -129,52 +129,51 @@ between backup runs, only the state at backup time is captured.
 #### Deleted source objects are retained
 
 The backup Lambda has **no** `s3:DeleteObject` permission. If a source object is
-deleted, it remains in the backup bucket indefinitely until the lifecycle policy
-expires it (365 days). This is intentional — it protects against accidental
-deletion propagating to backups.
+deleted, it remains in the backup bucket indefinitely
+([ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md) — there is
+no lifecycle expiry on current object versions). This is intentional — it
+protects against accidental deletion propagating to backups. Intentional
+removal of garbage is an out-of-band admin task (manual-purge runbook,
+tracked under #23).
 
 ```
 Source bucket                    Backup bucket
                                  ├── models/2024/run-001.h5  ← deleted from source,
-├── models/2024/run-002.h5            still here until 365d expiry
+├── models/2024/run-002.h5            retained forever
 └── ...
 ```
 
 ### Storage lifecycle
 
-Each object in the backup bucket ages through three tiers based on when it was
+Each object in the backup bucket ages through two tiers based on when it was
 **last written** (initial copy or overwritten by a changed version):
 
 ```
-Day 0–30    S3 Standard          $0.036/GB/month   immediate access
-Day 31–90   Glacier Instant      $0.007/GB/month   milliseconds retrieval
-Day 91–365  Glacier Deep Archive $0.0017/GB/month  12–48 hours retrieval
-Day 365+    Deleted              —
+Day 0–30     S3 Standard          $0.036/GB/month   immediate access
+Day 30+      Glacier Instant      $0.007/GB/month   milliseconds retrieval
+             (forever, no expiry)
 ```
 
-For NSHM data (largely immutable scientific outputs), most objects are written once
-and never updated. After 3 months the bulk of the 8 TB corpus sits in Deep Archive
-at $0.0017/GB — about **$14/month** for the entire ToshiBucket corpus.
+For NSHM data (largely immutable scientific outputs), most objects are written
+once and never updated. After 30 days they settle in Glacier Instant Retrieval
+at $0.007/GB and stay there indefinitely.
 
 ### Cost breakdown
 
-The plan models steady-state cost by accounting for the full 9 TB spread across
-all tiers simultaneously (conservative — assumes data written at a constant rate
-throughout the year):
+Steady-state for the 11.7 TB production corpus (toshi 8 TB + ths 1 TB + static
+2.7 TB + weka ~0), once the bulk has aged into Glacier IR:
 
 ```
-S3 Standard    (0-30 days):   9 TB × 1 month  × $0.036  = $324 NZD/month
-Glacier Instant (31-90 days): 9 TB × 2 months × $0.007  = $126 NZD/month
-Deep Archive  (91-365 days):  9 TB × 9 months × $0.0017 = $138 NZD/month
+S3 Standard     (0-30 days):    ~1 TB × 1 month × $0.036 = ~$37 NZD/month
+Glacier Instant (30+, forever): 10.7 TB         × $0.007 = ~$75 NZD/month
                                                            ─────────────
-                                              Annual:     $7,056 NZD
-                                              Monthly avg:  ~$588 NZD
+                                              Monthly:     ~$112 NZD
+                                              Annual:    ~$1,344 NZD
 ```
 
 For data that is largely **static** (most NSHM outputs are write-once), the
-real steady-state cost is lower — the majority of 9 TB drops to Deep Archive
-quickly after the initial sync, making the actual monthly cost closer to
-**$14–$20 NZD/month** once the corpus has aged through.
+real steady-state cost is at the lower end — almost the entire corpus drops
+into Glacier IR within the first month after initial sync.
 
 ### Backup poisoning (mutation propagation)
 
@@ -260,7 +259,7 @@ and the object reappears with no data transfer or restore wait.
 
 | Scenario | Without versioning | With versioning |
 |----------|--------------------|-----------------|
-| Accidental delete (single object) | Gone — recover from backup bucket (12–48h if in Deep Archive) | Instant — delete the marker |
+| Accidental delete (single object) | Gone — recover from backup bucket (milliseconds from Glacier IR) | Instant — delete the marker |
 | Bulk accidental delete | Gone — full restore from backup | Instant — bulk-delete the markers |
 | Malicious delete (attacker with S3 access) | Gone — recover from backup | Gone — attacker can delete markers too (unless MFA Delete enabled) |
 
@@ -273,7 +272,8 @@ effectively **zero storage cost**.
 
 **Recommendation:** Enable S3 versioning on `ths-dataset-prod`. The backup bucket
 (`bb-ths-s3-dataset-ap-southeast-2-595842668254`) does not need versioning — it
-already retains deleted objects for 365 days via the no-delete Lambda policy.
+already retains deleted objects indefinitely via the no-delete Lambda policy
+and the no-expiry lifecycle ([ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)).
 
 **MFA Delete caveat:** Versioning alone does not protect against a malicious actor
 with full S3 permissions — they can delete object versions and markers. MFA Delete
@@ -284,16 +284,21 @@ compromise.
 
 ### Churn rate matters
 
-| Churn (new/changed data per week) | Monthly backup cost (steady state) |
-|-----------------------------------|-------------------------------------|
-| ~0 GB (fully static after initial sync) | ~$16 NZD (Deep Archive only) |
-| ~10 GB/week | ~$22 NZD |
-| ~100 GB/week | ~$75 NZD |
-| ~1 TB/week (active experiment) | ~$450 NZD |
+Most cost comes from steady-state Glacier IR storage (~$0.007/GB/month).
+Higher churn keeps a larger share of the corpus in the first-30-day Standard
+tier (~5× more expensive per GB) and produces extra non-current versions
+that linger for `version_retention_days`.
 
-During **Active Experiment Mode** (daily backups, high data churn), costs rise
-because more data stays in the Standard and Glacier Instant tiers. Switch back
-to weekly cadence once experiments complete to let data age into Deep Archive.
+| Churn (new/changed data per week) | Monthly backup cost (11.7 TB corpus, steady state) |
+|-----------------------------------|----------------------------------------------------|
+| ~0 GB (fully static after initial sync) | ~$82 NZD (entire corpus in Glacier IR) |
+| ~10 GB/week | ~$83 NZD |
+| ~100 GB/week | ~$95 NZD |
+| ~1 TB/week (active experiment) | ~$220 NZD |
+
+During **Active Experiment Mode** (daily backups, high churn), more data sits
+in the Standard tier and the non-current-version pool grows faster. Returning
+to weekly cadence after experiments lets the new objects age into Glacier IR.
 
 ---
 
@@ -302,18 +307,19 @@ to weekly cadence once experiments complete to let data age into Deep Archive.
 See [Cost Model](../architecture/cost-model.md) for the full combined summary,
 AWS Backup comparison, and S3 Batch Operations cost impact.
 
-Steady-state (9 TB corpus fully aged into Deep Archive):
+Steady-state (11.7 TB corpus fully aged into Glacier Instant Retrieval):
 
 | Component | NZD/year |
 |-----------|---------|
-| ToshiAPI DynamoDB — PITR + monthly export | ~$39 |
-| ToshiAPI S3 (8 TB, aged) | ~$165 |
-| THS S3 (1 TB, aged) | ~$20 |
-| Lambda + infrastructure | ~$120 |
-| **Total steady-state** | **~$344** |
+| ToshiAPI DynamoDB — PITR + weekly export | ~$156 |
+| ToshiAPI S3 (8 TB, aged) | ~$672 |
+| THS S3 (1 TB, aged) | ~$84 |
+| Static reports S3 (2.7 TB, aged) | ~$228 |
+| Lambda + infrastructure | ~$156 |
+| **Total steady-state** | **~$1,300** |
 
-> During initial sync (first 3 months) costs are higher (~$588/month) while the
-> corpus ages through Standard and Glacier Instant tiers.
+> During the first month after initial sync, costs are temporarily higher
+> while the new corpus sits in Standard before transitioning to Glacier IR.
 
 ---
 
