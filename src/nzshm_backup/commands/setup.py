@@ -119,20 +119,24 @@ def setup_lifecycle(
     )
 
     session = boto3.Session()
-    account_id = get_account_id(session)
+    backup_account_id = get_account_id(session)
     region = cfg.general.region
     s3_client = session.client("s3")
 
+    # Bucket names embed the *source* account id (see backup_engine.py:72,81),
+    # not the backup-account caller. Falls back to backup account for same-
+    # account sources.
     bucket_names: list[str] = []
     for alias in sources_to_update:
         src_cfg = cfg.sources[alias]
+        naming_account_id = src_cfg.source_account_id or backup_account_id
         for b in src_cfg.s3_buckets:
             bucket_names.append(
-                src_cfg.get_backup_bucket_name(b.label, region, account_id, alias)
+                src_cfg.get_backup_bucket_name(b.label, region, naming_account_id, alias)
             )
         if src_cfg.dynamodb_tables:
             bucket_names.append(
-                src_cfg.get_dynamodb_backup_bucket_name(alias, region, account_id)
+                src_cfg.get_dynamodb_backup_bucket_name(alias, region, naming_account_id)
             )
 
     typer.echo(
