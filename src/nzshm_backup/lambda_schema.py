@@ -29,9 +29,9 @@ class BackupTask(BaseModel):
         "backup",
         description=(
             "Which task this event invokes. Defaults to backup so existing "
-            "EventBridge rules created before PR B (which omit the field) "
-            "continue to dispatch as before. Health-report rules pass "
-            "task_type='health_report' and a sentinel source value."
+            "EventBridge rules created before this discriminator (which omit "
+            "the field) continue to dispatch as before. Health-report rules "
+            "pass task_type='health_report' and a sentinel source value."
         ),
     )
 

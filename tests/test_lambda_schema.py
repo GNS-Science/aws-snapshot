@@ -27,7 +27,7 @@ def test_backup_task_defaults():
     assert task.full_sync is False
     assert task.prepare_only is False
     assert task.is_scheduled() is True
-    assert task.task_type == "backup"  # default keeps pre-PR-B events working
+    assert task.task_type == "backup"  # default keeps pre-dispatch EventBridge events working
 
 
 def test_backup_task_any_source_accepted():
@@ -71,7 +71,7 @@ def test_backup_task_from_dict():
 
 
 def test_backup_task_health_report_task_type():
-    """Test BackupTask accepts task_type='health_report' (PR B)."""
+    """BackupTask accepts task_type='health_report' for the Lambda dispatch path."""
     task = BackupTask(source="_health", task_type="health_report")
     assert task.task_type == "health_report"
 
