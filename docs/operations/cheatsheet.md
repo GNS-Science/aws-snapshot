@@ -81,6 +81,24 @@ The new thresholds take effect on the next Lambda invocation
 
 ---
 
+## Validating health-classification changes end-to-end
+
+When you change `_classify_source` logic, add a new signal, or want to
+verify ADR-009 claims against real AWS infrastructure, set up the two
+sandbox toy sources and walk the scenario matrix:
+
+```bash
+# Runbook covers source-bucket creation, IAM, Inventory wiring,
+# scenario actions, expected per-row signals, and full teardown.
+$EDITOR docs/operations/health-signal-validation-sandbox.md
+```
+
+Full sweep is ~48h (two S3 Inventory cycles); scenarios stack so
+4+ signals are exercised per cycle. The `toy-noinv` source uses
+`inventory_enabled: false` to exercise the no-Inventory floor.
+
+---
+
 ## Changing a schedule
 
 EventBridge rules are AWS resources, not YAML. Use the `schedule` CLI:
