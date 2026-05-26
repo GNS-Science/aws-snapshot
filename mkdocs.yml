@@ -44,6 +44,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - AWS Backup Comparison: aws-backup-comparison.md
   - Design Docs:
     - Backup Solution Plan: design/backup-solution-plan.md
     - Account Isolation: design/ACCOUNT_ISOLATION.md
