@@ -18,6 +18,13 @@ All notable changes to this project will be documented here.
   from `HealthReportConfig` and the production YAML — they no longer apply.
   Report layout grows distinct `⚠` (warnings) and `ℹ` (informational)
   sub-lines per source row.
+- **`SourceConfig.inventory_enabled` (default true)** lets a source opt
+  out of the S3 Inventory + Athena pipeline. When false the daily report
+  skips inventory-age, divergence, and count-delta for that source and
+  the classifier no longer reds on missing inventory data — restore test
+  becomes the dominant red signal. Used by the sandbox validation
+  runbook to exercise the "no Inventory" floor; also a fit for small
+  config buckets where the daily Athena cost isn't worth standing up.
 - **New runbook**: `docs/operations/purge-from-backup.md` — out-of-band
   procedure for removing class-2 orphans when retention is no longer
   desired. Small-list (`aws s3api delete-objects`) and large-list

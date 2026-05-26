@@ -172,6 +172,16 @@ class SourceConfig(BaseModel):
         "'inline' lists source+backup buckets live; "
         "'inventory' diffs latest S3 Inventory snapshots.",
     )
+    inventory_enabled: bool = Field(
+        True,
+        description="Whether this source has S3 Inventory configured on both source and "
+        "backup buckets. When False, the daily health report skips the inventory-age, "
+        "divergence, and count-delta signals for this source — restore test (and PITR "
+        "if DynamoDB tables are present) become the dominant signals. Default True "
+        "matches every production source; set False only for sources where the daily "
+        "Athena cost or Inventory pipeline isn't worth standing up (e.g. very small "
+        "config buckets, validation toys).",
+    )
 
     def get_backup_bucket_name(
         self, bucket_label: str, region: str, account_id: str, source_key: str

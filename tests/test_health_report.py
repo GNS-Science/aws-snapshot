@@ -77,6 +77,41 @@ def test_classify_green_when_backup_has_orphans_only():
     assert hr._classify_source(s) == "green"
 
 
+def test_classify_green_when_inventory_disabled_and_no_inventory_data():
+    """A source opted out of S3 Inventory must not red on missing inventory.
+
+    With inventory_enabled=False the classifier skips the
+    ``inventory_age_hours is None → red`` branch. Restore test and PITR
+    are the only red signals that still apply.
+    """
+    s = _make_src(
+        inventory_age_hours=None,
+        inventory_stale=False,
+        count_delta=None,
+        divergence=None,
+        backup_missing_count=None,
+        backup_orphan_count=None,
+        inventory_enabled=False,
+    )
+    assert hr._classify_source(s) == "green"
+
+
+def test_classify_red_when_inventory_disabled_but_restore_failed():
+    """Restore-test failure still reds an opted-out source."""
+    rt = RestoreTestResult(source="x", mode="direct copy")
+    rt.buckets = [
+        BucketRestoreResult(
+            source_bucket="s", backup_bucket="b", result="failed", sample_count=0
+        )
+    ]
+    s = _make_src(
+        inventory_age_hours=None,
+        inventory_enabled=False,
+        restore_test=rt,
+    )
+    assert hr._classify_source(s) == "red"
+
+
 def test_classify_green_despite_large_source_count_change():
     """ADR-009 reclassifies source-count delta as informational only.
 
@@ -303,6 +338,7 @@ def _build_report_mocks():
     source_cfg.source_account_id = "999"
     source_cfg.source_account_role_arn = None
     source_cfg.get_backup_bucket_name.return_value = "backup-bucket"
+    source_cfg.inventory_enabled = True
     config.general.region = "ap-southeast-2"
     config.notifications.reports.health = None  # use module-default thresholds
     return config, source_cfg
@@ -499,6 +535,40 @@ def test_build_report_orphan_count_is_class2_info(
     assert src.backup_orphan_count == 12_431
     assert src.overall == "green"
     assert any("orphans" in n for n in src.info_notes)
+
+
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_skips_athena_when_inventory_disabled(
+    _mock_account, mock_status, mock_inv, mock_delta, mock_restore, mock_div
+):
+    """A source with inventory_enabled=False must not call the Athena helpers
+    and must surface a class-2 info_note instead of a red row."""
+    config, source_cfg = _build_report_mocks()
+    source_cfg.inventory_enabled = False
+    config.sources = {"toy-noinv": source_cfg}
+    mock_status.return_value = {"toy-noinv": {}}
+    mock_restore.return_value = None  # not on rotation today
+
+    session = MagicMock()
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    # Athena-backed helpers never invoked
+    assert mock_inv.call_count == 0
+    assert mock_delta.call_count == 0
+    assert mock_div.call_count == 0
+
+    src = report.sources[0]
+    assert src.inventory_enabled is False
+    assert src.inventory_age_hours is None
+    assert src.divergence is None
+    assert src.count_delta is None
+    assert src.overall == "green"  # no inventory ≠ red when opt-in is off
+    assert any("inventory disabled" in n for n in src.info_notes)
 
 
 # ---------------------------------------------------------------------------
