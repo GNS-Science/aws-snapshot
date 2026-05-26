@@ -295,6 +295,47 @@ uv run backup health-report run --send --topic-arn arn:aws:sns:...
 `secretsmanager:GetSecretValue` on the relevant resources, or the
 Lambda's IAM role at runtime. The deployed Lambda has both.
 
+## Runtime and timeout headroom
+
+A real production report build (post-ADR-009, 4 sources) takes roughly
+**3–4 minutes**, dominated by Athena. Reference: 2026-05-26 manual run
+clocked 224.4s wall-clock with no restore tests scheduled that day (Tue
+= no rotation, weka canary only).
+
+What dominates the time:
+
+| Phase | Cost | Notes |
+|---|---|---|
+| Per-source `divergence_counts` Athena scan | ~50–60s × 4 | `FULL OUTER JOIN` between latest source and backup inventory snapshots; both sides scanned in one query |
+| `count_delta` Athena scan (day-over-day) | ~5s × 4 | Reuses recent inventory partitions, much smaller |
+| Inventory freshness check | <1s | S3 `head_object` per bucket |
+| Restore-test sample copy (when scheduled) | ~10–30s | Bound by S3 copy throughput |
+| Report formatting + Slack/SNS publish | <1s | Negligible |
+
+**It is not CPU- or memory-bound.** Athena runs the SQL on its own
+Presto fleet and the caller just polls `get_query_execution`. Lambda
+performance matches local closely:
+
+- Same Athena query latency (same service, same data)
+- +1–2s cold-start on first invocation only
+- Sub-second RTT difference for the poll loop
+- Restore tests are identical (bounded by S3 copy throughput)
+
+The relevant ceiling is the **15-minute Lambda timeout**, not memory.
+At 4 minutes today, headroom is ~11 minutes. The constraints that
+would burn through it (in likelihood order):
+
+1. Adding more sources (each adds ~60s of Athena scan)
+2. Athena queueing under regional load — observed up to 2× slowdowns
+3. Very large divergence sets (millions of class-2 orphans materialized
+   in the join result set)
+
+If the report ever approaches the 15-min ceiling, the cheapest fix is
+to split `divergence_counts` into two single-direction queries (giving
+up the "one scan" win for parallelizable halves). Bumping Lambda
+memory past 1769 MB unlocks a full vCPU but saves only tens of
+milliseconds on the poll loop — not worth it.
+
 ---
 
 ## Where the code lives
