@@ -42,6 +42,11 @@ All notable changes to this project will be documented here.
   `--source <alias|all>` and `--dry-run`. Used post-#25 merge to migrate
   all five production buckets to the new two-tier policy in a single
   command.
+- **New user-guide page**: `docs/user-guide/setup.md` — reference for
+  the four `backup setup` subcommands (`iam source-roles`, `iam
+  backup-batch-role`, `inventory`, `lifecycle`), with a first-time
+  deploy ordering recipe. Previously the `setup` namespace had no
+  dedicated docs page.
 - **Lambda-error alarm fast path** (ADR-005 / #16). CloudWatch alarm on the backup
   Lambda's `Errors` metric (≥ 1 over 5 min) → SNS topic → email subscription. Routes
   to `notifications.alerts.email` from `backup-config.{stage}.yaml`. Sandbox stage
