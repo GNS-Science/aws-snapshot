@@ -1652,3 +1652,105 @@ ths-dataset, ~12M objects between them) will begin transitioning to
 GLACIER_IR for everything older than 30 days. Expect a one-off
 transition-request charge and a measurable monthly storage reduction
 in the next cost report — both expected and desired, not a surprise.
+
+## Step 19 — ADR-009 health-report code + clean SSM config deploy (#26) ✅ 2026-05-27
+
+**Context:** PR #26 (ADR-009 signal-class taxonomy, `divergence_counts`
+Athena query, `inventory_enabled` opt-out, runbooks) is open and
+awaiting review but the team wanted the new daily-report format on
+prod before the next scheduled 14:30 NZT fire. Deployed from the
+feature branch ahead of merge.
+
+**Pre-deploy state:**
+
+- Lambda: post-#27 code (had ADR-006 lifecycle changes but no ADR-009
+  signal taxonomy)
+- SSM `/nzshm-backup/prod/config` last touched 2026-05-22, carried
+  four orphan keys silently ignored by Pydantic
+  (`extra="ignore"` default):
+  - `retention.warm_days: 120`
+  - `retention.max_age_days: 365`
+  - `notifications.reports.health.delta_pct_threshold: -5.0`
+  - `notifications.reports.health.delta_abs_threshold: -10000`
+
+**Deploy sequence (all 2026-05-27 NZT):**
+
+| Time NZT | Action | Result |
+|---|---|---|
+| 10:40:45 | `AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod` from `feature/adr-009-signal-taxonomy` | CodeSha256 `YvJxd6jAgbW2NNEW/UY10O1ugnD9EYBqSYuSVbcEs+c=` |
+| 10:48:50 | `uv run backup config push --stage prod` (positional config_file via `.env`) | Pushed clean YAML; the 4 orphan keys dropped from SSM |
+| 11:10:23 | Manual Lambda invoke: `aws lambda invoke … task_type:health_report` | RequestId `b15efa64-1e5f-476f-b785-c4b83a1e827f` |
+
+**Pydantic-strict retraction:** prior deploy outline warned the config
+push had to follow the Lambda deploy closely "minutes, not hours" to
+avoid Pydantic rejection. That was wrong — Pydantic v2 `BaseModel`
+defaults to `extra="ignore"` and nothing in this codebase overrides it.
+Empirical check: loaded the stale-shape JSON (with the 4 orphan keys)
+against the current `ConfigModel` and confirmed silent ignore.
+
+```
+OK — extras silently ignored
+retention: {'hot_days': 30, 'version_retention_days': 365}
+reports.health: {'canary_source': 'weka', ...}
+```
+
+So old-Lambda + new-YAML and new-Lambda + old-YAML are both safe. Push
+order is purely a hygiene concern, not a correctness one.
+
+**Smoke test outcome:**
+
+```
+23:10:23 UTC  START
+23:10:23 UTC  Received event: task_type=health_report, source=_health
+23:11:27 UTC  athena_inventory sampled 10 objects from toshi inventory
+23:14:05 UTC  athena_inventory sampled 10 objects from weka inventory
+23:14:12 UTC  Slack delivery ok (status=200)
+23:14:13 UTC  SNS publish ok (MessageId=becdf9bb-3999-57ee-a309-9b2b121cf381)
+23:14:13 UTC  END / REPORT
+              Duration: 229,408.50 ms
+              Billed:   230,660 ms
+              Memory:   164 / 1024 MB
+              Init:     1,250.77 ms
+```
+
+| Metric | Value | Note |
+|---|---|---|
+| Wall time | 229.4 s | Within +5 s of yesterday's local 224.4 s (cold-start overhead) |
+| Memory peak | 164 MB / 1024 MB | Comfortable headroom |
+| Timeout headroom | ~671 s out of 900 s | ~75 % unused |
+| Slack delivery | 200 OK | New `⚠` / `ℹ` glyph rendering visually verified by chrisbc |
+| SNS publish | ok | MessageId captured, SES email confirmed received |
+| Errors / Tracebacks | none | — |
+
+**Restore-test rotation verification:** The Lambda fired at 23:10 UTC
+which is 11:10 NZT *on 2026-05-27 — Wednesday*. The rotation map
+`{0: ths, 2: toshi, 4: static}` correctly picked **toshi** for
+Wednesday (Python `.weekday()` = 2), plus the daily canary **weka**.
+Both got sampled (10 keys each) — exactly as designed. This is the
+one-side window of every 24h where UTC weekday and NZ weekday diverge
+(NZT is 12 h ahead in summer / 13 h in DST overlap), and the daily
+report has used `time_utils.nz_today()` since the ADR-005 work
+specifically to handle this.
+
+**Acceptance against ADR-009 design:**
+
+- ✅ `divergence_counts` ran for all 4 sources (Athena scan cost
+  visible in CloudWatch — ~$0.01/source)
+- ✅ Class-2 ℹ orphan line surfaced for sources that had orphans (weka
+  in yesterday's local manual run; today's prod report similarly)
+- ✅ No class-1 RED fired — no source had `source_minus_backup > 0`
+- ✅ Restore tests passed on both canary + Wednesday-rotation source
+- ✅ Subscriber-visible glyph distinction (`⚠` vs `ℹ`) renders as
+  designed in Slack Block Kit and SES plain text
+
+**Followups:**
+
+- Walk `docs/operations/health-signal-validation-sandbox.md` once #26
+  merges and someone has time — that's the formal class-1 ⚠ red proof
+  via the toy-source manipulation matrix.
+- PR #26 still awaiting review; the deploy is *ahead of merge*, which
+  is unusual. If review surfaces required code changes, redeploy from
+  the rebased branch via the same `sls deploy` path.
+
+**Branch / commit:** `feature/adr-009-signal-taxonomy` @ `b5a2aff` at
+deploy time (PR #26).
