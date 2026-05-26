@@ -184,6 +184,7 @@ an abstract spec.
 | #23 closed as superseded | GitHub | Trivial |
 | User-guide health-report doc updated for class taxonomy | `docs/user-guide/health-report.md` | Small |
 | Unit tests for new signals + classifier | `tests/test_health_report.py` | Small |
+| Per-source `inventory_enabled` opt-out (no-Inventory floor mode) | `src/nzshm_backup/config/models.py` + `health_report.py` + tests | Small |
 
 ## Consequences
 

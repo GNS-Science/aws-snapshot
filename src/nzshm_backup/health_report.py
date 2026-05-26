@@ -90,6 +90,10 @@ class SourceHealthData:
     backup_orphan_count: int | None
     restore_test: RestoreTestResult | None  # None if not tested this run
     pitr_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # When False, the source has opted out of S3 Inventory (see
+    # ``SourceConfig.inventory_enabled``). The classifier must not red on
+    # missing inventory data — restore test becomes the dominant red signal.
+    inventory_enabled: bool = True
     overall: Status = "green"
     # Operational errors and class-1/3 detail strings (warning glyph).
     notes: list[str] = field(default_factory=list)
@@ -161,7 +165,8 @@ def _classify_source(s: SourceHealthData) -> Status:
     Class 1 → red (any of):
       - restore-test failure
       - PITR disabled on any configured DynamoDB table
-      - inventory missing entirely
+      - inventory missing entirely (only when ``inventory_enabled`` is True
+        for the source; opted-out sources don't red on missing inventory)
       - backup is missing keys that source has
         (``backup_missing_count`` > 0)
 
@@ -175,7 +180,7 @@ def _classify_source(s: SourceHealthData) -> Status:
         return "red"
     if any(not t.get("enabled") for t in s.pitr_tables.values()):
         return "red"
-    if s.inventory_age_hours is None:
+    if s.inventory_enabled and s.inventory_age_hours is None:
         return "red"
     if s.backup_missing_count and s.backup_missing_count > 0:
         return "red"
@@ -242,68 +247,77 @@ def build_report(
                 bucket_cfg.label, config.general.region, source_account_id, alias
             )
 
-        # Inventory freshness (class 3 — yellow when present-but-stale).
+        # Inventory-based signals are gated on inventory_enabled. When opted
+        # out, the source surfaces no inventory-age, divergence, or
+        # count-delta lines — restore test (and PITR) become dominant.
         inv_age: float | None = None
         inv_stale = False
-        if source_bucket and backup_bucket:
-            source_session = (
-                get_cross_account_session(session, source_config.source_account_role_arn)
-                if source_config.source_account_role_arn
-                else session
-            )
-            try:
-                inv = inventory_health_for_bucket_pair(
-                    session, source_session, alias, source_bucket, backup_bucket
-                )
-                effective = inv.get("effective_data_ts")
-                if effective:
-                    inv_age = (now_utc - effective).total_seconds() / 3600.0
-                    inv_stale = inv_age > freshness_threshold_hours
-                else:
-                    notes.append("no inventory data available")
-            except Exception as e:
-                notes.append(f"inventory health check failed: {e}")
-
-        # Day-over-day source count (class 2 — informational only).
         delta: dict[str, Any] | None = None
-        if source_bucket:
-            try:
-                delta = count_delta(session, alias, "source", source_bucket)
-                if delta.get("available"):
-                    d = delta.get("delta") or 0
-                    pct = delta.get("delta_pct")
-                    if d != 0:
-                        pct_str = f" ({pct:+.1f}%)" if pct is not None else ""
-                        verb = "grew" if d > 0 else "dropped"
-                        info_notes.append(
-                            f"source {verb} by {abs(d):,} objects vs yesterday{pct_str}"
-                        )
-            except Exception as e:
-                notes.append(f"count delta check failed: {e}")
-
-        # Source-vs-backup divergence (class 1 backup-missing + class 2 orphans).
         divergence: dict[str, Any] | None = None
         backup_missing: int | None = None
         backup_orphans: int | None = None
-        if source_bucket and backup_bucket:
-            try:
-                divergence = divergence_counts(
-                    session, alias, source_bucket, backup_bucket
+
+        if source_config.inventory_enabled:
+            # Inventory freshness (class 3 — yellow when present-but-stale).
+            if source_bucket and backup_bucket:
+                source_session = (
+                    get_cross_account_session(session, source_config.source_account_role_arn)
+                    if source_config.source_account_role_arn
+                    else session
                 )
-                if divergence.get("available"):
-                    backup_missing = divergence["source_minus_backup"]
-                    backup_orphans = divergence["backup_minus_source"]
-                    if backup_missing and backup_missing > 0:
-                        notes.append(
-                            f"backup is missing {backup_missing:,} source keys"
-                        )
-                    if backup_orphans and backup_orphans > 0:
-                        info_notes.append(
-                            f"backup has {backup_orphans:,} orphans "
-                            "(source-side deletions retained per ADR-006)"
-                        )
-            except Exception as e:
-                notes.append(f"divergence check failed: {e}")
+                try:
+                    inv = inventory_health_for_bucket_pair(
+                        session, source_session, alias, source_bucket, backup_bucket
+                    )
+                    effective = inv.get("effective_data_ts")
+                    if effective:
+                        inv_age = (now_utc - effective).total_seconds() / 3600.0
+                        inv_stale = inv_age > freshness_threshold_hours
+                    else:
+                        notes.append("no inventory data available")
+                except Exception as e:
+                    notes.append(f"inventory health check failed: {e}")
+
+            # Day-over-day source count (class 2 — informational only).
+            if source_bucket:
+                try:
+                    delta = count_delta(session, alias, "source", source_bucket)
+                    if delta.get("available"):
+                        d = delta.get("delta") or 0
+                        pct = delta.get("delta_pct")
+                        if d != 0:
+                            pct_str = f" ({pct:+.1f}%)" if pct is not None else ""
+                            verb = "grew" if d > 0 else "dropped"
+                            info_notes.append(
+                                f"source {verb} by {abs(d):,} objects vs yesterday{pct_str}"
+                            )
+                except Exception as e:
+                    notes.append(f"count delta check failed: {e}")
+
+            # Source-vs-backup divergence (class 1 backup-missing + class 2 orphans).
+            if source_bucket and backup_bucket:
+                try:
+                    divergence = divergence_counts(
+                        session, alias, source_bucket, backup_bucket
+                    )
+                    if divergence.get("available"):
+                        backup_missing = divergence["source_minus_backup"]
+                        backup_orphans = divergence["backup_minus_source"]
+                        if backup_missing and backup_missing > 0:
+                            notes.append(
+                                f"backup is missing {backup_missing:,} source keys"
+                            )
+                        if backup_orphans and backup_orphans > 0:
+                            info_notes.append(
+                                f"backup has {backup_orphans:,} orphans "
+                                "(source-side deletions retained per ADR-006)"
+                            )
+                except Exception as e:
+                    notes.append(f"divergence check failed: {e}")
+        else:
+            info_notes.append(
+                "inventory disabled for this source — restore test is the dominant signal"
+            )
 
         # Restore verification (canary + rotation).
         restore_result: RestoreTestResult | None = None
@@ -335,6 +349,7 @@ def build_report(
             backup_orphan_count=backup_orphans,
             restore_test=restore_result,
             pitr_tables=pitr,
+            inventory_enabled=source_config.inventory_enabled,
             notes=notes,
             info_notes=info_notes,
         )

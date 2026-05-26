@@ -245,6 +245,32 @@ runs that day). To **add** a Saturday test, add `5: <source-alias>`.
 The source alias must exist under the top-level `sources:` block or the
 entry is silently ignored.
 
+### Per-source opt-out: `inventory_enabled`
+
+Set `inventory_enabled: false` on a `SourceConfig` to declare that the
+source intentionally has no S3 Inventory pipeline:
+
+```yaml
+sources:
+  toy-noinv:
+    inventory_enabled: false   # default true
+    s3_buckets: [...]
+```
+
+When false:
+
+- `inventory_age` / `freshness` / `divergence` / `count_delta` are all
+  **skipped** for this source (no Athena calls, no false-positive red)
+- The row carries a single `ℹ` info line: *"inventory disabled for this
+  source — restore test is the dominant signal"*
+- The row reds only on **restore-test failure** or **PITR disabled**
+- Default `true` preserves existing behaviour for every production source
+
+Use this for sources where the daily Inventory cost or pipeline isn't
+worth standing up — small config buckets, validation toys, etc. For
+production datasets, leave it `true`: Inventory is the cheapest way to
+catch silent backup-side data loss at scale.
+
 ---
 
 ## Delivery channels
