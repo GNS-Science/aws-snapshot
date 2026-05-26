@@ -57,7 +57,9 @@ backup costs report --period last-month
 ### User Guide
 - [Backup Operations](user-guide/backup.md)
 - [Restore Operations](user-guide/restore.md)
+- [Provisioning (`backup setup`)](user-guide/setup.md)
 - [Testing & Validation](user-guide/testing.md)
+- [Daily Health Report](user-guide/health-report.md)
 - [Cost Management](user-guide/costs.md)
 
 ### CLI Reference
