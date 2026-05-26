@@ -269,6 +269,17 @@ volume of currently-archived data is small.
   — the trade may need to be revisited if storage volume grows by an
   order of magnitude.
 
+## Possible future enhancements
+
+- **Per-source `hot_days` override.** `RetentionConfig` currently applies
+  globally. If a source ever wants a different transition threshold (e.g.
+  `static` at 7 days vs `toshi` at 30), add an optional `retention:` block
+  on `SourceConfig` and have `backup setup lifecycle` fall back to the
+  root value when not set. Not pursued now — the single global knob is
+  sufficient for current usage, and the per-source naming convention
+  (`get_backup_bucket_name`) already keeps the policy boundary clean per
+  bucket if we ever do split it.
+
 ## Links
 
 - Storage tiers: `docs/architecture/storage-tiers.md`
