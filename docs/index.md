@@ -2,6 +2,11 @@
 
 AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
 
+> **Why not AWS Backup?** ~16× cheaper *and* materially better signal
+> coverage (per-key source/backup divergence, sampled restore
+> verification, inventory freshness, signal classification). See
+> [AWS Backup Comparison](aws-backup-comparison.md).
+
 ## Features
 
 - **Automated Scheduling**: Weekly/daily backup schedules via AWS EventBridge
