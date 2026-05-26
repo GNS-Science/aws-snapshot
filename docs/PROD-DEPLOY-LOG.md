@@ -1754,3 +1754,40 @@ specifically to handle this.
 
 **Branch / commit:** `feature/adr-009-signal-taxonomy` @ `b5a2aff` at
 deploy time (PR #26).
+
+## Step 20 — ADR-009 sandbox validation kickoff 🚧 2026-05-27
+
+**Purpose:** Drive the formal class-1/2/3 acceptance proof for ADR-009
+against real AWS infrastructure using the two toy sources defined in
+`docs/operations/health-signal-validation-sandbox.md`.
+
+**Cadence — corrected after a one-day over-estimate.** Initial reading
+of the runbook inserted a spurious "baseline-confirmation day" between
+the first GREEN and the first scenario. The runbook design is
+*act-before-02:00-UTC-on-day-D, see-the-result-at-14:30-NZT-on-day-D+1*.
+So the actual minimum cadence from setup to first scenario result is:
+
+| NZT day | Action | What lands in 14:30 NZT report |
+|---|---|---|
+| **Wed 2026-05-27** | Set up toys before 14:30 NZT | toy-inv ⚠ RED (no inventory yet), toy-noinv ✓ GREEN with `ℹ inventory disabled` |
+| **Thu 2026-05-28** | First Inventory drop ~14:00 NZT; observe only | toy-inv ✓ GREEN (baseline) |
+| **Thu evening → before 02:00 UTC Fri (14:00 NZT Fri)** | Apply Cycle-1 manipulations | — |
+| **Fri 2026-05-29** | Fri 02:00 UTC inventory captures the manipulations | **First scenario results** |
+
+Wed → Fri is the genuine minimum: 2 days from setup to first scenario
+proof, not 3.
+
+**Kickoff (this step):** create toy buckets, IAM, S3 Inventory for
+toy-inv, push config. Subsequent cycles' observed outcomes append
+here as the runbook progresses; this entry stays 🚧 until Cycle 3
+(green recovery) is verified and the toys are torn down.
+
+**Per-cycle outcomes (to be filled in as observed):**
+
+- [ ] Cycle 0 / baseline: Thu 2026-05-28 14:30 NZT — both toys GREEN
+- [ ] Cycle 1 / class-1 RED: Fri 2026-05-29 14:30 NZT — 4 scenarios fire as expected
+- [ ] Cycle 2 / class-2 ℹ + class-3 yellow: TBD
+- [ ] Cycle 3 / GREEN recovery: TBD
+- [ ] Teardown: TBD
+
+**Runbook:** `docs/operations/health-signal-validation-sandbox.md`.
