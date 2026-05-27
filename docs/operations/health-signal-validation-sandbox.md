@@ -72,23 +72,39 @@ place, but no benefit either.
 
 ### 1. Create source buckets
 
-In account `461564345538` (source) under `nshm-admin` profile:
+In account `461564345538` (source) under `nshm-admin` profile.
+
+> ⚠ **Gotcha:** if you've recently `eval`-exported `nshm-backup-admin`
+> credentials (Step 0), those env vars override `AWS_PROFILE`. Without
+> an explicit `--profile nshm-admin` on each `aws` command, the buckets
+> would silently get created in the **backup** account
+> (`737696831915`), the cross-account `Condition:
+> s3:ResourceAccount=="461564345538"` on the reader role would fail at
+> first `backup run`, and you'd have to delete + recreate. Pin every
+> `aws` call to `--profile nshm-admin` (or `unset AWS_ACCESS_KEY_ID
+> AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN` first).
 
 ```bash
 aws s3api create-bucket --bucket nzshm22-toy-inv-source \
   --region ap-southeast-2 \
-  --create-bucket-configuration LocationConstraint=ap-southeast-2
+  --create-bucket-configuration LocationConstraint=ap-southeast-2 \
+  --profile nshm-admin
 aws s3api create-bucket --bucket nzshm22-toy-noinv-source \
   --region ap-southeast-2 \
-  --create-bucket-configuration LocationConstraint=ap-southeast-2
+  --create-bucket-configuration LocationConstraint=ap-southeast-2 \
+  --profile nshm-admin
 
 # Populate each with ~50 small text files
 for B in nzshm22-toy-inv-source nzshm22-toy-noinv-source; do
   for i in $(seq -w 1 50); do
     echo "toy file $i for $B (created $(date -u +%FT%TZ))" \
-      | aws s3 cp - "s3://$B/data/file-$i.txt"
+      | aws s3 cp - "s3://$B/data/file-$i.txt" --profile nshm-admin
   done
 done
+
+# Verify ownership before proceeding — both names should appear here:
+aws s3api list-buckets --profile nshm-admin \
+  --query "Buckets[?contains(Name, 'toy')].Name" --output text
 ```
 
 ### 2. Add to production config
