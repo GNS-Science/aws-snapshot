@@ -42,6 +42,34 @@ nzshm22-toy-noinv-source   ────►     bb-toy-noinv-s3-src-…-210987654
 
 ## One-time setup
 
+### 0. Shell prep (`.env`-aware)
+
+This runbook assumes `BACKUP_CONFIG_PATH=backup-config.production.yaml`
+is set in your project `.env`. `uv run` loads that into the process
+environment before Python starts, so the `uv run backup …` commands
+below pick the right config without a `--config` flag.
+
+```bash
+grep BACKUP_CONFIG_PATH .env
+# → BACKUP_CONFIG_PATH=backup-config.production.yaml
+```
+
+For commands that touch the **backup account** (`backup run`,
+`backup setup lifecycle`, `backup config push`), eval-export
+`<aws-profile>` credentials and unset `AWS_PROFILE` to keep
+boto3's credential chain unambiguous:
+
+```bash
+eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
+unset AWS_PROFILE
+```
+
+The `backup setup iam source-roles` and `backup setup inventory`
+commands take explicit `--source-profile` / `--profile` arguments and
+construct boto3 sessions via `profile_name=…`, which bypasses the
+exported env vars — no harm running them with the eval already in
+place, but no benefit either.
+
 ### 1. Create source buckets
 
 In account `210987654321` (source) under `nshm-admin` profile:
@@ -99,33 +127,35 @@ idempotent and rebuilds the policy from the YAML:
 
 ```bash
 uv run backup setup iam source-roles \
-  --source toy-inv --profile nshm-admin \
-  --config backup-config.production.yaml
+  --source toy-inv --profile nshm-admin
 
 uv run backup setup iam source-roles \
-  --source toy-noinv --profile nshm-admin \
-  --config backup-config.production.yaml
+  --source toy-noinv --profile nshm-admin
 ```
 
-### 4. Inventory setup (toy-inv only)
+### 4. First backup + lifecycle apply
+
+Run before Inventory setup — the Inventory pipeline's
+`PutBucketInventoryConfiguration` call on the backup-side bucket
+requires the bucket to exist, and `backup run` is what creates it
+(plus applies lifecycle on creation):
+
+```bash
+uv run backup run --source toy-inv
+uv run backup run --source toy-noinv
+uv run backup setup lifecycle --source toy-inv
+uv run backup setup lifecycle --source toy-noinv
+```
+
+### 5. Inventory setup (toy-inv only)
 
 ```bash
 uv run backup setup inventory --source toy-inv \
-  --source-profile nshm-admin --backup-profile <aws-profile> \
-  --config backup-config.production.yaml
+  --source-profile nshm-admin --backup-profile <aws-profile>
 ```
 
 Do **not** run this for `toy-noinv` — the whole point is to exercise
 the no-Inventory floor.
-
-### 5. First backup + lifecycle apply
-
-```bash
-uv run backup run --source toy-inv  --config backup-config.production.yaml
-uv run backup run --source toy-noinv --config backup-config.production.yaml
-uv run backup setup lifecycle --source toy-inv  --config backup-config.production.yaml
-uv run backup setup lifecycle --source toy-noinv --config backup-config.production.yaml
-```
 
 ### 6. Push config to SSM and redeploy
 
@@ -134,7 +164,7 @@ changed, a `config push` is sufficient; if Lambda code changed (e.g.
 when `inventory_enabled` is being shipped for the first time), redeploy:
 
 ```bash
-uv run backup config push --config backup-config.production.yaml --stage prod
+uv run backup config push --stage prod
 # If code changed: AWS_PROFILE=<aws-profile> npx sls deploy --stage prod
 ```
 
@@ -225,9 +255,10 @@ When validation is complete:
 ```bash
 # 1. Remove from config
 $EDITOR backup-config.production.yaml   # delete toy-inv + toy-noinv sources
+# (or revert the TMP commit: git revert <toy-yaml-commit-sha>)
 
 # 2. Push to SSM
-uv run backup config push --config backup-config.production.yaml --stage prod
+uv run backup config push --stage prod
 
 # 3. Empty + delete buckets (source + backup sides)
 for B in nzshm22-toy-inv-source nzshm22-toy-noinv-source; do
@@ -255,9 +286,12 @@ Local CLI for full picture (skips delivery; compare against what
 subscribers received via Slack/email):
 
 ```bash
-uv run backup health-report run \
-  --config backup-config.production.yaml
+uv run backup health-report run
 ```
+
+(`backup health-report run` has no `--config` flag at all — it always
+reads from `BACKUP_CONFIG_PATH` or the default `backup-config.yaml`,
+which `.env`-via-`uv run` supplies.)
 
 What to verify per signal:
 
