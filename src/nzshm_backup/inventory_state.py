@@ -48,11 +48,29 @@ def _inventory_config_for_prefix(
 
 
 def _latest_object_ts(s3_client, bucket: str, prefix: str) -> datetime | None:
+    """Return the LastModified of the freshest non-empty object under prefix.
+
+    Excludes 0-byte objects — S3 represents non-existent "folders" via a
+    0-byte key with a trailing slash, and ``setup-inventory.py`` (or AWS
+    itself when wiring up an InventoryConfiguration) can leave such a
+    marker at the destination prefix before any real inventory data has
+    been delivered. Counting that marker as a valid freshness signal
+    silently masks the *"no inventory data available"* class-1 red — the
+    source appears green until first real delivery, ~18 h after the
+    Inventory pipeline is set up. Caught by the toy-inv sandbox source
+    on 2026-05-27.
+
+    Real inventory artifacts (manifest.json, manifest.checksum, parquet)
+    are always >0 bytes, so the size filter doesn't change behaviour for
+    healthy production sources.
+    """
     paginator = s3_client.get_paginator("list_objects_v2")
     latest: datetime | None = None
     try:
         for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix.rstrip('/')}/"):
             for obj in page.get("Contents", []) or []:
+                if obj.get("Size", 0) == 0:
+                    continue
                 ts = obj.get("LastModified")
                 if isinstance(ts, datetime) and (latest is None or ts > latest):
                     latest = ts

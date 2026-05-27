@@ -50,6 +50,18 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 
+- **`_latest_object_ts` skips 0-byte placeholder objects** in the inventory
+  freshness check. Setup-inventory (or AWS itself when wiring up the
+  InventoryConfiguration) can leave a 0-byte folder marker at the
+  destination prefix before any real inventory data has been delivered.
+  Previously its LastModified counted as a valid freshness signal,
+  silently masking the class-1 "no inventory data available" red — a
+  newly-configured source appeared GREEN until first real delivery (~18 h
+  later). Caught by the toy-inv sandbox source on 2026-05-27: today's
+  15:45 NZT report came back 6/6 GREEN when toy-inv should have been
+  RED. Real inventory artifacts (manifest.json / manifest.checksum /
+  parquet) are always >0 bytes, so the size filter doesn't change
+  behaviour for healthy production sources.
 - **`backup config push` auto-upgrades to SSM Advanced tier when needed.**
   The serialised config blob exceeded the 4 KB Standard-tier limit once
   two toy sources were added for ADR-009 sandbox validation; push would
