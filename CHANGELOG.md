@@ -50,6 +50,20 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 
+- **`backup config push` auto-upgrades to SSM Advanced tier when needed.**
+  The serialised config blob exceeded the 4 KB Standard-tier limit once
+  two toy sources were added for ADR-009 sandbox validation; push would
+  fail with `ValidationException`. Now selects `Tier="Advanced"` when
+  the payload is > 4 KB and reports the chosen tier in the success
+  message. Advanced costs ~$0.05/parameter/month; upgrade is one-way
+  per parameter.
+- **`load_dotenv()` now runs at CLI module-import time**, not inside
+  the `@app.callback`. The previous ordering meant `BACKUP_CONFIG_PATH`
+  from `.env` was not visible to typer `Option(os.getenv(...))`
+  defaults — those evaluate at function-definition time during
+  subcommand import, which happens *before* `@app.callback` runs.
+  Operators were forced to pass `--config` explicitly on every
+  command. Caught during ADR-009 sandbox setup walkthrough.
 - **Lambda IAM: scoped `s3:DeleteObject` / `s3:DeleteBucket` for restore-test
   temp buckets** (2026-05-22). The role's deliberate "no delete on backup
   buckets" stance meant the daily health-report Lambda silently failed to
