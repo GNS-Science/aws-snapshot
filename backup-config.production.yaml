@@ -65,7 +65,7 @@ sources:
   toy-inv:
     display_name: "[SANDBOX] toy-inv (Inventory enabled)"
     s3_buckets:
-      - arn: arn:aws:s3:::nzshm22-toy-inv-source
+      - arn: arn:aws:s3:::nzshm22-toy2-inv-source
         label: src
     source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
     source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
@@ -76,7 +76,7 @@ sources:
   toy-noinv:
     display_name: "[SANDBOX] toy-noinv (no Inventory)"
     s3_buckets:
-      - arn: arn:aws:s3:::nzshm22-toy-noinv-source
+      - arn: arn:aws:s3:::nzshm22-toy2-noinv-source
         label: src
     source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
     source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
