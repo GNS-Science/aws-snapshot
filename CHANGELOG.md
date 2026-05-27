@@ -25,6 +25,11 @@ All notable changes to this project will be documented here.
   becomes the dominant red signal. Used by the sandbox validation
   runbook to exercise the "no Inventory" floor; also a fit for small
   config buckets where the daily Athena cost isn't worth standing up.
+  A Pydantic `@model_validator` rejects the inconsistent combination
+  `inventory_enabled: false` + `batch_manifest_mode: inventory` at
+  config-load time — the Batch path needs Inventory to build its
+  manifest, so the opt-out flag must come with `batch_manifest_mode:
+  inline` (or `use_s3_batch: false`).
 - **New runbook**: `docs/operations/purge-from-backup.md` — out-of-band
   procedure for removing class-2 orphans when retention is no longer
   desired. Small-list (`aws s3api delete-objects`) and large-list

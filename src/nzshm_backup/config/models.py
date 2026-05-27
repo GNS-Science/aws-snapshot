@@ -180,8 +180,33 @@ class SourceConfig(BaseModel):
         "if DynamoDB tables are present) become the dominant signals. Default True "
         "matches every production source; set False only for sources where the daily "
         "Athena cost or Inventory pipeline isn't worth standing up (e.g. very small "
-        "config buckets, validation toys).",
+        "config buckets, validation toys). Incompatible with "
+        "batch_manifest_mode='inventory' — the Batch path requires Inventory to "
+        "build its object-list manifest. Use 'inline' there if you opt out.",
     )
+
+    @model_validator(mode="after")
+    def validate_inventory_consistency(self) -> "SourceConfig":
+        """Reject the silent-misconfig combination ``inventory_enabled=False``
+        + ``batch_manifest_mode='inventory'``.
+
+        The Batch manifest-preparation path with mode ``inventory`` reads S3
+        Inventory snapshots to build its object list. Declaring
+        ``inventory_enabled=False`` for the same source asserts the source
+        has no Inventory pipeline — which contradicts what the Batch path
+        needs. Caught at config load time so the backup job doesn't fail
+        opaquely at runtime.
+        """
+        if not self.inventory_enabled and self.batch_manifest_mode == "inventory":
+            raise ValueError(
+                "inventory_enabled=False is incompatible with "
+                "batch_manifest_mode='inventory' — the Batch manifest-prep "
+                "path requires S3 Inventory but inventory_enabled=False "
+                "asserts the source has none. Either enable Inventory "
+                "(inventory_enabled=True) or switch the Batch mode to "
+                "'inline'."
+            )
+        return self
 
     def get_backup_bucket_name(
         self, bucket_label: str, region: str, account_id: str, source_key: str
