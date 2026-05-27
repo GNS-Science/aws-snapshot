@@ -269,6 +269,44 @@ def test_config_push_uploads_to_ssm(aws_credentials, cli_runner, temp_config_fil
         assert "toshi" in stored["sources"]
 
 
+def test_config_push_auto_upgrades_to_advanced_tier_when_oversized(
+    aws_credentials, cli_runner, temp_config_file
+):
+    """When the serialised config exceeds 4 KB, push uses Advanced tier."""
+    from nzshm_backup.commands.config import app
+
+    # Inject enough source aliases to push the JSON past 4096 bytes.
+    cfg = yaml.safe_load(temp_config_file.read_text())
+    base = cfg["sources"]["toshi"]
+    for i in range(20):
+        cfg["sources"][f"filler-{i}"] = {**base, "display_name": f"Filler {i}" + ("x" * 200)}
+    temp_config_file.write_text(yaml.safe_dump(cfg))
+
+    with mock_aws():
+        result = cli_runner.invoke(app, ["push", str(temp_config_file), "--stage", "dev"])
+        assert result.exit_code == 0, result.output
+        assert "Tier=Advanced" in result.output
+
+        # boto/moto: confirm the tier on the parameter
+        ssm = boto3.client("ssm", region_name="ap-southeast-2")
+        meta = ssm.describe_parameters(
+            Filters=[{"Key": "Name", "Values": ["/nzshm-backup/dev/config"]}]
+        )["Parameters"][0]
+        assert meta["Tier"] == "Advanced"
+
+
+def test_config_push_uses_standard_tier_when_small(
+    aws_credentials, cli_runner, temp_config_file
+):
+    """A small (default fixture) config stays on Standard tier."""
+    from nzshm_backup.commands.config import app
+
+    with mock_aws():
+        result = cli_runner.invoke(app, ["push", str(temp_config_file), "--stage", "dev"])
+        assert result.exit_code == 0, result.output
+        assert "Tier=Standard" in result.output
+
+
 def test_config_push_dry_run(aws_credentials, cli_runner, temp_config_file):
     """push --dry-run prints a preview but does NOT create the SSM parameter."""
     from nzshm_backup.commands.config import app

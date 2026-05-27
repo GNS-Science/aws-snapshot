@@ -138,13 +138,23 @@ def push_config(
         return
 
     ssm = boto3.client("ssm")
+    # Standard tier caps Value at 4 KB. Auto-upgrade to Advanced when the
+    # JSON exceeds that; Advanced caps at 8 KB and costs ~$0.05/parameter/
+    # month. The upgrade is one-way per parameter — once Advanced, the SSM
+    # parameter stays Advanced even if a future push fits in 4 KB.
+    payload_bytes = len(json_str.encode("utf-8"))
+    tier = "Advanced" if payload_bytes > 4096 else "Standard"
     ssm.put_parameter(
         Name=param_name,
         Value=json_str,
         Type="String",
+        Tier=tier,
         Overwrite=True,
     )
-    typer.echo(f"Config pushed to SSM parameter: {param_name}")
+    typer.echo(
+        f"Config pushed to SSM parameter: {param_name} "
+        f"({payload_bytes} bytes, Tier={tier})"
+    )
 
 
 @app.command("pull")
