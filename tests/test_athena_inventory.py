@@ -162,6 +162,46 @@ def test_read_two_count_result_parses_quoted_csv():
     assert bms == 12_431
 
 
+def test_build_divergence_sample_query_returns_missing_keys_only():
+    """ADR-009 head-check companion: LEFT JOIN, single direction, LIMIT N.
+
+    Only the class-1 (backup-missing) direction is sampled — orphans are
+    informational and don't fire RED, so they don't need head-check
+    verification (decision recorded in the implementation plan).
+    """
+    q = ai._build_divergence_sample_query(
+        "inv_src", "dt = '2026-05-25'",
+        "inv_dst", "dt = '2026-05-25'",
+        limit=10,
+    )
+    assert "LEFT JOIN" in q
+    assert "WHERE b.key IS NULL" in q
+    assert "LIMIT 10" in q
+    # Only the source-missing-from-backup direction; no SELECT of backup-only keys
+    assert "SELECT s.key" in q
+    # Counts query helpers must not appear here
+    assert "COUNT_IF" not in q
+    assert "FULL OUTER JOIN" not in q
+
+
+def test_read_key_list_result_parses_single_column_csv():
+    """Athena writes the sample query result as a header row + N data rows."""
+    s3 = MagicMock()
+    body = b'"key"\n"data/file-01.txt"\n"data/file-07.txt"\n"data/file-99.txt"\n'
+    s3.get_object.return_value = {"Body": MagicMock(read=lambda: body)}
+    keys = ai._read_key_list_result(s3, "s3://ctrl/athena-results/x.csv")
+    assert keys == ["data/file-01.txt", "data/file-07.txt", "data/file-99.txt"]
+
+
+def test_read_key_list_result_empty_returns_empty_list():
+    """Header-only result (zero data rows) returns empty list."""
+    s3 = MagicMock()
+    body = b'"key"\n'
+    s3.get_object.return_value = {"Body": MagicMock(read=lambda: body)}
+    keys = ai._read_key_list_result(s3, "s3://ctrl/athena-results/x.csv")
+    assert keys == []
+
+
 # ---------------------------------------------------------------------------
 # S3 multipart-copy concatenation
 # ---------------------------------------------------------------------------

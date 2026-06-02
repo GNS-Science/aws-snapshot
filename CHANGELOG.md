@@ -50,6 +50,27 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 
+- **Class-1 RED divergence note tagged with live-state head-check** (ADR-009).
+  When `divergence_counts` reports `source_minus_backup > 0`, the report
+  now samples up to 10 missing keys via `athena_inventory.divergence_sample_keys`
+  and `head_object`-checks each against the live backup bucket. The existing
+  RED note gains a tag:
+  - All sampled keys 404 → `"(still missing live, sampled N)"` — the gap
+    is current; backup hasn't re-synced yet.
+  - All sampled keys 200 → `"(auto-healed since snapshot, sampled N)"` —
+    the inventory snapshot captured a gap that a subsequent backup run
+    has already repaired. Row stays RED (audit framing preserved per
+    ADR-009 — the gap existed at snapshot time and deserves operator
+    attention regardless).
+  - Mixed → `"(X still missing, Y auto-healed, sampled N)"`.
+  Closes the operator-experience gap surfaced by the toy-inv sandbox
+  Cycle-1 validation: the daily report could fire RED at 10:45 NZT for
+  divergences that the 09:45 NZT backup had already self-healed,
+  leaving operators chasing non-issues. A failed sample query falls
+  back to the original untagged note shape + a separate
+  `"head-check sample failed: ..."` diagnostic note. Only the class-1
+  (source-minus-backup) direction is verified; class-2 orphans remain
+  count-only.
 - **`_latest_object_ts` skips 0-byte placeholder objects** in the inventory
   freshness check. Setup-inventory (or AWS itself when wiring up the
   InventoryConfiguration) can leave a 0-byte folder marker at the

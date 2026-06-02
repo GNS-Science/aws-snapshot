@@ -1098,3 +1098,163 @@ def divergence_counts(
         "backup_minus_source": bms,
         "available": True,
     }
+
+
+def _build_divergence_sample_query(
+    source_table: str,
+    source_filter: str,
+    backup_table: str,
+    backup_filter: str,
+    limit: int = 10,
+) -> str:
+    """Sample up to ``limit`` keys present in source but missing from backup.
+
+    Companion to ``_build_divergence_count_query``. Single-direction
+    (class-1 red): keys ``divergence_counts`` is counting in
+    ``source_minus_backup``. The health-report orchestrator head_objects
+    each returned key against the live backup bucket to distinguish
+    "still missing" from "auto-healed since snapshot".
+    """
+    return f"""
+WITH src AS (
+  SELECT key
+  FROM {source_table}
+  WHERE {source_filter}
+),
+bkp AS (
+  SELECT key
+  FROM {backup_table}
+  WHERE {backup_filter}
+)
+SELECT s.key
+FROM src s
+LEFT JOIN bkp b ON s.key = b.key
+WHERE b.key IS NULL
+LIMIT {limit}
+""".strip()
+
+
+def _read_key_list_result(s3_client, result_location: str) -> list[str]:
+    """Read a single-column CSV result (header 'key', then N data rows)."""
+    import csv as csv_mod
+
+    bucket, key = _parse_s3_uri(result_location)
+    body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+    reader = csv_mod.reader(body.splitlines())
+    keys: list[str] = []
+    first = True
+    for row in reader:
+        if first:
+            first = False
+            continue
+        if row and row[0]:
+            keys.append(row[0])
+    return keys
+
+
+def divergence_sample_keys(
+    session: boto3.Session,
+    source_alias: str,
+    source_bucket: str,
+    backup_bucket: str,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Sample up to ``limit`` keys present in source but missing from backup.
+
+    Companion to ``divergence_counts`` for ADR-009 class-1 RED tagging.
+    When ``divergence_counts`` reports ``source_minus_backup > 0``, this
+    function returns up to ``limit`` actual key names so the daily
+    health-report orchestrator can ``head_object`` each against the live
+    backup bucket and tag the class-1 RED signal with "(still missing
+    live)" or "(auto-healed since snapshot)".
+
+    Reuses the same Glue database, table naming, workgroup output
+    location, version filter, and operational-prefix exclusion list as
+    ``divergence_counts``, so cost accounting and behaviour stay
+    consistent.
+
+    Returns::
+
+        {
+            "source_dt": str | None,
+            "backup_dt": str | None,
+            "source_minus_backup_sample": list[str],
+            "sample_size": int,    # actual returned count (may be < limit)
+            "available": bool,     # True iff both partitions queried
+        }
+    """
+    s3_client = session.client("s3")
+    athena_client = session.client("athena")
+    account_id = session.client("sts").get_caller_identity()["Account"]
+    control_bucket = f"nzshm-backup-inventory-{account_id}"
+    database = "nzshm_backup_inventory"
+    output_location = (
+        f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
+    )
+
+    source_prefix = _expected_prefix(source_alias, "source", source_bucket)
+    backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
+
+    try:
+        source_dt, source_hive = _latest_inventory_partition(
+            s3_client, control_bucket, source_prefix
+        )
+    except ValueError:
+        source_dt, source_hive = None, None
+    try:
+        backup_dt, backup_hive = _latest_inventory_partition(
+            s3_client, control_bucket, backup_prefix
+        )
+    except ValueError:
+        backup_dt, backup_hive = None, None
+
+    if source_dt is None or backup_dt is None:
+        return {
+            "source_dt": source_dt,
+            "backup_dt": backup_dt,
+            "source_minus_backup_sample": [],
+            "sample_size": 0,
+            "available": False,
+        }
+    assert source_hive is not None and backup_hive is not None  # for type narrowing
+
+    source_table = _table_name(source_alias, "source", source_bucket)
+    backup_table = _table_name(source_alias, "backup", backup_bucket)
+
+    _ensure_inventory_table(
+        athena_client, output_location, database, source_table, control_bucket, source_hive
+    )
+    _ensure_inventory_table(
+        athena_client, output_location, database, backup_table, control_bucket, backup_hive
+    )
+    _ensure_partition(
+        athena_client, output_location, database, source_table, control_bucket,
+        source_hive, source_dt,
+    )
+    _ensure_partition(
+        athena_client, output_location, database, backup_table, control_bucket,
+        backup_hive, backup_dt,
+    )
+
+    prefix_exclusions = " AND ".join(f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES)
+    source_filter = f"dt = '{source_dt}' AND {_VERSION_FILTER}"
+    backup_filter = (
+        f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {prefix_exclusions}"
+    )
+
+    query = _build_divergence_sample_query(
+        source_table, source_filter, backup_table, backup_filter, limit
+    )
+    qid = _run_athena_query(athena_client, query, output_location, database=database)
+    _wait_for_athena_query(athena_client, qid)
+    exec_info = athena_client.get_query_execution(QueryExecutionId=qid)
+    result_loc = exec_info["QueryExecution"]["ResultConfiguration"]["OutputLocation"]
+    keys = _read_key_list_result(s3_client, result_loc)
+
+    return {
+        "source_dt": source_dt,
+        "backup_dt": backup_dt,
+        "source_minus_backup_sample": keys,
+        "sample_size": len(keys),
+        "available": True,
+    }
