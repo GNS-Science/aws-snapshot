@@ -1790,13 +1790,21 @@ here as the runbook progresses; this entry stays 🚧 until Cycle 3
 - [x] Schedule shift: 14:45/15:45 NZT → 09:45/10:45 NZT for backups/report
       (T+60 gap). Toys added to daily backup EventBridge schedule alongside
       the four prod sources. Confirmed firing daily 2026-05-28 → 2026-06-01.
-- [ ] Cycle 1 / class-1 RED: Wed 2026-06-03 — scenarios 1 + 3 applied
-      2026-06-02; expected to land in Wed 10:45 NZT scheduled report.
+- [x] Cycle 1 / class-1 RED ✅ 2026-06-03 — scenarios 1 + 3 applied
+      2026-06-02; both manifested as expected in the morning's two
+      reports. Detailed validation outcome appended to Step 21 below.
       Scenarios 2 + 4 (restore-test failure) deferred (Option C — class-1
       restore-test path proven by production canary historically).
-- [ ] Cycle 2 / class-2 ℹ + class-3 yellow: TBD
+- [ ] Cycle 2 / class-2 ℹ + class-3 yellow: TBD (will start once
+      Cycle 1 teardown completes and toy-inv returns to GREEN)
 - [ ] Cycle 3 / GREEN recovery: TBD
-- [ ] Teardown: TBD
+- [ ] Teardown: scenario 1 has self-healed (09:45 backup re-synced
+      file-01.txt; will clear from divergence count on next fresh
+      snapshot ~07:00 NZT Thu). Scenario 3 still needs manual
+      teardown — re-install source-side S3 Inventory configuration on
+      `nzshm22-toy2-inv-source` via `backup setup inventory --source
+      toy-inv`. Until then `inventory_age` will keep climbing and
+      eventually fall off entirely.
 
 **Runbook:** `docs/operations/health-signal-validation-sandbox.md`.
 
@@ -1862,3 +1870,59 @@ all auto-healed). ruff + mypy clean.
    extra Athena. Decide if the head-check tag alone proves enough.
 
 **Branch / commit:** `feature/adr-009-signal-taxonomy` @ `038e797`.
+
+### Validation outcome — Wed 2026-06-03
+
+The "same snapshot, both tags in one day" test from the
+implementation plan was executed cleanly. The morning inventory
+snapshot (delivered ~07:00 NZT 2026-06-03) was the first one carrying
+the Scenario 1 backup-side deletion that was applied 2026-06-02
+~10:30 NZT.
+
+| Time NZT | Trigger | inventory_age | toy-inv tag observed | Notes |
+|---|---|---|---|---|
+| ~09:05 | Local `backup health-report run` (pre-09:45 backup) | 26.0h | `(still missing live, sampled 1)` | head_object 404 confirmed file-01 absent on disk |
+| ~09:18 | Manual Lambda invoke (still pre-backup) | 26.x | `(still missing live, sampled 1)` | Delivered to Slack + SES; confirms Lambda path uses new code |
+| ~09:45 | Scheduled backup runs | — | — | Re-syncs `data/file-01.txt` from source → backup |
+| ~10:45 | Scheduled health-report Lambda fires | 27.6h | `(auto-healed since snapshot, sampled 1)` | head_object 200 confirmed file-01 now present; row stayed RED per audit-framing decision |
+
+Build times:
+
+- Local report (with head_object on RED source): **325.0s**
+- Scheduled Lambda after warm Athena cache: **282.3s**
+- Compares to yesterday's no-divergence smoke test (246.9s); ~30-80s
+  added when one source has a class-1 RED, in line with the
+  implementation plan's ~60s/source estimate.
+
+Decisions confirmed live:
+
+1. **Row stays RED in both live-state cases.** Audit framing preserved
+   per ADR-009 — the gap existed at snapshot time, and that fact
+   deserves operator attention regardless of whether a subsequent
+   backup has repaired it. The tag is the clarifying detail, not a
+   downgrade.
+2. **Sample size 10 is sufficient.** Only one key was missing in this
+   scenario, so the sample returned a single entry. The mixed-state
+   path (`X still missing, Y auto-healed`) is exercised by unit tests
+   but not yet by a real production event. Acceptable; the formatter
+   handles all three branches.
+3. **No regression on green sources.** toshi/ths/static/weka all
+   GREEN throughout both reports — head-check code is correctly
+   gated on `backup_missing > 0` and does not run on healthy sources.
+
+Scenario 3 (source-side Inventory configuration deleted) manifests
+more subtly than the runbook predicted: rather than the
+*"no inventory data available"* class-1 RED the runbook claimed, the
+existing snapshot just keeps aging. toy-inv's `inventory_age` was
+**26.0h** at 09:05 NZT today and **27.6h** at the 10:45 fire — under
+the 30h freshness threshold, so no class-3 yellow fired. By Thursday
+morning the snapshot will be > 30h old and yellow would fire — except
+the class-1 RED from Scenario 1 (or its aftermath) will continue to
+dominate the row. The "no inventory data available" red would only
+fire if the snapshot becomes entirely unreadable, which doesn't
+happen organically. This is a finding worth recording in the runbook
+(Scenario 3's expected signal is *staleness yellow over time*, not
+immediate red).
+
+ADR-009 class-1 RED with live-state tagging is now operationally
+complete in production.
