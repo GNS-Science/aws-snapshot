@@ -102,7 +102,7 @@ Each per-source row gains a "notes" section for class-2 lines. Example:
 
 🔴 ths      inventory_age=3h   restore=FAILED
               ℹ source grew by 0 objects today
-              ⚠ backup is missing 3 source keys (last copy: 2026-05-23)
+              ⚠ backup is missing 3 source keys (still missing live, sampled 3)
 ```
 
 Subject line / headline reflects only class 1 + class 3 (green/yellow/red);
@@ -185,6 +185,7 @@ an abstract spec.
 | User-guide health-report doc updated for class taxonomy | `docs/user-guide/health-report.md` | Small |
 | Unit tests for new signals + classifier | `tests/test_health_report.py` | Small |
 | Per-source `inventory_enabled` opt-out (no-Inventory floor mode) | `src/nzshm_backup/config/models.py` + `health_report.py` + tests | Small |
+| Class-1 RED head-check tag — `(still missing live)` vs `(auto-healed since snapshot)` | `src/nzshm_backup/athena_inventory.py` (`divergence_sample_keys`) + `health_report.py` + tests | Small |
 
 ## Consequences
 
@@ -199,7 +200,10 @@ an abstract spec.
   unwritten ADR-006 mitigation; this ADR adopts it as deliverable work.
 - **Two extra Athena queries per source per day** — ~$0.01 incremental cost
   per report run if scan bytes stay bounded (same workgroup cap as the
-  existing manifest pipeline).
+  existing manifest pipeline). When class-1 RED fires, one additional
+  small Athena scan + up to 10 S3 `head_object` calls per affected
+  source for the live-state tag (`(still missing live)` /
+  `(auto-healed since snapshot)`). Marginal cost; only on RED days.
 - **Report layout is busier** — one or two additional rows per source for
   class-2 lines. Mitigated by rendering them distinctly so they're scannable
   rather than alarming.

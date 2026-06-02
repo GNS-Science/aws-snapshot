@@ -34,8 +34,8 @@ Bucket layout (single AWS Organization, two accounts):
 ```
 Source account 210987654321          Backup account 123456789012
 ─────────────────────────────        ──────────────────────────────
-nzshm22-toy-inv-source     ────►     bb-toy-inv-s3-src-…-210987654321
-nzshm22-toy-noinv-source   ────►     bb-toy-noinv-s3-src-…-210987654321
+nzshm22-toy2-inv-source     ────►     bb-toy-inv-s3-src-…-210987654321
+nzshm22-toy2-noinv-source   ────►     bb-toy-noinv-s3-src-…-210987654321
 ```
 
 (Backup bucket names embed `source_account_id` per `backup_engine.py:72,81`.)
@@ -85,17 +85,17 @@ In account `210987654321` (source) under `nshm-admin` profile.
 > AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN` first).
 
 ```bash
-aws s3api create-bucket --bucket nzshm22-toy-inv-source \
+aws s3api create-bucket --bucket nzshm22-toy2-inv-source \
   --region ap-southeast-2 \
   --create-bucket-configuration LocationConstraint=ap-southeast-2 \
   --profile nshm-admin
-aws s3api create-bucket --bucket nzshm22-toy-noinv-source \
+aws s3api create-bucket --bucket nzshm22-toy2-noinv-source \
   --region ap-southeast-2 \
   --create-bucket-configuration LocationConstraint=ap-southeast-2 \
   --profile nshm-admin
 
 # Populate each with ~50 small text files
-for B in nzshm22-toy-inv-source nzshm22-toy-noinv-source; do
+for B in nzshm22-toy2-inv-source nzshm22-toy2-noinv-source; do
   for i in $(seq -w 1 50); do
     echo "toy file $i for $B (created $(date -u +%FT%TZ))" \
       | aws s3 cp - "s3://$B/data/file-$i.txt" --profile nshm-admin
@@ -115,7 +115,7 @@ Append to `backup-config.production.yaml` under `sources:`:
   toy-inv:
     display_name: "[SANDBOX] toy-inv (Inventory enabled)"
     s3_buckets:
-      - arn: arn:aws:s3:::nzshm22-toy-inv-source
+      - arn: arn:aws:s3:::nzshm22-toy2-inv-source
         label: src
     source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
     source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
@@ -126,7 +126,7 @@ Append to `backup-config.production.yaml` under `sources:`:
   toy-noinv:
     display_name: "[SANDBOX] toy-noinv (no Inventory)"
     s3_buckets:
-      - arn: arn:aws:s3:::nzshm22-toy-noinv-source
+      - arn: arn:aws:s3:::nzshm22-toy2-noinv-source
         label: src
     source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
     source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
@@ -219,10 +219,10 @@ afternoon). Stack scenarios per cycle to keep iteration to ~48h total.
 
 | # | Action (D₀, before 02:00 UTC) | Source | Expected D₁ report |
 |---|---|---|---|
-| 1 | `aws s3api delete-object --bucket bb-toy-inv-s3-src-…-210987654321 --key data/file-01.txt --version-id <v>` (admin override of the no-delete bucket policy) | `toy-inv` | ⚠ class-1 RED: "backup is missing 1 source keys" |
-| 2 | Strip `s3:GetObject` from the source-account `nzshm-backup-reader` role for `nzshm22-toy-inv-source` | `toy-inv` | ⚠ class-1 RED on restore-test day for `toy-inv`: "restore test exception: AccessDenied" |
-| 3 | Disable the daily inventory producer for `toy-inv` (delete the S3 Inventory configuration on the source bucket) | `toy-inv` | ⚠ class-1 RED: "no inventory data available" (since `inventory_enabled` is true) |
-| 4 | Strip `s3:GetObject` from source role for `nzshm22-toy-noinv-source` | `toy-noinv` | ⚠ class-1 RED on restore-test day for `toy-noinv`: "restore test exception". Confirms restore-test red still fires when inventory_enabled=false. |
+| 1 | `aws s3api delete-object --bucket bb-toy-inv-s3-src-…-210987654321 --key data/file-01.txt --version-id <v>` (admin override of the no-delete bucket policy) | `toy-inv` | ⚠ class-1 RED: `"backup is missing 1 source keys (still missing live, sampled 1)"` on a report run *before* the next 09:45 NZT backup; `"backup is missing 1 source keys (auto-healed since snapshot, sampled 1)"` on a report run *after* — head-check tag reflects live state at report time |
+| 2 | Strip `s3:GetObject` from the source-account `nzshm-backup-reader` role for `nzshm22-toy2-inv-source` | `toy-inv` | ⚠ class-1 RED on restore-test day for `toy-inv`: `"restore test exception: AccessDenied"` |
+| 3 | Disable the daily inventory producer for `toy-inv` (delete the S3 Inventory configuration on the source bucket) | `toy-inv` | ⚠ class-1 RED: `"no inventory data available"` (since `inventory_enabled` is true) |
+| 4 | Strip `s3:GetObject` from source role for `nzshm22-toy2-noinv-source` | `toy-noinv` | ⚠ class-1 RED on restore-test day for `toy-noinv`: `"restore test exception"`. Confirms restore-test red still fires when inventory_enabled=false. |
 
 ### Cycle 2 — class-2 informational ℹ + class-3 yellow
 
@@ -231,8 +231,8 @@ wait one cycle for greens, then:
 
 | # | Action (D₀, before 02:00 UTC) | Source | Expected D₁ report |
 |---|---|---|---|
-| 5 | `aws s3 rm s3://nzshm22-toy-inv-source/data/file-02.txt` (source-side delete; backup retains it per ADR-006) | `toy-inv` | ℹ class-2: "backup has 1 orphans (source-side deletions retained per ADR-006)". Row stays GREEN. |
-| 6 | Add 10 new files: `for i in $(seq 51 60); do echo extra | aws s3 cp - s3://nzshm22-toy-inv-source/data/file-$i.txt; done` | `toy-inv` | ℹ class-2: "source grew by 10 objects vs yesterday (+20.0%)". Row stays GREEN. |
+| 5 | `aws s3 rm s3://nzshm22-toy2-inv-source/data/file-02.txt` (source-side delete; backup retains it per ADR-006) | `toy-inv` | ℹ class-2: "backup has 1 orphans (source-side deletions retained per ADR-006)". Row stays GREEN. |
+| 6 | Add 10 new files: `for i in $(seq 51 60); do echo extra | aws s3 cp - s3://nzshm22-toy2-inv-source/data/file-$i.txt; done` | `toy-inv` | ℹ class-2: "source grew by 10 objects vs yesterday (+20.0%)". Row stays GREEN. |
 | 7 | Skip the daily backup for `toy-inv`: `backup schedule disable --source toy-inv` | `toy-inv` | ⚠ class-3 YELLOW once inventory_age crosses 30h threshold. Row turns YELLOW, not RED. |
 | 8 | (No action) | `toy-noinv` | Steady GREEN with the `ℹ` "inventory disabled" info line. Confirms class-2 info line renders correctly for opted-out sources. |
 
@@ -247,7 +247,7 @@ For each cycle-1 manipulation:
 
 | # | Recovery action |
 |---|---|
-| 1 | `aws s3 cp s3://nzshm22-toy-inv-source/data/file-01.txt s3://bb-toy-inv-s3-src-…-210987654321/data/file-01.txt` |
+| 1 | `aws s3 cp s3://nzshm22-toy2-inv-source/data/file-01.txt s3://bb-toy-inv-s3-src-…-210987654321/data/file-01.txt` |
 | 2 | Re-run `backup setup iam source-roles --source toy-inv` to restore the policy |
 | 3 | Re-run `backup setup inventory --source toy-inv` to reinstall the Inventory config |
 | 4 | Re-run `backup setup iam source-roles --source toy-noinv` |
@@ -277,7 +277,7 @@ $EDITOR backup-config.production.yaml   # delete toy-inv + toy-noinv sources
 uv run backup config push --stage prod
 
 # 3. Empty + delete buckets (source + backup sides)
-for B in nzshm22-toy-inv-source nzshm22-toy-noinv-source; do
+for B in nzshm22-toy2-inv-source nzshm22-toy2-noinv-source; do
   AWS_PROFILE=nshm-admin aws s3 rm "s3://$B" --recursive
   AWS_PROFILE=nshm-admin aws s3api delete-bucket --bucket "$B"
 done
