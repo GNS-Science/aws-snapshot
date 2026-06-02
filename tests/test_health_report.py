@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+from botocore.exceptions import ClientError
+
 from nzshm_backup import health_report as hr
 from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
 
@@ -535,6 +537,285 @@ def test_build_report_orphan_count_is_class2_info(
     assert src.backup_orphan_count == 12_431
     assert src.overall == "green"
     assert any("orphans" in n for n in src.info_notes)
+
+
+# ---------------------------------------------------------------------------
+# Head-check tag on class-1 RED (still missing / auto-healed / mixed)
+# ---------------------------------------------------------------------------
+
+
+def _client_error(code: str) -> ClientError:
+    """Construct a botocore.ClientError with the given S3 error code."""
+    return ClientError({"Error": {"Code": code, "Message": code}}, "HeadObject")
+
+
+def _session_with_head_object_results(results: list[object]) -> MagicMock:
+    """Build a session whose s3 client's head_object iterates through results.
+
+    Each entry is either an exception (raised on that call) or a dict
+    (returned on that call). Useful for mixed still-missing/auto-healed
+    scenarios.
+    """
+    session = MagicMock()
+    s3 = MagicMock()
+
+    iter_results = iter(results)
+
+    def _head(**kwargs):
+        item = next(iter_results)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    s3.head_object.side_effect = _head
+    session.client.return_value = s3
+    return session
+
+
+@patch("nzshm_backup.health_report.divergence_sample_keys")
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_tags_still_missing_when_head_object_404s(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
+    mock_div, mock_sample,
+):
+    """Sampled keys all 404 → tag '(still missing live, sampled N)'.
+
+    Scenario A from the head-check validation: backup-side delete has
+    not yet been re-synced; live state still shows the gap.
+    """
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 1,
+        "backup_minus_source": 0,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+    mock_sample.return_value = {
+        "available": True,
+        "source_minus_backup_sample": ["data/file-01.txt"],
+        "sample_size": 1,
+    }
+
+    session = _session_with_head_object_results([_client_error("404")])
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.overall == "red"
+    assert any(
+        "missing 1 source keys (still missing live, sampled 1)" in n
+        for n in src.notes
+    ), src.notes
+
+
+@patch("nzshm_backup.health_report.divergence_sample_keys")
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_tags_auto_healed_when_head_object_200s(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
+    mock_div, mock_sample,
+):
+    """Sampled keys all 200 → tag '(auto-healed since snapshot, sampled N)'.
+
+    Scenario AA from the head-check validation: backup has re-synced
+    between the snapshot and the report; the gap exists on disk no
+    more, but the audit signal still fires RED (decision: keep RED).
+    """
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 1,
+        "backup_minus_source": 0,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+    mock_sample.return_value = {
+        "available": True,
+        "source_minus_backup_sample": ["data/file-01.txt"],
+        "sample_size": 1,
+    }
+
+    session = _session_with_head_object_results([{"ContentLength": 71}])
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.overall == "red"  # decision: keep RED regardless of live state
+    assert any(
+        "missing 1 source keys (auto-healed since snapshot, sampled 1)" in n
+        for n in src.notes
+    ), src.notes
+
+
+@patch("nzshm_backup.health_report.divergence_sample_keys")
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_tags_mixed_when_some_still_missing_some_healed(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
+    mock_div, mock_sample,
+):
+    """Partial recovery → tag '(X still missing, Y auto-healed, sampled N)'."""
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 4,
+        "backup_minus_source": 0,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+    mock_sample.return_value = {
+        "available": True,
+        "source_minus_backup_sample": [
+            "data/file-01.txt", "data/file-02.txt",
+            "data/file-03.txt", "data/file-04.txt",
+        ],
+        "sample_size": 4,
+    }
+
+    # 1 still missing, 3 auto-healed
+    session = _session_with_head_object_results([
+        _client_error("404"),
+        {"ContentLength": 71},
+        {"ContentLength": 72},
+        {"ContentLength": 73},
+    ])
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.overall == "red"
+    assert any(
+        "missing 4 source keys (1 still missing, 3 auto-healed, sampled 4)" in n
+        for n in src.notes
+    ), src.notes
+
+
+@patch("nzshm_backup.health_report.divergence_sample_keys")
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_falls_back_to_untagged_when_sample_query_fails(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
+    mock_div, mock_sample,
+):
+    """A failed sample query falls back to the original untagged note shape.
+
+    The class-1 RED still fires (it's based on the count, not the sample);
+    only the live-state tag is missing. A separate diagnostic note records
+    why the sample failed.
+    """
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 3,
+        "backup_minus_source": 0,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+    mock_sample.side_effect = RuntimeError("athena workgroup unavailable")
+
+    session = MagicMock()
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.overall == "red"
+    # Untagged note shape — no '(...)' suffix
+    assert any(
+        n == "backup is missing 3 source keys" for n in src.notes
+    ), src.notes
+    # Diagnostic note recording the sample failure
+    assert any("head-check sample failed" in n for n in src.notes), src.notes
+
+
+@patch("nzshm_backup.health_report.divergence_sample_keys")
+@patch("nzshm_backup.health_report.divergence_counts")
+@patch("nzshm_backup.health_report.restore_test_source")
+@patch("nzshm_backup.health_report.count_delta")
+@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
+@patch("nzshm_backup.health_report.get_status_dict")
+@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+def test_build_report_classifier_unchanged_when_all_auto_healed(
+    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
+    mock_div, mock_sample,
+):
+    """Decision: row stays RED even when all sampled keys are auto-healed.
+
+    Audit framing per ADR-009 — the gap existed at snapshot time and
+    deserves operator attention regardless of self-heal.
+    """
+    config, source_cfg = _build_report_mocks()
+    config.sources = {"toshi": source_cfg}
+    mock_status.return_value = {"toshi": {}}
+    mock_inv.return_value = {
+        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
+    }
+    mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
+    mock_div.return_value = {
+        "available": True,
+        "source_minus_backup": 5,
+        "backup_minus_source": 0,
+        "source_dt": "2026-05-25-00-00",
+        "backup_dt": "2026-05-25-00-00",
+    }
+    mock_sample.return_value = {
+        "available": True,
+        "source_minus_backup_sample": [
+            "data/file-01.txt", "data/file-02.txt", "data/file-03.txt",
+            "data/file-04.txt", "data/file-05.txt",
+        ],
+        "sample_size": 5,
+    }
+
+    # All 5 succeed → auto_healed = 5, still_missing = 0
+    session = _session_with_head_object_results([
+        {"ContentLength": 71}, {"ContentLength": 72}, {"ContentLength": 73},
+        {"ContentLength": 74}, {"ContentLength": 75},
+    ])
+    report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
+
+    src = report.sources[0]
+    assert src.overall == "red", (
+        "Decision: keep RED even when all sampled keys are auto-healed "
+        "— audit framing trumps live state."
+    )
 
 
 @patch("nzshm_backup.health_report.divergence_counts")

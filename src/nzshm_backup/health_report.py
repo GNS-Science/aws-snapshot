@@ -37,8 +37,13 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 import boto3
+from botocore.exceptions import ClientError
 
-from nzshm_backup.athena_inventory import count_delta, divergence_counts
+from nzshm_backup.athena_inventory import (
+    count_delta,
+    divergence_counts,
+    divergence_sample_keys,
+)
 from nzshm_backup.commands.status import get_status_dict
 from nzshm_backup.commands.test import RestoreTestResult, restore_test_source
 from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
@@ -304,8 +309,62 @@ def build_report(
                         backup_missing = divergence["source_minus_backup"]
                         backup_orphans = divergence["backup_minus_source"]
                         if backup_missing and backup_missing > 0:
+                            # Sample up to 10 missing keys and head_object each
+                            # against the live backup bucket. Distinguishes a
+                            # *current* gap from one already self-healed by a
+                            # subsequent backup run. Note that the row stays
+                            # RED either way — the tag is for operator
+                            # clarity, not classification (audit framing per
+                            # ADR-009).
+                            still_missing = 0
+                            auto_healed = 0
+                            sample_size = 0
+                            try:
+                                sample = divergence_sample_keys(
+                                    session, alias, source_bucket, backup_bucket,
+                                    limit=10,
+                                )
+                                if sample.get("available"):
+                                    backup_s3 = session.client("s3")
+                                    for k in sample.get(
+                                        "source_minus_backup_sample", []
+                                    ):
+                                        sample_size += 1
+                                        try:
+                                            backup_s3.head_object(
+                                                Bucket=backup_bucket, Key=k
+                                            )
+                                            auto_healed += 1
+                                        except ClientError as e:
+                                            code = e.response.get("Error", {}).get(
+                                                "Code", ""
+                                            )
+                                            if code in ("404", "NoSuchKey", "NotFound"):
+                                                still_missing += 1
+                                            else:
+                                                raise
+                            except Exception as e:
+                                notes.append(f"head-check sample failed: {e}")
+
+                            if sample_size == 0:
+                                tag = ""
+                            elif still_missing == sample_size:
+                                tag = (
+                                    f" (still missing live, sampled {sample_size})"
+                                )
+                            elif auto_healed == sample_size:
+                                tag = (
+                                    " (auto-healed since snapshot, "
+                                    f"sampled {sample_size})"
+                                )
+                            else:
+                                tag = (
+                                    f" ({still_missing} still missing, "
+                                    f"{auto_healed} auto-healed, "
+                                    f"sampled {sample_size})"
+                                )
                             notes.append(
-                                f"backup is missing {backup_missing:,} source keys"
+                                f"backup is missing {backup_missing:,} source keys{tag}"
                             )
                         if backup_orphans and backup_orphans > 0:
                             info_notes.append(
