@@ -1784,10 +1784,81 @@ here as the runbook progresses; this entry stays 🚧 until Cycle 3
 
 **Per-cycle outcomes (to be filled in as observed):**
 
-- [ ] Cycle 0 / baseline: Thu 2026-05-28 14:30 NZT — both toys GREEN
-- [ ] Cycle 1 / class-1 RED: Fri 2026-05-29 14:30 NZT — 4 scenarios fire as expected
+- [x] Cycle 0 / baseline: Thu 2026-05-28 — both toys GREEN at 09:00 NZT manual
+      run (`inventory_age=2.0h` for toy-inv; `inventory_age=n/a` + `ℹ inventory
+      disabled` for toy-noinv)
+- [x] Schedule shift: 14:45/15:45 NZT → 09:45/10:45 NZT for backups/report
+      (T+60 gap). Toys added to daily backup EventBridge schedule alongside
+      the four prod sources. Confirmed firing daily 2026-05-28 → 2026-06-01.
+- [ ] Cycle 1 / class-1 RED: Wed 2026-06-03 — scenarios 1 + 3 applied
+      2026-06-02; expected to land in Wed 10:45 NZT scheduled report.
+      Scenarios 2 + 4 (restore-test failure) deferred (Option C — class-1
+      restore-test path proven by production canary historically).
 - [ ] Cycle 2 / class-2 ℹ + class-3 yellow: TBD
 - [ ] Cycle 3 / GREEN recovery: TBD
 - [ ] Teardown: TBD
 
 **Runbook:** `docs/operations/health-signal-validation-sandbox.md`.
+
+## Step 21 — Head-check tag for class-1 backup-missing-source-keys (#26) ✅ 2026-06-02
+
+**Context:** Toy sandbox Cycle-1 surfaced a real operator-experience
+tension: the daily health report fires ⚠ RED at 10:45 NZT for
+divergences that the 09:45 NZT backup has already self-healed. The
+signal is correct as an *audit record* (gap existed at snapshot time)
+but confusing as a *current-state monitor* (gap is already repaired by
+the time the operator reads the alert).
+
+**Change shipped:** when `divergence_counts` reports
+`source_minus_backup > 0`, the report now samples up to 10 missing
+keys via a new `athena_inventory.divergence_sample_keys` Athena helper
+and `head_object`-checks each against the live backup bucket. The
+existing class-1 RED note gains a tag distinguishing the three live
+states. Row stays RED in all cases — audit framing per ADR-009.
+
+| Live state of sampled keys | Tag |
+|---|---|
+| All 404 | `"(still missing live, sampled N)"` |
+| All 200 | `"(auto-healed since snapshot, sampled N)"` |
+| Mixed | `"(X still missing, Y auto-healed, sampled N)"` |
+
+**Deploy timeline (2026-06-02 NZT):**
+
+| Time NZT | Action | Result |
+|---|---|---|
+| 12:29:25 | `sls deploy --stage prod` from `feature/adr-009-signal-taxonomy` @ `038e797` | CodeSha256 `+mqaihXXgqtF48IpUmriCSfn1d05xICxMnOdLS2lXf4=` |
+| 12:32:12 | Manual smoke-test invoke | RequestId `935c71bb-…` |
+| 12:36:21 | Slack delivery ok (status=200), SNS publish ok (MessageId `8d6ae6d7-…`), END+REPORT (Duration 246.9s, Memory 160/1024 MB) | ✓ |
+
+No head-check tag fired during the smoke test — today's snapshot
+(delivered ~07:00 NZT) pre-dates the 10:30 NZT scenario-1 deletion, so
+divergence = 0 and the head-check branch wasn't exercised. The new
+behaviour will only be visible from the Wed 2026-06-03 morning
+inventory snapshot onwards. Wed 09:00 NZT manual run and Wed 10:45 NZT
+scheduled fire will exercise the `(still missing live)` and
+`(auto-healed since snapshot)` paths respectively — same snapshot,
+different live state, two different tags in one day.
+
+**Tests:** 430 passing (was 422; +8 new tests covering query shape,
+result parser, four head-check branches, classifier-unchanged when
+all auto-healed). ruff + mypy clean.
+
+**Code paths added:**
+
+- `src/nzshm_backup/athena_inventory.py` — `divergence_sample_keys()`,
+  `_build_divergence_sample_query()`, `_read_key_list_result()`
+- `src/nzshm_backup/health_report.py` — head_object loop + tagged
+  note-append inside the existing divergence block
+- Classifier in `_classify_source()` unchanged: `backup_missing > 0`
+  still reds the row regardless of head-check result
+
+**Deferred follow-ups** (decided during planning):
+
+1. Move main report to pre-backup time (e.g. 09:00 NZT). Trade: loses
+   restore-test recency. Decide after operator experience with the
+   head-check tags.
+2. Silent post-backup verification EventBridge rule. Requires
+   `BackupTask.verify_only` field + `send()` suppression logic. ~$7/mo
+   extra Athena. Decide if the head-check tag alone proves enough.
+
+**Branch / commit:** `feature/adr-009-signal-taxonomy` @ `038e797`.
