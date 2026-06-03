@@ -221,7 +221,7 @@ afternoon). Stack scenarios per cycle to keep iteration to ~48h total.
 |---|---|---|---|
 | 1 | `aws s3api delete-object --bucket bb-toy-inv-s3-src-…-210987654321 --key data/file-01.txt --version-id <v>` (admin override of the no-delete bucket policy) | `toy-inv` | ⚠ class-1 RED: `"backup is missing 1 source keys (still missing live, sampled 1)"` on a report run *before* the next 09:45 NZT backup; `"backup is missing 1 source keys (auto-healed since snapshot, sampled 1)"` on a report run *after* — head-check tag reflects live state at report time |
 | 2 | Strip `s3:GetObject` from the source-account `nzshm-backup-reader` role for `nzshm22-toy2-inv-source` | `toy-inv` | ⚠ class-1 RED on restore-test day for `toy-inv`: `"restore test exception: AccessDenied"` |
-| 3 | Disable the daily inventory producer for `toy-inv` (delete the S3 Inventory configuration on the source bucket) | `toy-inv` | ⚠ class-1 RED: `"no inventory data available"` (since `inventory_enabled` is true) |
+| 3 | Disable the daily inventory producer for `toy-inv` (delete the S3 Inventory configuration on the source bucket) | `toy-inv` | **⚠ class-3 YELLOW (creeping)**: the existing snapshot remains readable indefinitely — only its age grows. ~26h on D₁, ~50h on D₂, ~74h on D₃; crosses the 30h threshold ~13h after the last delivery and fires `inventory_stale=true → yellow`. The runbook originally predicted `"no inventory data available"` class-1 RED here, but that signal only fires when the snapshot becomes *unreadable* (e.g. delete-objects on the control bucket), not when delivery stops. Observed live 2026-06-03 — see PROD-DEPLOY-LOG Step 21 validation outcome. |
 | 4 | Strip `s3:GetObject` from source role for `nzshm22-toy2-noinv-source` | `toy-noinv` | ⚠ class-1 RED on restore-test day for `toy-noinv`: `"restore test exception"`. Confirms restore-test red still fires when inventory_enabled=false. |
 
 ### Cycle 2 — class-2 informational ℹ + class-3 yellow
@@ -247,9 +247,9 @@ For each cycle-1 manipulation:
 
 | # | Recovery action |
 |---|---|
-| 1 | `aws s3 cp s3://nzshm22-toy2-inv-source/data/file-01.txt s3://bb-toy-inv-s3-src-…-210987654321/data/file-01.txt` |
+| 1 | `aws s3 cp s3://nzshm22-toy2-inv-source/data/file-01.txt s3://bb-toy-inv-s3-src-…-210987654321/data/file-01.txt` *(usually unnecessary — the next scheduled `backup run` for toy-inv re-syncs the missing key from source automatically; only do this if you want the RED to clear immediately rather than on the next backup cycle)* |
 | 2 | Re-run `backup setup iam source-roles --source toy-inv` to restore the policy |
-| 3 | Re-run `backup setup inventory --source toy-inv` to reinstall the Inventory config |
+| 3 | Re-run `backup setup inventory --source toy-inv` to reinstall the Inventory configuration. *(This is the only Scenario-3 cleanup step that matters — the existing snapshot keeps aging indefinitely until a new manifest delivers from the reinstalled configuration. Allow ~24h after re-install for the first new manifest to land.)* |
 | 4 | Re-run `backup setup iam source-roles --source toy-noinv` |
 
 For cycle-2:
