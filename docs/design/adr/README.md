@@ -9,6 +9,12 @@ choices in the backup system.
 - [ADR-002: Inventory-based manifest pipeline for THS](ADR-002-inventory-manifest-pipeline-ths.md)
 - [ADR-003: Run-state transition model](ADR-003-run-state-transition-model.md)
 - [ADR-004: Scheduler health observability](ADR-004-scheduler-health-observability.md)
+- [ADR-005: Daily health report (slow-path observability)](ADR-005-weekly-health-report.md)
+- [ADR-006: Simplify backup-bucket lifecycle (drop Deep Archive)](ADR-006-simplify-storage-tiers-drop-deep-archive.md)
+- [ADR-007: Harden inventory control-plane bucket](ADR-007-harden-inventory-control-plane-bucket.md)
+- [ADR-008: Notification recipients managed from YAML](ADR-008-notification-recipients-managed-from-yaml.md)
+- [ADR-009: Health-check signal-class taxonomy](ADR-009-health-check-measurement-model.md)
+- [ADR-010: Source-bucket Intelligent-Tiering (toshi + ths only)](ADR-010-source-bucket-intelligent-tiering.md) — **Proposed**
 
 ## ADR Template
 
