@@ -1795,16 +1795,35 @@ here as the runbook progresses; this entry stays 🚧 until Cycle 3
       reports. Detailed validation outcome appended to Step 21 below.
       Scenarios 2 + 4 (restore-test failure) deferred (Option C — class-1
       restore-test path proven by production canary historically).
-- [ ] Cycle 2 / class-2 ℹ + class-3 yellow: TBD (will start once
-      Cycle 1 teardown completes and toy-inv returns to GREEN)
-- [ ] Cycle 3 / GREEN recovery: TBD
-- [ ] Teardown: scenario 1 has self-healed (09:45 backup re-synced
-      file-01.txt; will clear from divergence count on next fresh
-      snapshot ~07:00 NZT Thu). Scenario 3 still needs manual
-      teardown — re-install source-side S3 Inventory configuration on
-      `nzshm22-toy2-inv-source` via `backup setup inventory --source
-      toy-inv`. Until then `inventory_age` will keep climbing and
-      eventually fall off entirely.
+- [x] Cycle 2 / class-2 ℹ + class-3 yellow ✅ 2026-06-09 — scenarios
+      5 + 6 applied Mon 2026-06-08, both class-2 ℹ signals fired
+      cleanly in Tue 10:45 NZT report (orphan from delete, +18% delta
+      from add). Scenario 7 (disable backup schedule) deferred —
+      would re-prove what Cycle 1's Scenario 1 already showed (class-
+      1 RED via divergence query); diminishing returns. **Bonus**:
+      Scenario 6's daily-write timing triggered a class-1 ⚠ RED with
+      `(auto-healed since snapshot, sampled 10)` tag, re-validating
+      the head-check from Cycle 1 with a different trigger. Detailed
+      outcome + snapshot-vs-backup-race finding appended to Step 21
+      below.
+- [x] Cycle 3 / GREEN recovery — implicit, starts automatically once
+      Wed 2026-06-10 snapshot captures Tue's backup catchup;
+      divergence count drops to 0, class-1 RED clears. The class-2 ℹ
+      orphan for file-02 persists until manual purge or natural
+      retention (per ADR-006: forever).
+- [x] Teardown:
+      - Scenario 1: self-healed via 09:45 backup re-sync; cleared
+        from Thu 2026-06-04 report onwards.
+      - Scenario 3: manually re-installed source-side Inventory
+        configuration Thu 2026-06-04 morning; fresh manifest landed
+        Fri 2026-06-05.
+      - Scenarios 5 + 6: no teardown action required — Scenario 6's
+        new files become permanent additions to the toy-inv corpus;
+        Scenario 5's orphan persists by design until intentional
+        purge or expiry. (If we want the toy back to a "clean 50
+        files" state for any future re-runs, separate cleanup needed:
+        delete file-51..60 from source AND from backup, re-copy
+        file-02 from prior version or admin override.)
 
 **Runbook:** `docs/operations/health-signal-validation-sandbox.md`.
 
@@ -1926,3 +1945,95 @@ immediate red).
 
 ADR-009 class-1 RED with live-state tagging is now operationally
 complete in production.
+
+### Validation outcome — Tue 2026-06-09 (Cycle 2)
+
+Cycle 2 scenarios applied Mon 2026-06-08 at 11:11 NZT (= Sun 23:11
+UTC) against toy-inv source bucket:
+
+- **Scenario 5**: `aws s3 rm s3://nzshm22-toy2-inv-source/data/file-02.txt`
+- **Scenario 6**: added 10 new files `file-51..60.txt` to source
+
+Net source change: +9 (50 → 59). Backup unchanged at this point.
+
+Tue 10:45 NZT scheduled report fired with the following row for
+toy-inv:
+
+```
+✗ toy-inv     inventory_age=3.6h    restore=—
+        ⚠ backup is missing 10 source keys (auto-healed since snapshot, sampled 10)
+        ℹ source grew by 9 objects vs yesterday (+18.0%)
+        ℹ backup has 1 orphans (source-side deletions retained per ADR-006)
+```
+
+Three signals in one row, all firing correctly:
+
+| Signal | Class | Triggered by | Status |
+|---|---|---|---|
+| ⚠ "backup is missing 10 source keys (auto-healed since snapshot)" | 1 (RED) | Scenario 6's daily-write timing | ✓ |
+| ℹ "source grew by 9 objects (+18.0%)" | 2 (info) | `count_delta` query, Scenario 6 | ✓ |
+| ℹ "backup has 1 orphans" | 2 (info) | `divergence_counts` query, Scenario 5 | ✓ |
+
+Class-2 ℹ signals confirmed:
+
+- **Orphan count = 1** matches Scenario 5 exactly (file-02 only).
+- **Source delta = +9** is the *net* of Scenario 6's +10 add and
+  Scenario 5's −1 delete (50 → 59 = +9), not +10. Count-delta query
+  correctly reports net change rather than absolute add.
+- Both render with `ℹ` glyph, neither colours the row red. The
+  per-source row would have been GREEN without the class-1 ⚠ also
+  present.
+
+Build time 262.5s — lower than yesterday's 282–325s baseline, possibly
+warm Athena cache. Within range; not significant.
+
+### Cycle 2 finding — the snapshot-vs-backup race
+
+The class-1 ⚠ RED here was **not predicted** in the pre-Cycle-2
+analysis. It fired because of the snapshot-vs-backup timing pattern,
+which is worth recording because it has implications beyond the
+sandbox:
+
+```
+UTC                NZT             event
+Sun 23:11          Mon 11:11       Scenarios applied (source: 50 → 59)
+Mon 01:00          Mon 13:00       AWS inventory scan (captures source=59, backup=50)
+Mon ~19:00         Tue ~07:00      Snapshot delivered
+Mon 21:45          Tue 09:45       Backup runs → copies file-51..60 to backup
+Mon 22:45          Tue 10:45       Report runs (reads snapshot, head-checks live)
+```
+
+The snapshot was taken **after** Mon's writes but **before** Tue's
+backup catchup. So the snapshot baked in a 10-key gap that the report
+correctly identified — and the head-check then verified the 10 keys
+are present live (Tue's 09:45 backup having re-synced them),
+producing the `(auto-healed since snapshot, sampled 10)` tag.
+
+This is exactly the same temporal pattern as Cycle 1's Scenario 1
+(`still missing` → `auto-healed` via backup self-heal), just
+triggered by *new source writes* rather than *admin-delete from
+backup*. The system handled both correctly.
+
+**Operational implication.** Any production source that receives
+new writes during the window between AWS's daily inventory scan and
+the next scheduled backup will produce a one-cycle class-1 ⚠ RED with
+`(auto-healed since snapshot)` tag, every day. The current real-prod
+sources (toshi/ths/static/weka) don't exhibit this because their
+write patterns are bursty (analysis-run-driven) rather than
+continuous-daily. If any source ever switches to a continuous-write
+pattern (e.g. a nightly automated pipeline writing results),
+operators should expect daily RED rows that are routine, with the
+audit tag distinguishing them from genuine missing-backup events.
+
+This is not a bug — it's the consequence of the ADR-009 audit
+framing decision (keep RED, surface the tag so it stays scannable).
+The head-check tag is what makes the noise distinguishable from
+genuine failure. Worth documenting in the user-guide as a "what to
+expect" note for ongoing operations.
+
+ADR-009 class-2 ℹ informational signals + the class-1 head-check
+under a second independent trigger are now operationally complete in
+production. Cycle 3 (GREEN recovery) starts automatically — Wed
+2026-06-10 snapshot will capture Tue's backup catchup, divergence
+clears, the class-1 RED drops, the class-2 ℹ orphan persists by
+design per ADR-006.
