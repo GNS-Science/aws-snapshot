@@ -38,25 +38,51 @@ AWS Backup tells you "your job succeeded." It does not tell you
 the one this system closes — and it's the one that matters during a
 real disaster.
 
-### What AWS Backup cannot detect
+### What's outside AWS Backup's contract — signals only the data owner can verify
 
-- **A backup that's silently missing source keys.** AWS Backup
-  considers a snapshot complete if the job finishes without error;
-  it does not compare contents to source. If a permissions glitch,
-  bucket-policy mistake, or upstream bug causes 10 % of keys to be
-  silently skipped, AWS Backup reports green forever.
-- **A backup pipeline that has stopped delivering inventories.** If
-  the underlying mechanism (in our case, S3 Inventory) goes dark,
-  AWS Backup has no equivalent signal — the next failed job is the
-  first you'd hear about it.
-- **Intentional source deletion impact.** If a team deletes 6 TB of
-  source data, AWS Backup keeps the snapshot indefinitely (or
-  expires it per retention policy) — with no informational signal
-  that source state has changed materially.
+AWS Backup is well-engineered software built by AWS engineers who
+understand the storage layer intimately. We're not claiming it's
+broken or inadequate at what it does. Its contract is well-defined:
+
+> *"We copied what was visible to us at scan time, using your
+> configured IAM grants, in the storage classes you specified."*
+
+That contract is honoured robustly. The signals below check a
+**different question** — *"does what was visible at scan time match
+what the application considers correct?"* — which AWS Backup cannot
+answer for us because only the data owner knows the domain semantics
+that determine "correct." None of these failure modes are bugs in
+AWS Backup; they're domain-knowledge gaps that any general-purpose
+snapshot service has to leave to the data owner to close.
+
+- **A backup that's silently missing source keys.** Permissions
+  glitches, bucket-policy conditions, KMS access issues, or upstream
+  processes that fail to deposit some files produce a snapshot that
+  is *internally complete* (the job finished successfully) but
+  *application-incomplete* (10 % of what should be there isn't).
+  AWS Backup correctly reports green — the job did succeed for what
+  it could see — but we'd want to know about the gap. Our
+  `divergence_counts` Athena query compares against an independent
+  source inventory and surfaces a class-1 RED when keys go missing.
+- **A backup pipeline that has stopped delivering inventories.**
+  This one is *our-architecture-specific*: we use S3 Inventory as a
+  signal channel; AWS Backup doesn't use the same channel. So this
+  "gap" is partly self-inflicted by our chosen design. Listed for
+  completeness rather than as a critique of AWS Backup.
+- **Intentional source deletion impact.** When a team deletes 6 TB
+  of source data, AWS Backup faithfully captures the post-delete
+  state (or keeps a pre-delete snapshot per retention) — neither
+  outcome is "wrong," both are decisions for the data owner. Our
+  count_delta signal surfaces *that* the source change happened so
+  an operator can confirm intent rather than wonder if a bug caused
+  the discrepancy.
 - **Backup-side drift from source intent.** Once a deletion-protected
-  snapshot exists, AWS Backup gives you no way to see which keys it
-  carries that no longer exist in source (class-2 orphans). They
-  silently accrue cost without surfacing.
+  snapshot exists, the backup retains keys that no longer exist in
+  source. This is by design (we *want* deletion-protection), but the
+  data owner needs visibility to decide whether to purge the orphans
+  or let them age out. Our class-2 ℹ orphan signal makes that drift
+  visible — not because AWS Backup should automatically clean it up,
+  but because that decision belongs to the data owner.
 
 ### What this system detects
 
