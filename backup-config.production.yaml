@@ -60,6 +60,30 @@ sources:
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
     batch_manifest_mode: inventory
+  # BEGIN TMP
+  # temporary additions for health-signal-validation
+  toy-inv:
+    display_name: "[SANDBOX] toy-inv (Inventory enabled)"
+    s3_buckets:
+      - arn: arn:aws:s3:::nzshm22-toy2-inv-source
+        label: src
+    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    source_account_id: '461564345538'
+    use_s3_batch: false
+    # inventory_enabled: true   # default — left implicit
+
+  toy-noinv:
+    display_name: "[SANDBOX] toy-noinv (no Inventory)"
+    s3_buckets:
+      - arn: arn:aws:s3:::nzshm22-toy2-noinv-source
+        label: src
+    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    source_account_id: '461564345538'
+    use_s3_batch: false
+    inventory_enabled: false      # the whole point of this source
+  # END TMP
 retention:
   hot_days: 30
 restore:
@@ -96,8 +120,6 @@ notifications:
         2: toshi              # Wednesday
         4: static             # Friday
       freshness_threshold_hours: 30.0  # inventory older than this flags YELLOW (pipeline lagging, not the backup itself)
-      delta_pct_threshold: -5.0     # source-count drop ≥ 5% → red
-      delta_abs_threshold: -10000   # OR drop ≥ 10k objects → red (whichever first)
       restore_sample_size: 10       # how many objects to restore for each test
   ses:
     enabled: false

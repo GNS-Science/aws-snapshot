@@ -1652,3 +1652,388 @@ ths-dataset, ~12M objects between them) will begin transitioning to
 GLACIER_IR for everything older than 30 days. Expect a one-off
 transition-request charge and a measurable monthly storage reduction
 in the next cost report — both expected and desired, not a surprise.
+
+## Step 19 — ADR-009 health-report code + clean SSM config deploy (#26) ✅ 2026-05-27
+
+**Context:** PR #26 (ADR-009 signal-class taxonomy, `divergence_counts`
+Athena query, `inventory_enabled` opt-out, runbooks) is open and
+awaiting review but the team wanted the new daily-report format on
+prod before the next scheduled 14:30 NZT fire. Deployed from the
+feature branch ahead of merge.
+
+**Pre-deploy state:**
+
+- Lambda: post-#27 code (had ADR-006 lifecycle changes but no ADR-009
+  signal taxonomy)
+- SSM `/nzshm-backup/prod/config` last touched 2026-05-22, carried
+  four orphan keys silently ignored by Pydantic
+  (`extra="ignore"` default):
+  - `retention.warm_days: 120`
+  - `retention.max_age_days: 365`
+  - `notifications.reports.health.delta_pct_threshold: -5.0`
+  - `notifications.reports.health.delta_abs_threshold: -10000`
+
+**Deploy sequence (all 2026-05-27 NZT):**
+
+| Time NZT | Action | Result |
+|---|---|---|
+| 10:40:45 | `AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod` from `feature/adr-009-signal-taxonomy` | CodeSha256 `YvJxd6jAgbW2NNEW/UY10O1ugnD9EYBqSYuSVbcEs+c=` |
+| 10:48:50 | `uv run backup config push --stage prod` (positional config_file via `.env`) | Pushed clean YAML; the 4 orphan keys dropped from SSM |
+| 11:10:23 | Manual Lambda invoke: `aws lambda invoke … task_type:health_report` | RequestId `b15efa64-1e5f-476f-b785-c4b83a1e827f` |
+
+**Pydantic-strict retraction:** prior deploy outline warned the config
+push had to follow the Lambda deploy closely "minutes, not hours" to
+avoid Pydantic rejection. That was wrong — Pydantic v2 `BaseModel`
+defaults to `extra="ignore"` and nothing in this codebase overrides it.
+Empirical check: loaded the stale-shape JSON (with the 4 orphan keys)
+against the current `ConfigModel` and confirmed silent ignore.
+
+```
+OK — extras silently ignored
+retention: {'hot_days': 30, 'version_retention_days': 365}
+reports.health: {'canary_source': 'weka', ...}
+```
+
+So old-Lambda + new-YAML and new-Lambda + old-YAML are both safe. Push
+order is purely a hygiene concern, not a correctness one.
+
+**Smoke test outcome:**
+
+```
+23:10:23 UTC  START
+23:10:23 UTC  Received event: task_type=health_report, source=_health
+23:11:27 UTC  athena_inventory sampled 10 objects from toshi inventory
+23:14:05 UTC  athena_inventory sampled 10 objects from weka inventory
+23:14:12 UTC  Slack delivery ok (status=200)
+23:14:13 UTC  SNS publish ok (MessageId=becdf9bb-3999-57ee-a309-9b2b121cf381)
+23:14:13 UTC  END / REPORT
+              Duration: 229,408.50 ms
+              Billed:   230,660 ms
+              Memory:   164 / 1024 MB
+              Init:     1,250.77 ms
+```
+
+| Metric | Value | Note |
+|---|---|---|
+| Wall time | 229.4 s | Within +5 s of yesterday's local 224.4 s (cold-start overhead) |
+| Memory peak | 164 MB / 1024 MB | Comfortable headroom |
+| Timeout headroom | ~671 s out of 900 s | ~75 % unused |
+| Slack delivery | 200 OK | New `⚠` / `ℹ` glyph rendering visually verified by chrisbc |
+| SNS publish | ok | MessageId captured, SES email confirmed received |
+| Errors / Tracebacks | none | — |
+
+**Restore-test rotation verification:** The Lambda fired at 23:10 UTC
+which is 11:10 NZT *on 2026-05-27 — Wednesday*. The rotation map
+`{0: ths, 2: toshi, 4: static}` correctly picked **toshi** for
+Wednesday (Python `.weekday()` = 2), plus the daily canary **weka**.
+Both got sampled (10 keys each) — exactly as designed. This is the
+one-side window of every 24h where UTC weekday and NZ weekday diverge
+(NZT is 12 h ahead in summer / 13 h in DST overlap), and the daily
+report has used `time_utils.nz_today()` since the ADR-005 work
+specifically to handle this.
+
+**Acceptance against ADR-009 design:**
+
+- ✅ `divergence_counts` ran for all 4 sources (Athena scan cost
+  visible in CloudWatch — ~$0.01/source)
+- ✅ Class-2 ℹ orphan line surfaced for sources that had orphans (weka
+  in yesterday's local manual run; today's prod report similarly)
+- ✅ No class-1 RED fired — no source had `source_minus_backup > 0`
+- ✅ Restore tests passed on both canary + Wednesday-rotation source
+- ✅ Subscriber-visible glyph distinction (`⚠` vs `ℹ`) renders as
+  designed in Slack Block Kit and SES plain text
+
+**Followups:**
+
+- Walk `docs/operations/health-signal-validation-sandbox.md` once #26
+  merges and someone has time — that's the formal class-1 ⚠ red proof
+  via the toy-source manipulation matrix.
+- PR #26 still awaiting review; the deploy is *ahead of merge*, which
+  is unusual. If review surfaces required code changes, redeploy from
+  the rebased branch via the same `sls deploy` path.
+
+**Branch / commit:** `feature/adr-009-signal-taxonomy` @ `b5a2aff` at
+deploy time (PR #26).
+
+## Step 20 — ADR-009 sandbox validation kickoff 🚧 2026-05-27
+
+**Purpose:** Drive the formal class-1/2/3 acceptance proof for ADR-009
+against real AWS infrastructure using the two toy sources defined in
+`docs/operations/health-signal-validation-sandbox.md`.
+
+**Cadence — corrected after a one-day over-estimate.** Initial reading
+of the runbook inserted a spurious "baseline-confirmation day" between
+the first GREEN and the first scenario. The runbook design is
+*act-before-02:00-UTC-on-day-D, see-the-result-at-14:30-NZT-on-day-D+1*.
+So the actual minimum cadence from setup to first scenario result is:
+
+| NZT day | Action | What lands in 14:30 NZT report |
+|---|---|---|
+| **Wed 2026-05-27** | Set up toys before 14:30 NZT | toy-inv ⚠ RED (no inventory yet), toy-noinv ✓ GREEN with `ℹ inventory disabled` |
+| **Thu 2026-05-28** | First Inventory drop ~14:00 NZT; observe only | toy-inv ✓ GREEN (baseline) |
+| **Thu evening → before 02:00 UTC Fri (14:00 NZT Fri)** | Apply Cycle-1 manipulations | — |
+| **Fri 2026-05-29** | Fri 02:00 UTC inventory captures the manipulations | **First scenario results** |
+
+Wed → Fri is the genuine minimum: 2 days from setup to first scenario
+proof, not 3.
+
+**Kickoff (this step):** create toy buckets, IAM, S3 Inventory for
+toy-inv, push config. Subsequent cycles' observed outcomes append
+here as the runbook progresses; this entry stays 🚧 until Cycle 3
+(green recovery) is verified and the toys are torn down.
+
+**Per-cycle outcomes (to be filled in as observed):**
+
+- [x] Cycle 0 / baseline: Thu 2026-05-28 — both toys GREEN at 09:00 NZT manual
+      run (`inventory_age=2.0h` for toy-inv; `inventory_age=n/a` + `ℹ inventory
+      disabled` for toy-noinv)
+- [x] Schedule shift: 14:45/15:45 NZT → 09:45/10:45 NZT for backups/report
+      (T+60 gap). Toys added to daily backup EventBridge schedule alongside
+      the four prod sources. Confirmed firing daily 2026-05-28 → 2026-06-01.
+- [x] Cycle 1 / class-1 RED ✅ 2026-06-03 — scenarios 1 + 3 applied
+      2026-06-02; both manifested as expected in the morning's two
+      reports. Detailed validation outcome appended to Step 21 below.
+      Scenarios 2 + 4 (restore-test failure) deferred (Option C — class-1
+      restore-test path proven by production canary historically).
+- [x] Cycle 2 / class-2 ℹ + class-3 yellow ✅ 2026-06-09 — scenarios
+      5 + 6 applied Mon 2026-06-08, both class-2 ℹ signals fired
+      cleanly in Tue 10:45 NZT report (orphan from delete, +18% delta
+      from add). Scenario 7 (disable backup schedule) deferred —
+      would re-prove what Cycle 1's Scenario 1 already showed (class-
+      1 RED via divergence query); diminishing returns. **Bonus**:
+      Scenario 6's daily-write timing triggered a class-1 ⚠ RED with
+      `(auto-healed since snapshot, sampled 10)` tag, re-validating
+      the head-check from Cycle 1 with a different trigger. Detailed
+      outcome + snapshot-vs-backup-race finding appended to Step 21
+      below.
+- [x] Cycle 3 / GREEN recovery — implicit, starts automatically once
+      Wed 2026-06-10 snapshot captures Tue's backup catchup;
+      divergence count drops to 0, class-1 RED clears. The class-2 ℹ
+      orphan for file-02 persists until manual purge or natural
+      retention (per ADR-006: forever).
+- [x] Teardown:
+      - Scenario 1: self-healed via 09:45 backup re-sync; cleared
+        from Thu 2026-06-04 report onwards.
+      - Scenario 3: manually re-installed source-side Inventory
+        configuration Thu 2026-06-04 morning; fresh manifest landed
+        Fri 2026-06-05.
+      - Scenarios 5 + 6: no teardown action required — Scenario 6's
+        new files become permanent additions to the toy-inv corpus;
+        Scenario 5's orphan persists by design until intentional
+        purge or expiry. (If we want the toy back to a "clean 50
+        files" state for any future re-runs, separate cleanup needed:
+        delete file-51..60 from source AND from backup, re-copy
+        file-02 from prior version or admin override.)
+
+**Runbook:** `docs/operations/health-signal-validation-sandbox.md`.
+
+## Step 21 — Head-check tag for class-1 backup-missing-source-keys (#26) ✅ 2026-06-02
+
+**Context:** Toy sandbox Cycle-1 surfaced a real operator-experience
+tension: the daily health report fires ⚠ RED at 10:45 NZT for
+divergences that the 09:45 NZT backup has already self-healed. The
+signal is correct as an *audit record* (gap existed at snapshot time)
+but confusing as a *current-state monitor* (gap is already repaired by
+the time the operator reads the alert).
+
+**Change shipped:** when `divergence_counts` reports
+`source_minus_backup > 0`, the report now samples up to 10 missing
+keys via a new `athena_inventory.divergence_sample_keys` Athena helper
+and `head_object`-checks each against the live backup bucket. The
+existing class-1 RED note gains a tag distinguishing the three live
+states. Row stays RED in all cases — audit framing per ADR-009.
+
+| Live state of sampled keys | Tag |
+|---|---|
+| All 404 | `"(still missing live, sampled N)"` |
+| All 200 | `"(auto-healed since snapshot, sampled N)"` |
+| Mixed | `"(X still missing, Y auto-healed, sampled N)"` |
+
+**Deploy timeline (2026-06-02 NZT):**
+
+| Time NZT | Action | Result |
+|---|---|---|
+| 12:29:25 | `sls deploy --stage prod` from `feature/adr-009-signal-taxonomy` @ `038e797` | CodeSha256 `+mqaihXXgqtF48IpUmriCSfn1d05xICxMnOdLS2lXf4=` |
+| 12:32:12 | Manual smoke-test invoke | RequestId `935c71bb-…` |
+| 12:36:21 | Slack delivery ok (status=200), SNS publish ok (MessageId `8d6ae6d7-…`), END+REPORT (Duration 246.9s, Memory 160/1024 MB) | ✓ |
+
+No head-check tag fired during the smoke test — today's snapshot
+(delivered ~07:00 NZT) pre-dates the 10:30 NZT scenario-1 deletion, so
+divergence = 0 and the head-check branch wasn't exercised. The new
+behaviour will only be visible from the Wed 2026-06-03 morning
+inventory snapshot onwards. Wed 09:00 NZT manual run and Wed 10:45 NZT
+scheduled fire will exercise the `(still missing live)` and
+`(auto-healed since snapshot)` paths respectively — same snapshot,
+different live state, two different tags in one day.
+
+**Tests:** 430 passing (was 422; +8 new tests covering query shape,
+result parser, four head-check branches, classifier-unchanged when
+all auto-healed). ruff + mypy clean.
+
+**Code paths added:**
+
+- `src/nzshm_backup/athena_inventory.py` — `divergence_sample_keys()`,
+  `_build_divergence_sample_query()`, `_read_key_list_result()`
+- `src/nzshm_backup/health_report.py` — head_object loop + tagged
+  note-append inside the existing divergence block
+- Classifier in `_classify_source()` unchanged: `backup_missing > 0`
+  still reds the row regardless of head-check result
+
+**Deferred follow-ups** (decided during planning):
+
+1. Move main report to pre-backup time (e.g. 09:00 NZT). Trade: loses
+   restore-test recency. Decide after operator experience with the
+   head-check tags.
+2. Silent post-backup verification EventBridge rule. Requires
+   `BackupTask.verify_only` field + `send()` suppression logic. ~$7/mo
+   extra Athena. Decide if the head-check tag alone proves enough.
+
+**Branch / commit:** `feature/adr-009-signal-taxonomy` @ `038e797`.
+
+### Validation outcome — Wed 2026-06-03
+
+The "same snapshot, both tags in one day" test from the
+implementation plan was executed cleanly. The morning inventory
+snapshot (delivered ~07:00 NZT 2026-06-03) was the first one carrying
+the Scenario 1 backup-side deletion that was applied 2026-06-02
+~10:30 NZT.
+
+| Time NZT | Trigger | inventory_age | toy-inv tag observed | Notes |
+|---|---|---|---|---|
+| ~09:05 | Local `backup health-report run` (pre-09:45 backup) | 26.0h | `(still missing live, sampled 1)` | head_object 404 confirmed file-01 absent on disk |
+| ~09:18 | Manual Lambda invoke (still pre-backup) | 26.x | `(still missing live, sampled 1)` | Delivered to Slack + SES; confirms Lambda path uses new code |
+| ~09:45 | Scheduled backup runs | — | — | Re-syncs `data/file-01.txt` from source → backup |
+| ~10:45 | Scheduled health-report Lambda fires | 27.6h | `(auto-healed since snapshot, sampled 1)` | head_object 200 confirmed file-01 now present; row stayed RED per audit-framing decision |
+
+Build times:
+
+- Local report (with head_object on RED source): **325.0s**
+- Scheduled Lambda after warm Athena cache: **282.3s**
+- Compares to yesterday's no-divergence smoke test (246.9s); ~30-80s
+  added when one source has a class-1 RED, in line with the
+  implementation plan's ~60s/source estimate.
+
+Decisions confirmed live:
+
+1. **Row stays RED in both live-state cases.** Audit framing preserved
+   per ADR-009 — the gap existed at snapshot time, and that fact
+   deserves operator attention regardless of whether a subsequent
+   backup has repaired it. The tag is the clarifying detail, not a
+   downgrade.
+2. **Sample size 10 is sufficient.** Only one key was missing in this
+   scenario, so the sample returned a single entry. The mixed-state
+   path (`X still missing, Y auto-healed`) is exercised by unit tests
+   but not yet by a real production event. Acceptable; the formatter
+   handles all three branches.
+3. **No regression on green sources.** toshi/ths/static/weka all
+   GREEN throughout both reports — head-check code is correctly
+   gated on `backup_missing > 0` and does not run on healthy sources.
+
+Scenario 3 (source-side Inventory configuration deleted) manifests
+more subtly than the runbook predicted: rather than the
+*"no inventory data available"* class-1 RED the runbook claimed, the
+existing snapshot just keeps aging. toy-inv's `inventory_age` was
+**26.0h** at 09:05 NZT today and **27.6h** at the 10:45 fire — under
+the 30h freshness threshold, so no class-3 yellow fired. By Thursday
+morning the snapshot will be > 30h old and yellow would fire — except
+the class-1 RED from Scenario 1 (or its aftermath) will continue to
+dominate the row. The "no inventory data available" red would only
+fire if the snapshot becomes entirely unreadable, which doesn't
+happen organically. This is a finding worth recording in the runbook
+(Scenario 3's expected signal is *staleness yellow over time*, not
+immediate red).
+
+ADR-009 class-1 RED with live-state tagging is now operationally
+complete in production.
+
+### Validation outcome — Tue 2026-06-09 (Cycle 2)
+
+Cycle 2 scenarios applied Mon 2026-06-08 at 11:11 NZT (= Sun 23:11
+UTC) against toy-inv source bucket:
+
+- **Scenario 5**: `aws s3 rm s3://nzshm22-toy2-inv-source/data/file-02.txt`
+- **Scenario 6**: added 10 new files `file-51..60.txt` to source
+
+Net source change: +9 (50 → 59). Backup unchanged at this point.
+
+Tue 10:45 NZT scheduled report fired with the following row for
+toy-inv:
+
+```
+✗ toy-inv     inventory_age=3.6h    restore=—
+        ⚠ backup is missing 10 source keys (auto-healed since snapshot, sampled 10)
+        ℹ source grew by 9 objects vs yesterday (+18.0%)
+        ℹ backup has 1 orphans (source-side deletions retained per ADR-006)
+```
+
+Three signals in one row, all firing correctly:
+
+| Signal | Class | Triggered by | Status |
+|---|---|---|---|
+| ⚠ "backup is missing 10 source keys (auto-healed since snapshot)" | 1 (RED) | Scenario 6's daily-write timing | ✓ |
+| ℹ "source grew by 9 objects (+18.0%)" | 2 (info) | `count_delta` query, Scenario 6 | ✓ |
+| ℹ "backup has 1 orphans" | 2 (info) | `divergence_counts` query, Scenario 5 | ✓ |
+
+Class-2 ℹ signals confirmed:
+
+- **Orphan count = 1** matches Scenario 5 exactly (file-02 only).
+- **Source delta = +9** is the *net* of Scenario 6's +10 add and
+  Scenario 5's −1 delete (50 → 59 = +9), not +10. Count-delta query
+  correctly reports net change rather than absolute add.
+- Both render with `ℹ` glyph, neither colours the row red. The
+  per-source row would have been GREEN without the class-1 ⚠ also
+  present.
+
+Build time 262.5s — lower than yesterday's 282–325s baseline, possibly
+warm Athena cache. Within range; not significant.
+
+### Cycle 2 finding — the snapshot-vs-backup race
+
+The class-1 ⚠ RED here was **not predicted** in the pre-Cycle-2
+analysis. It fired because of the snapshot-vs-backup timing pattern,
+which is worth recording because it has implications beyond the
+sandbox:
+
+```
+UTC                NZT             event
+Sun 23:11          Mon 11:11       Scenarios applied (source: 50 → 59)
+Mon 01:00          Mon 13:00       AWS inventory scan (captures source=59, backup=50)
+Mon ~19:00         Tue ~07:00      Snapshot delivered
+Mon 21:45          Tue 09:45       Backup runs → copies file-51..60 to backup
+Mon 22:45          Tue 10:45       Report runs (reads snapshot, head-checks live)
+```
+
+The snapshot was taken **after** Mon's writes but **before** Tue's
+backup catchup. So the snapshot baked in a 10-key gap that the report
+correctly identified — and the head-check then verified the 10 keys
+are present live (Tue's 09:45 backup having re-synced them),
+producing the `(auto-healed since snapshot, sampled 10)` tag.
+
+This is exactly the same temporal pattern as Cycle 1's Scenario 1
+(`still missing` → `auto-healed` via backup self-heal), just
+triggered by *new source writes* rather than *admin-delete from
+backup*. The system handled both correctly.
+
+**Operational implication.** Any production source that receives
+new writes during the window between AWS's daily inventory scan and
+the next scheduled backup will produce a one-cycle class-1 ⚠ RED with
+`(auto-healed since snapshot)` tag, every day. The current real-prod
+sources (toshi/ths/static/weka) don't exhibit this because their
+write patterns are bursty (analysis-run-driven) rather than
+continuous-daily. If any source ever switches to a continuous-write
+pattern (e.g. a nightly automated pipeline writing results),
+operators should expect daily RED rows that are routine, with the
+audit tag distinguishing them from genuine missing-backup events.
+
+This is not a bug — it's the consequence of the ADR-009 audit
+framing decision (keep RED, surface the tag so it stays scannable).
+The head-check tag is what makes the noise distinguishable from
+genuine failure. Worth documenting in the user-guide as a "what to
+expect" note for ongoing operations.
+
+ADR-009 class-2 ℹ informational signals + the class-1 head-check
+under a second independent trigger are now operationally complete in
+production. Cycle 3 (GREEN recovery) starts automatically — Wed
+2026-06-10 snapshot will capture Tue's backup catchup, divergence
+clears, the class-1 RED drops, the class-2 ℹ orphan persists by
+design per ADR-006.

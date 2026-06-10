@@ -6,6 +6,35 @@ All notable changes to this project will be documented here.
 
 ### Changed (breaking — config schema)
 
+- **Daily health report — class-1 backup-missing-source-keys signal + class-2
+  reclassification of source-count delta** (ADR-009 / #23). Single Athena
+  `FULL OUTER JOIN` query (`divergence_counts`) returns both directions of
+  source-vs-backup divergence in one scan. `source_minus_backup > 0` is now
+  the class-1 red signal that means the backup system has actually failed;
+  `backup_minus_source > 0` is class-2 informational (orphans from
+  source-side deletions retained per ADR-006). The previous day-over-day
+  source-count delta is reclassified from red to class-2 informational,
+  and the `delta_pct_threshold` / `delta_abs_threshold` keys are removed
+  from `HealthReportConfig` and the production YAML — they no longer apply.
+  Report layout grows distinct `⚠` (warnings) and `ℹ` (informational)
+  sub-lines per source row.
+- **`SourceConfig.inventory_enabled` (default true)** lets a source opt
+  out of the S3 Inventory + Athena pipeline. When false the daily report
+  skips inventory-age, divergence, and count-delta for that source and
+  the classifier no longer reds on missing inventory data — restore test
+  becomes the dominant red signal. Used by the sandbox validation
+  runbook to exercise the "no Inventory" floor; also a fit for small
+  config buckets where the daily Athena cost isn't worth standing up.
+  A Pydantic `@model_validator` rejects the inconsistent combination
+  `inventory_enabled: false` + `batch_manifest_mode: inventory` at
+  config-load time — the Batch path needs Inventory to build its
+  manifest, so the opt-out flag must come with `batch_manifest_mode:
+  inline` (or `use_s3_batch: false`).
+- **New runbook**: `docs/operations/purge-from-backup.md` — out-of-band
+  procedure for removing class-2 orphans when retention is no longer
+  desired. Small-list (`aws s3api delete-objects`) and large-list
+  (S3 Batch with version-scoped manifest) paths; #24 is a candidate
+  large-list use case.
 - **Simplify backup-bucket lifecycle to two tiers, no expiry** (ADR-006 / #17).
   The lifecycle policy now has a single Standard → Glacier Instant Retrieval
   transition at `hot_days` (default 30) and backup objects are retained
@@ -16,11 +45,58 @@ All notable changes to this project will be documented here.
 - **Removed retention config keys**: `warm_days`, `cold_days`, and
   `max_age_days` no longer exist on `RetentionConfig` or `LifecycleConfig`.
   Remove them from any `backup-config.*.yaml`. ADR-006 mitigations
-  (object-count delta health signal, manual-purge runbook) are tracked under
-  ADR-009 / #23.
+  (object-count delta health signal, manual-purge runbook) have been
+  implemented under ADR-009 / #23 (see above).
 
 ### Fixed
 
+- **Class-1 RED divergence note tagged with live-state head-check** (ADR-009).
+  When `divergence_counts` reports `source_minus_backup > 0`, the report
+  now samples up to 10 missing keys via `athena_inventory.divergence_sample_keys`
+  and `head_object`-checks each against the live backup bucket. The existing
+  RED note gains a tag:
+  - All sampled keys 404 → `"(still missing live, sampled N)"` — the gap
+    is current; backup hasn't re-synced yet.
+  - All sampled keys 200 → `"(auto-healed since snapshot, sampled N)"` —
+    the inventory snapshot captured a gap that a subsequent backup run
+    has already repaired. Row stays RED (audit framing preserved per
+    ADR-009 — the gap existed at snapshot time and deserves operator
+    attention regardless).
+  - Mixed → `"(X still missing, Y auto-healed, sampled N)"`.
+  Closes the operator-experience gap surfaced by the toy-inv sandbox
+  Cycle-1 validation: the daily report could fire RED at 10:45 NZT for
+  divergences that the 09:45 NZT backup had already self-healed,
+  leaving operators chasing non-issues. A failed sample query falls
+  back to the original untagged note shape + a separate
+  `"head-check sample failed: ..."` diagnostic note. Only the class-1
+  (source-minus-backup) direction is verified; class-2 orphans remain
+  count-only.
+- **`_latest_object_ts` skips 0-byte placeholder objects** in the inventory
+  freshness check. Setup-inventory (or AWS itself when wiring up the
+  InventoryConfiguration) can leave a 0-byte folder marker at the
+  destination prefix before any real inventory data has been delivered.
+  Previously its LastModified counted as a valid freshness signal,
+  silently masking the class-1 "no inventory data available" red — a
+  newly-configured source appeared GREEN until first real delivery (~18 h
+  later). Caught by the toy-inv sandbox source on 2026-05-27: today's
+  15:45 NZT report came back 6/6 GREEN when toy-inv should have been
+  RED. Real inventory artifacts (manifest.json / manifest.checksum /
+  parquet) are always >0 bytes, so the size filter doesn't change
+  behaviour for healthy production sources.
+- **`backup config push` auto-upgrades to SSM Advanced tier when needed.**
+  The serialised config blob exceeded the 4 KB Standard-tier limit once
+  two toy sources were added for ADR-009 sandbox validation; push would
+  fail with `ValidationException`. Now selects `Tier="Advanced"` when
+  the payload is > 4 KB and reports the chosen tier in the success
+  message. Advanced costs ~$0.05/parameter/month; upgrade is one-way
+  per parameter.
+- **`load_dotenv()` now runs at CLI module-import time**, not inside
+  the `@app.callback`. The previous ordering meant `BACKUP_CONFIG_PATH`
+  from `.env` was not visible to typer `Option(os.getenv(...))`
+  defaults — those evaluate at function-definition time during
+  subcommand import, which happens *before* `@app.callback` runs.
+  Operators were forced to pass `--config` explicitly on every
+  command. Caught during ADR-009 sandbox setup walkthrough.
 - **Lambda IAM: scoped `s3:DeleteObject` / `s3:DeleteBucket` for restore-test
   temp buckets** (2026-05-22). The role's deliberate "no delete on backup
   buckets" stance meant the daily health-report Lambda silently failed to

@@ -105,8 +105,6 @@ class HealthReportConfig(BaseModel):
         default_factory=lambda: {0: "ths", 2: "toshi", 4: "static"}
     )
     freshness_threshold_hours: float = 30.0
-    delta_pct_threshold: float = -5.0  # source-count drop ≥ 5% (negative) → red
-    delta_abs_threshold: int = -10_000  # source-count drop ≥ 10k objects → red
     restore_sample_size: int = 10
 
 
@@ -174,6 +172,41 @@ class SourceConfig(BaseModel):
         "'inline' lists source+backup buckets live; "
         "'inventory' diffs latest S3 Inventory snapshots.",
     )
+    inventory_enabled: bool = Field(
+        True,
+        description="Whether this source has S3 Inventory configured on both source and "
+        "backup buckets. When False, the daily health report skips the inventory-age, "
+        "divergence, and count-delta signals for this source — restore test (and PITR "
+        "if DynamoDB tables are present) become the dominant signals. Default True "
+        "matches every production source; set False only for sources where the daily "
+        "Athena cost or Inventory pipeline isn't worth standing up (e.g. very small "
+        "config buckets, validation toys). Incompatible with "
+        "batch_manifest_mode='inventory' — the Batch path requires Inventory to "
+        "build its object-list manifest. Use 'inline' there if you opt out.",
+    )
+
+    @model_validator(mode="after")
+    def validate_inventory_consistency(self) -> "SourceConfig":
+        """Reject the silent-misconfig combination ``inventory_enabled=False``
+        + ``batch_manifest_mode='inventory'``.
+
+        The Batch manifest-preparation path with mode ``inventory`` reads S3
+        Inventory snapshots to build its object list. Declaring
+        ``inventory_enabled=False`` for the same source asserts the source
+        has no Inventory pipeline — which contradicts what the Batch path
+        needs. Caught at config load time so the backup job doesn't fail
+        opaquely at runtime.
+        """
+        if not self.inventory_enabled and self.batch_manifest_mode == "inventory":
+            raise ValueError(
+                "inventory_enabled=False is incompatible with "
+                "batch_manifest_mode='inventory' — the Batch manifest-prep "
+                "path requires S3 Inventory but inventory_enabled=False "
+                "asserts the source has none. Either enable Inventory "
+                "(inventory_enabled=True) or switch the Batch mode to "
+                "'inline'."
+            )
+        return self
 
     def get_backup_bucket_name(
         self, bucket_label: str, region: str, account_id: str, source_key: str

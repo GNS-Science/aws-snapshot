@@ -5,8 +5,14 @@ import os
 import typer
 from dotenv import load_dotenv
 
-from nzshm_backup import __version__
-from nzshm_backup.state import _state
+# Load .env BEFORE any subcommand modules are imported. Subcommand
+# typer.Option defaults that use os.getenv(...) are evaluated at
+# module-import time, so loading .env inside the @app.callback would be
+# too late — the defaults would already have captured the unloaded env.
+load_dotenv()
+
+from nzshm_backup import __version__  # noqa: E402
+from nzshm_backup.state import _state  # noqa: E402
 
 app = typer.Typer(
     name="backup",
@@ -55,7 +61,10 @@ def main(
     version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ):
     """NSHM Backup Solution - Manage AWS backups for ToshiAPI and THS datasets."""
-    load_dotenv()  # loads .env from cwd if present (before any config/AWS ops)
+    # load_dotenv() already ran at module import (see top of file). This
+    # second call is idempotent and kept so that .env changes since import
+    # (rare; mostly testing) are picked up.
+    load_dotenv()
 
     if version:
         typer.echo(f"backup {__version__}")

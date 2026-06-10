@@ -163,32 +163,33 @@ wait time.
 
 ## Mitigations
 
-1. **Daily object-count delta check** (folded into ADR-005 health
-   report). For each source the daily report compares
-   `source.object_count` against the previous day's value (already
-   available from S3 Inventory). Drops exceeding a configurable
-   threshold (default: 5% or 10,000 objects, whichever is larger) are
-   flagged loud in the Slack/email message. The goal is not to block
-   the backup — accidental deletions are exactly what we want to keep
-   backing up around — but to ensure a human notices within 24 hours
-   that a large drop occurred and can decide whether it was
-   intentional.
+Both mitigations were superseded / implemented under
+[ADR-009](ADR-009-health-check-measurement-model.md) (#23):
 
-2. **Documented manual-purge runbook**
-   (`docs/operations/purge-from-backup.md`, to be written). Describes
-   the out-of-band admin process for intentionally removing identified
-   garbage from a backup bucket: required IAM credentials, the
-   recommended command pattern (S3 Batch Operations with a
-   manually-prepared manifest of keys to delete), the verification
-   step (cross-check that source state matches expectation before
-   issuing deletes), and the post-purge audit trail. This is
-   deliberately a manual, friction-laden process — it should not feel
-   routine.
+1. **Visibility of source-side deletions.** ADR-009 introduces an
+   asymmetric pair of source-vs-backup divergence signals:
+   - `source - backup` (class 1, red) — backup is incomplete; the
+     system has actually failed.
+   - `backup - source` (class 2, informational) — orphan accumulation
+     from source-side deletions; not an alarm.
 
-Together these give the system the property: deletions are not
-silent (mitigation 1) and there is a documented way to act on them
-(mitigation 2), but no daily code path is empowered to remove backup
-data on its own.
+   The original ADR-006 mit. 1 (a single `count_delta` threshold firing
+   red on day-over-day source-count drops) is reclassified to class-2
+   informational by ADR-009 — it was measuring the wrong thing for a
+   delete-protected system. Operators see the same data, just no
+   longer rendered as an alarm.
+
+2. **Manual-purge runbook** — written as
+   [`docs/operations/purge-from-backup.md`](../../operations/purge-from-backup.md)
+   under ADR-009. Covers required IAM credentials, the small-list
+   (`aws s3api delete-objects`) and large-list (S3 Batch) command
+   patterns, the verification step, and the audit trail. Deliberately
+   manual and friction-laden — not routine.
+
+Together these give the system the property: orphans are visible
+(mitigation 1, now class-2 info) and there is a documented way to act
+on them (mitigation 2), but no daily code path is empowered to remove
+backup data on its own.
 
 ## Alternatives considered
 

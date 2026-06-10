@@ -21,13 +21,23 @@ Per source, every day:
 - **Backup state** — last run status (skipped / submitted / failed),
   recent S3 Batch jobs, DynamoDB exports.
 - **Inventory freshness** — most recent S3 Inventory report's age. Stale
-  inventory means the diff query is running against old data.
-- **Object-count delta** — source-bucket object count today vs yesterday
-  (Athena `COUNT(*)` against the two latest inventory partitions). A
-  large drop is the only loud signal of an intentional source deletion;
-  see ADR-006 mitigation 1.
+  inventory means the diff query is running against old data
+  (*class 3 → yellow*).
+- **Source-vs-backup divergence** — single Athena query (see
+  [ADR-009](../design/adr/ADR-009-health-check-measurement-model.md))
+  returning two counts in one scan:
+  - `source_minus_backup`: keys source has that backup doesn't —
+    *class 1 → red*, the backup system has actually failed.
+  - `backup_minus_source`: orphan keys backup retains after source-side
+    deletions — *class 2 → informational*. See
+    [purge-from-backup.md](../operations/purge-from-backup.md) for the
+    out-of-band removal procedure.
+- **Source-count delta vs yesterday** — *class 2 → informational only*
+  after ADR-009 (previously red). Surfaces cleanups and growth events
+  without alarming.
 - **DynamoDB PITR** — per configured table, confirms point-in-time
-  recovery is enabled and reports the latest restorable timestamp.
+  recovery is enabled and reports the latest restorable timestamp
+  (*class 1 → red* if disabled).
 
 For one or two sources each day:
 
@@ -80,16 +90,17 @@ Overall: GREEN  (4/4 sources healthy)
 Build time: 132.3s
 
 Per source:
-  ✓ toshi       inventory_age=3.5h      delta=+0 (+0.0%)            restore=—
-  ✓ ths         inventory_age=3.5h      delta=+0 (+0.0%)            restore=—
-  ✓ static      inventory_age=3.5h      delta=+0 (+0.0%)            restore=—
-  ✓ weka        inventory_age=3.5h      delta=+0 (+0.0%)            restore=passed
+  ✓ toshi       inventory_age=3.5h      restore=—
+        ℹ backup has 12,431 orphans (source-side deletions retained per ADR-006)
+  ✓ ths         inventory_age=3.5h      restore=—
+  ✓ static      inventory_age=3.5h      restore=—
+        ℹ source grew by 47 objects vs yesterday (+0.0%)
+  ✓ weka        inventory_age=3.5h      restore=passed
 
 Configuration:
   Canary (daily): weka
   Today's rotated source: —
   Freshness threshold: 30.0h
-  Delta thresholds: -10,000 absolute or -5.0% (whichever crossed first)
 ```
 
 Per-source line:
@@ -98,12 +109,19 @@ Per-source line:
 - `inventory_age=<N>h` — hours since the most recent S3 Inventory report
   was delivered for this source. `n/a` means no inventory data
   available.
-- `delta=<N> (<P>%)` — today's source object count minus yesterday's
-  (raw + percent). `+0` is the steady-state for immutable scientific
-  data.
 - `restore=passed|failed|—` — restore-test outcome. `—` means this
   source wasn't tested today (not the canary and not in today's
   rotation).
+
+Indented sub-lines below the per-source line follow the ADR-009 signal
+taxonomy:
+
+- `⚠ <text>` — class-1/class-3 issues affecting the row's status (a
+  failed restore-test, a stale inventory, **backup-missing-source-keys**,
+  PITR disabled).
+- `ℹ <text>` — class-2 informational notes (source-count delta, backup
+  orphan accumulation). Never change the row colour; safe to scan past
+  unless investigating something specific.
 
 Headline subject line:
 `NSHM backup health 2026-05-21 — GREEN (3/4)` — scan-friendly so you
@@ -116,11 +134,14 @@ can tell at a glance whether to open the message.
 Each source rolls up to a single status; the report's overall status is
 the worst per-source status.
 
+Status colour comes from the [ADR-009](../design/adr/ADR-009-health-check-measurement-model.md)
+class taxonomy:
+
 | Status | Condition |
 |---|---|
-| **🟢 Green** | All signals normal. |
-| **🟡 Yellow** | Inventory is older than 30h (default) but present. |
-| **🔴 Red** | Any of: restore test failed; PITR disabled on a configured DynamoDB table; inventory completely missing; object-count drop ≥ 5% or ≥ 10,000 objects. |
+| **🟢 Green** | All class-1 signals nominal and inventory is fresh. Class-2 informational lines may still appear in the body. |
+| **🟡 Yellow** | Inventory is older than 30h (class 3) but present, and no class-1 signal fires. |
+| **🔴 Red** | Any class-1 signal: restore test failed; PITR disabled on a configured DynamoDB table; inventory completely missing; **backup is missing keys that source has**. |
 
 ### When you see red — investigate-by-signal table
 
@@ -128,9 +149,19 @@ the worst per-source status.
 |---|---|---|
 | `restore=failed` | Cross-account credentials expired; backup bucket data corrupted; Athena scan-bytes quota hit | CloudWatch logs for the backup Lambda; `backup test restore --source <name>` locally |
 | `inventory_age=n/a` | S3 Inventory disabled on source/backup bucket; control-plane bucket lost | `docs/operations/inventory-bucket-recovery.md` |
-| Large `delta=-N` drop | Intentional source deletion; bug in source pipeline silently deleted data | Source bucket history; confirm with source-data owner before touching backup |
+| `⚠ backup is missing N source keys (still missing live, sampled K)` | Last `backup run` failed silently or skipped these keys; cross-account read role lost permission; manifest pipeline regression; the sampled keys are *currently* absent from the backup bucket | Run `backup status`, then `backup run --source <name> --dry-run` to see what the next sync would do — likely the next backup will repair the gap |
+| `⚠ backup is missing N source keys (auto-healed since snapshot, sampled K)` | Same root cause as above, but a subsequent backup run has already re-synced the sampled keys. Signal is *historical* — the gap existed when the inventory snapshot was taken but is no longer on disk. Audit framing: investigate the *cause* (why was the gap there?) rather than the current state. | Check CloudWatch logs for the time between snapshot delivery and the next backup — what happened? `aws s3api get-object-versions` on the affected keys may show the delete-and-recreate timing |
+| `⚠ backup is missing N source keys (X still missing, Y auto-healed, sampled K)` | Partial recovery — some sampled keys auto-healed, others still gone live | Same as the still-missing case for the X live-gap keys; investigate the Y auto-healed cause separately |
 | PITR disabled | Someone disabled PITR in the source account; PITR-watcher Lambda failed to re-enable | `aws dynamodb describe-continuous-backups --table-name <t>`; SSM parameter for pitr-watcher |
 | All sources red simultaneously | Notification path itself is fine but the backup account/network is broken | Check console; check `backup status` |
+
+### When you see a class-2 informational line
+
+| Info line | What it means | When to act |
+|---|---|---|
+| `ℹ source grew by N objects vs yesterday` | Normal day-over-day source-side change. | Investigate only if N is unexpectedly large for the source. |
+| `ℹ source dropped by N objects vs yesterday` | Source-side cleanup or pipeline change. | Confirm with the source-data owner; if intentional, no action needed (backup retains the keys per ADR-006). |
+| `ℹ backup has N orphans (source-side deletions retained per ADR-006)` | Steady-state — backup is keeping deleted source keys. | Decide whether to leave (default) or run [purge-from-backup.md](../operations/purge-from-backup.md). |
 
 When in doubt: run `backup health-report run` manually with prod
 credentials to reproduce. The CLI prints the same content the email
@@ -191,8 +222,6 @@ notifications:
         2: toshi                  # Wednesday
         4: static                 # Friday
       freshness_threshold_hours: 30.0
-      delta_pct_threshold: -5.0   # source-count drop ≥ 5% → red
-      delta_abs_threshold: -10000 # OR drop ≥ 10k objects → red (first to cross wins)
       restore_sample_size: 10
 ```
 
@@ -200,10 +229,14 @@ notifications:
 |---|---|---|
 | `canary_source` | `weka` | Source restore-tested *every* day. Pick the smallest one. |
 | `rotation_by_weekday` | `{0: ths, 2: toshi, 4: static}` | Additional source per weekday (0=Mon … 6=Sun). |
-| `freshness_threshold_hours` | `30.0` | Inventory age above this flags **yellow**. |
-| `delta_pct_threshold` | `-5.0` | Source-count drop ≥ this % flags **red**. Must be negative. |
-| `delta_abs_threshold` | `-10000` | OR drop ≥ this absolute count flags red. First to cross wins. |
+| `freshness_threshold_hours` | `30.0` | Inventory age above this flags **yellow** (class 3). |
 | `restore_sample_size` | `10` | Objects sampled per restore test. Larger = slower + more confidence. |
+
+> The previous `delta_pct_threshold` / `delta_abs_threshold` knobs were
+> removed under [ADR-009](../design/adr/ADR-009-health-check-measurement-model.md)
+> — the source-count delta is now informational only, not a red signal,
+> so the thresholds no longer apply. Remove them from your YAML when
+> upgrading; Pydantic will reject the unknown keys.
 
 Defaults are baked into `src/nzshm_backup/health_report.py`; the YAML
 overrides are read with `getattr` fallback so omitting the block is
@@ -213,6 +246,32 @@ To **disable** a rotation day, remove the map entry (only the canary
 runs that day). To **add** a Saturday test, add `5: <source-alias>`.
 The source alias must exist under the top-level `sources:` block or the
 entry is silently ignored.
+
+### Per-source opt-out: `inventory_enabled`
+
+Set `inventory_enabled: false` on a `SourceConfig` to declare that the
+source intentionally has no S3 Inventory pipeline:
+
+```yaml
+sources:
+  toy-noinv:
+    inventory_enabled: false   # default true
+    s3_buckets: [...]
+```
+
+When false:
+
+- `inventory_age` / `freshness` / `divergence` / `count_delta` are all
+  **skipped** for this source (no Athena calls, no false-positive red)
+- The row carries a single `ℹ` info line: *"inventory disabled for this
+  source — restore test is the dominant signal"*
+- The row reds only on **restore-test failure** or **PITR disabled**
+- Default `true` preserves existing behaviour for every production source
+
+Use this for sources where the daily Inventory cost or pipeline isn't
+worth standing up — small config buckets, validation toys, etc. For
+production datasets, leave it `true`: Inventory is the cheapest way to
+catch silent backup-side data loss at scale.
 
 ---
 
@@ -264,6 +323,47 @@ uv run backup health-report run --send --topic-arn arn:aws:sns:...
 `secretsmanager:GetSecretValue` on the relevant resources, or the
 Lambda's IAM role at runtime. The deployed Lambda has both.
 
+## Runtime and timeout headroom
+
+A real production report build (post-ADR-009, 4 sources) takes roughly
+**3–4 minutes**, dominated by Athena. Reference: 2026-05-26 manual run
+clocked 224.4s wall-clock with no restore tests scheduled that day (Tue
+= no rotation, weka canary only).
+
+What dominates the time:
+
+| Phase | Cost | Notes |
+|---|---|---|
+| Per-source `divergence_counts` Athena scan | ~50–60s × 4 | `FULL OUTER JOIN` between latest source and backup inventory snapshots; both sides scanned in one query |
+| `count_delta` Athena scan (day-over-day) | ~5s × 4 | Reuses recent inventory partitions, much smaller |
+| Inventory freshness check | <1s | S3 `head_object` per bucket |
+| Restore-test sample copy (when scheduled) | ~10–30s | Bound by S3 copy throughput |
+| Report formatting + Slack/SNS publish | <1s | Negligible |
+
+**It is not CPU- or memory-bound.** Athena runs the SQL on its own
+Presto fleet and the caller just polls `get_query_execution`. Lambda
+performance matches local closely:
+
+- Same Athena query latency (same service, same data)
+- +1–2s cold-start on first invocation only
+- Sub-second RTT difference for the poll loop
+- Restore tests are identical (bounded by S3 copy throughput)
+
+The relevant ceiling is the **15-minute Lambda timeout**, not memory.
+At 4 minutes today, headroom is ~11 minutes. The constraints that
+would burn through it (in likelihood order):
+
+1. Adding more sources (each adds ~60s of Athena scan)
+2. Athena queueing under regional load — observed up to 2× slowdowns
+3. Very large divergence sets (millions of class-2 orphans materialized
+   in the join result set)
+
+If the report ever approaches the 15-min ceiling, the cheapest fix is
+to split `divergence_counts` into two single-direction queries (giving
+up the "one scan" win for parallelizable halves). Bumping Lambda
+memory past 1769 MB unlocks a full vCPU but saves only tens of
+milliseconds on the poll loop — not worth it.
+
 ---
 
 ## Where the code lives
@@ -276,7 +376,8 @@ Lambda's IAM role at runtime. The deployed Lambda has both.
 | Slack delivery | `src/nzshm_backup/notifications/slack.py` |
 | SNS delivery | `src/nzshm_backup/notifications/sns.py` |
 | Inventory freshness reuse | `src/nzshm_backup/inventory_state.py` |
-| Object-count delta query | `src/nzshm_backup/athena_inventory.py` (`count_delta`) |
+| Object-count delta query (class-2 info) | `src/nzshm_backup/athena_inventory.py` (`count_delta`) |
+| Source-vs-backup divergence (class-1 + class-2 in one scan) | `src/nzshm_backup/athena_inventory.py` (`divergence_counts`) |
 | Restore test reuse | `src/nzshm_backup/commands/test.py` (`restore_test_source`) |
 | AWS infrastructure (SNS topic, IAM) | `serverless.yml` (`BackupReportsTopic`) |
 | Lambda dispatch | `src/nzshm_backup/lambda_handler.py`, `src/nzshm_backup/lambda_schema.py` |
@@ -286,9 +387,17 @@ Lambda's IAM role at runtime. The deployed Lambda has both.
 
 ## Related
 
-- ADR-005 — design rationale (cadence, channels, SES rejection)
-- ADR-006 mitigation 1 — object-count delta check
-- ADR-007 mitigation 4 — freshness watchdog
-- `docs/operations/enabling-notifications.md` — channel turn-on runbook
-- `docs/operations/inventory-bucket-recovery.md` — recovery for the
-  control-plane bucket the report depends on
+- [ADR-005](../design/adr/ADR-005-weekly-health-report.md) — design
+  rationale (cadence, channels, SES rejection)
+- [ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)
+  mit. 1 — original object-count delta intent (now reclassified by ADR-009)
+- [ADR-007](../design/adr/ADR-007-harden-inventory-control-plane-bucket.md)
+  mit. 4 — freshness watchdog
+- [ADR-009](../design/adr/ADR-009-health-check-measurement-model.md) —
+  signal-class taxonomy (class 1/2/3) currently in force
+- [purge-from-backup.md](../operations/purge-from-backup.md) — out-of-band
+  procedure for removing the class-2 orphans this report surfaces
+- [enabling-notifications.md](../operations/enabling-notifications.md)
+  — channel turn-on runbook
+- [inventory-bucket-recovery.md](../operations/inventory-bucket-recovery.md)
+  — recovery for the control-plane bucket the report depends on
