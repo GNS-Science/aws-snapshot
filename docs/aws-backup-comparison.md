@@ -21,6 +21,37 @@ engineering**.
 | **Decision audit trail** | Console actions | ADRs, CHANGELOG, deploy log |
 | **IAM transparency** | Service-managed role | Per-source reader vs restore roles, no-delete bucket policies + restore-test name-prefix exception |
 
+## Why we're doing more than AWS Backup
+
+Honest summary up front: this system does more than AWS Backup, and
+that's deliberate scope expansion. The DR requirement is what pulled
+it in. The chain of reasoning:
+
+1. **Cost-efficient backup at 11.7 TB requires *incremental* sync**,
+   not full snapshots. Full-snapshot daily would multiply storage by
+   ~50× and turn the cost story upside-down.
+2. **Incremental sync needs source-vs-backup diffing** — you have to
+   know which keys are new or changed before you can copy "only the
+   delta." We built that diff infrastructure on S3 Inventory + Athena
+   because we'd need it for cost reasons regardless of any other
+   feature.
+3. **Once the diff infrastructure exists, surfacing it as signal
+   coverage is nearly-free incremental work** — the same queries
+   that drive incremental sync can also report `source - backup` and
+   `backup - source` counts. The signals aren't separate scope;
+   they're the diff infrastructure made visible.
+4. **And once we have measurable diff, the DR plan becomes
+   defensible** — "the backup is correct" stops being a claim of
+   trust ("the daily job succeeded") and becomes a claim of evidence
+   ("we measure the gap, and the measurement says zero").
+
+So the comparison below has two halves not because they're separate
+arguments, but because **the diff infrastructure that makes the cost
+half work is also what makes the signal-coverage half possible**.
+Without incremental backup, no diff. Without diff, no measurable DR
+verification. They're the same engineering investment seen from two
+angles.
+
 ## Cost — the easy half
 
 AWS Backup baseline (2026-04, pre-migration): ~$1,700 NZD/month → $20,400/year.
