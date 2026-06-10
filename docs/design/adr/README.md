@@ -15,6 +15,7 @@ choices in the backup system.
 - [ADR-008: Notification recipients managed from YAML](ADR-008-notification-recipients-managed-from-yaml.md)
 - [ADR-009: Health-check signal-class taxonomy](ADR-009-health-check-measurement-model.md)
 - [ADR-010: Source-bucket Intelligent-Tiering (toshi + ths only)](ADR-010-source-bucket-intelligent-tiering.md) — **Proposed**
+- [ADR-011: Four-colour signal taxonomy (blue / green / amber / red)](ADR-011-four-color-signal-taxonomy.md) — **Proposed** (partially supersedes ADR-009)
 
 ## ADR Template
 
