@@ -44,6 +44,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - AWS Backup Comparison: aws-backup-comparison.md
   - Design Docs:
     - Backup Solution Plan: design/backup-solution-plan.md
     - Account Isolation: design/ACCOUNT_ISOLATION.md
@@ -77,6 +78,8 @@ nav:
     - Operator Cheatsheet: operations/cheatsheet.md
     - Enabling Notifications: operations/enabling-notifications.md
     - Inventory Bucket Recovery: operations/inventory-bucket-recovery.md
+    - Manual Purge from Backup: operations/purge-from-backup.md
+    - Health Signal Validation Sandbox: operations/health-signal-validation-sandbox.md
   - Development:
     - Contributing: development/contributing.md
     - Testing: development/testing.md

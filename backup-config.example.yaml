@@ -91,8 +91,6 @@ notifications:
         2: toshi              # Wednesday
         4: static             # Friday
       freshness_threshold_hours: 30.0
-      delta_pct_threshold: -5.0     # source-count drop ≥ 5% → red (must be negative)
-      delta_abs_threshold: -10000   # OR drop ≥ 10k objects → red (whichever first)
       restore_sample_size: 10
   ses:
     enabled: true
