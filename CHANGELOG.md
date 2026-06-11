@@ -4,6 +4,18 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+(no changes since v0.1.0)
+
+## [v0.1.0] - 2026-06-12
+
+First tagged release. Captures all work landed on `pre-release` since
+the project began — covering Phases 1–7 of the implementation plan
+(backup, schedule, restore, notifications, daily health report,
+ADR-009 signal-class taxonomy with head-check tagging, ADR-006
+two-tier lifecycle migration). Production has been running this code
+since at least 2026-05-22 (see PROD-DEPLOY-LOG Steps 14–22 for the
+deploy chronology and validation evidence).
+
 ### Changed (breaking — config schema)
 
 - **Daily health report — class-1 backup-missing-source-keys signal + class-2
