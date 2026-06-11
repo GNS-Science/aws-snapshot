@@ -27,16 +27,52 @@ The trigger is a daily health-report line like:
 
 Inspect the orphans before deciding to purge:
 
-1. Run the inventory-diff CLI to obtain the actual orphan keys, not just
-   the count:
+1. Run a one-shot Athena query against the inventory partitions to
+   list the actual orphan keys (the daily health-report code path
+   currently only *counts* the backup-minus-source direction —
+   sampling is implemented for the source-minus-backup direction
+   only, since that's the class-1 RED path that needed live-state
+   verification). Easiest from `backup health-report` working state:
 
    ```bash
-   uv run backup ... TODO  # exact command added once exposed by ADR-009 CLI
+   eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
+   unset AWS_PROFILE
+
+   # Resolve the relevant partitions from the latest inventory drops,
+   # then run a LEFT JOIN-with-LIMIT against the existing Athena
+   # workgroup (the health-report orchestrator already registered
+   # the Glue tables on its last run, so they're queryable).
+   #
+   # Concrete query template (substitute <SOURCE_ALIAS>, latest dt,
+   # and your sample size):
+   #
+   #   SELECT b.key
+   #   FROM nzshm_backup_inventory.inv_bkp_<source_alias>_<bucket> b
+   #   LEFT JOIN nzshm_backup_inventory.inv_src_<source_alias>_<bucket> s
+   #     ON b.key = s.key
+   #   WHERE b.dt = '<latest>'
+   #     AND b.is_latest = true
+   #     AND b.is_delete_marker = false
+   #     AND b.key NOT LIKE '_state/%'
+   #     AND b.key NOT LIKE '_manifests/%'
+   #     AND b.key NOT LIKE '_events/%'
+   #     AND b.key NOT LIKE '_inventory/%'
+   #     AND s.dt = '<latest>'  -- needs the source-side filter via join
+   #     AND s.key IS NULL
+   #   LIMIT 1000;
    ```
 
-2. Cross-check that source state really matches expectation — that the
-   missing keys were *intentionally* removed from source, not lost due
-   to a source-side incident you'd want recovered from backup.
+   Run it via the Athena console or `aws athena start-query-execution`.
+   For very large orphan lists (hundreds of thousands of keys), UNLOAD
+   the result to S3 instead of paginating console pages.
+
+   A dedicated `backup test divergence-sample --direction orphans`
+   CLI surface would be much nicer — tracked separately as a small
+   follow-up; not blocking for the rare-event purge workflow.
+
+2. Cross-check that source state really matches expectation — that
+   the missing keys were *intentionally* removed from source, not lost
+   due to a source-side incident you'd want recovered from backup.
 
 If you cannot positively confirm the deletions were intentional,
 **do not purge**. The orphans are protecting the data; you may need them.
