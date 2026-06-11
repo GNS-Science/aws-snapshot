@@ -1755,7 +1755,7 @@ specifically to handle this.
 **Branch / commit:** `feature/adr-009-signal-taxonomy` @ `b5a2aff` at
 deploy time (PR #26).
 
-## Step 20 — ADR-009 sandbox validation kickoff 🚧 2026-05-27
+## Step 20 — ADR-009 sandbox validation kickoff ✅ 2026-05-27 → 2026-06-10 (teardown in Step 22)
 
 **Purpose:** Drive the formal class-1/2/3 acceptance proof for ADR-009
 against real AWS infrastructure using the two toy sources defined in
@@ -2037,3 +2037,97 @@ production. Cycle 3 (GREEN recovery) starts automatically — Wed
 2026-06-10 snapshot will capture Tue's backup catchup, divergence
 clears, the class-1 RED drops, the class-2 ℹ orphan persists by
 design per ADR-006.
+
+## Step 22 — ADR-009 sandbox teardown (#26 follow-up) 🚧 2026-06-10
+
+**Context:** ADR-009 sandbox validation completed Tue 2026-06-09
+(see Step 21). The toy sources have served their purpose — every
+signal class from Cycles 0–3 has been observed firing correctly
+against real AWS data. Time to retire them so they stop:
+
+- Generating daily class-1 RED rows (the snapshot-vs-backup race
+  finding from Cycle 2 means toy-inv will fire `(auto-healed since
+  snapshot)` every day under the current schedule)
+- Eating Slack/SES subscriber attention with `[SANDBOX]` rows
+- Accumulating S3 Inventory data daily in the control bucket
+- Drifting from the heads-up commitment that sandbox tear-down was
+  planned
+
+### Part 1 — config removal (this commit)
+
+- `backup-config.production.yaml` — toy-inv and toy-noinv source
+  blocks removed (the `# BEGIN TMP` / `# END TMP` markers added in
+  `b28ff37` make the block self-locating).
+- After this PR merges, SSM config push removes the toys from the
+  deployed Lambda's view.
+
+Confirmed `backup config validate` reports 4 sources (toshi, ths,
+static, weka).
+
+### Part 2 — AWS-side cleanup (operator commands)
+
+To be executed after this PR merges + SSM push completes:
+
+```bash
+aws sso login --profile nshm-admin
+aws sso login --profile nshm-backup-admin
+
+# 1. Remove EventBridge schedules
+uv run backup schedule remove --source toy-inv --frequency daily
+uv run backup schedule remove --source toy-noinv --frequency daily
+
+# 2. Empty + delete source buckets (source account 461564345538)
+for B in nzshm22-toy2-inv-source nzshm22-toy2-noinv-source; do
+  aws s3 rm "s3://$B" --recursive --profile nshm-admin --region ap-southeast-2
+  aws s3api delete-bucket --bucket "$B" --profile nshm-admin --region ap-southeast-2
+done
+
+# 3. Empty + delete backup buckets (backup account 737696831915)
+#    Versioned + no-delete policy; use admin bypass
+for B in bb-toy-inv-s3-src-ap-southeast-2-461564345538 \
+         bb-toy-noinv-s3-src-ap-southeast-2-461564345538; do
+  aws s3api list-object-versions --bucket "$B" --region ap-southeast-2 \
+    --output=json --query='{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+    > /tmp/versions.json
+  aws s3api delete-objects --bucket "$B" --delete file:///tmp/versions.json \
+    --region ap-southeast-2 --bypass-governance-retention
+  aws s3api list-object-versions --bucket "$B" --region ap-southeast-2 \
+    --output=json --query='{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+    > /tmp/markers.json
+  aws s3api delete-objects --bucket "$B" --delete file:///tmp/markers.json \
+    --region ap-southeast-2 --bypass-governance-retention
+  aws s3api delete-bucket --bucket "$B" --region ap-southeast-2
+done
+
+# 4. Rebuild source-account IAM policies (drops toy ARN allow-listings)
+for s in toshi ths static weka; do
+  uv run backup setup iam source-roles --source $s --profile nshm-admin
+done
+
+# 5. Clean up inventory data in control bucket (tidy)
+aws s3 rm s3://nzshm-backup-inventory-737696831915/inventory/toy-inv/ \
+  --recursive --region ap-southeast-2
+
+# 6. Subscriber heads-up on Slack
+# 7. Verify: uv run backup health-report run → expect 4 sources, no toys
+```
+
+### Post-teardown verification
+
+| Check | Expected |
+|---|---|
+| `backup schedule show` | 4 backup rules (toshi/ths/static/weka), 1 health-report rule. No toy rules. |
+| `aws s3api list-buckets --query "Buckets[?contains(Name, 'toy')]"` (both accounts) | Empty. |
+| SSM `/nzshm-backup/prod/config` | 4 sources only. Returns to Standard tier or stays Advanced — either is fine. |
+| Next 10:45 NZT health-report row count | 4 sources, GREEN headline (no class-1 RED from toy-inv's auto-healed pattern). |
+| Source-account IAM `nzshm-backup-reader` policy | No `nzshm22-toy2-*-source` ARNs in the resource list. |
+| `nzshm-backup-inventory-737696831915/inventory/` prefix | No `toy-inv/` subdirectory. |
+
+This step transitions Step 20's sandbox kickoff from 🚧 → ✅
+once Part 2 executes. Update Step 21's validation-outcome section
+to reference Step 22 as the close-out marker.
+
+**Branch / commit:** `feature/adr-009-sandbox-teardown` stacked on
+`feature/adr-009-signal-taxonomy` (PR #26). After both PRs merge,
+the teardown PR's base auto-retargets to `pre-release` and shows a
+clean two-file diff.
