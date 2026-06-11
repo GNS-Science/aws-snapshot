@@ -1,36 +1,39 @@
 # NSHM Backup Solution
 
-AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
-Replaces AWS Backup (~$1,700 NZD/month) with S3 Glacier lifecycle policies
-and DynamoDB Point-in-Time exports (~$618 NZD/month target).
+AWS-native backup management CLI for NSHM datasets (ToshiAPI, THS, static
+reports, Weka). Replaces AWS Backup (~$1,700 NZD/month before) with
+incremental S3 sync + 2-tier Glacier Instant Retrieval lifecycle and
+DynamoDB Point-in-Time exports — running at **~$108 NZD/month** in
+production since May 2026 (per
+[ADR-006](docs/design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)).
 
 ## Implementation Status
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Phase 1 Step 1 | ✅ Complete | CLI skeleton with Typer |
-| Phase 1 Step 2 | ✅ Complete | Config system + S3 backup operations |
-| Phase 2        | ✅ Complete | DynamoDB PITR export + EventBridge scheduling |
-| Phase 3        | ✅ Complete (notifications); cost reporting outstanding | Slack + SNS-email; daily health report; Lambda-error alarm (ADR-005) |
-| Phase 4        | ✅ Substantially complete | Restore (S3 + DynamoDB, cross-account) |
-| Phase 5        | ✅ Core done | Testing, validation, event audit log |
-| Phase 6        | 🔄 In progress | Parallel run, NSHM cutover (arkivalist done) |
+| Phase 1 | ✅ Complete | CLI skeleton with Typer + Config system + S3 backup operations |
+| Phase 2 | ✅ Complete | DynamoDB PITR export + EventBridge scheduling |
+| Phase 3 | ✅ Complete | Slack + SNS-email; daily health report; Lambda-error alarm (ADR-005); YAML-managed recipients (ADR-008) |
+| Phase 4 | ✅ Complete | Restore (S3 + DynamoDB, cross-account) |
+| Phase 5 | ✅ Complete | Testing, validation, event audit log, daily-canary restore tests |
+| Phase 6 | ✅ Complete | Production cutover (all 4 sources live since April 2026; AWS Backup decommissioned May 2026) |
+| Phase 7 | ✅ Complete | ADR-009 signal-class taxonomy + class-1 head-check tagging; validated end-to-end against real AWS (sandbox cycles 0–3, June 2026) |
 
-**Tests:** 403 passing · **Coverage:** 77% · **Lint:** ruff clean
+**Tests:** 430+ passing · **Coverage:** 76% · **Lint:** ruff + mypy clean
 
 ---
 
 ## Features (implemented)
 
 - **Configuration**: YAML config with Pydantic validation, alias→ARN mapping
-- **S3 Backup**: Incremental sync with 3-tier lifecycle policies (Standard → Glacier Instant → Deep Archive)
+- **S3 Backup**: Incremental sync with 2-tier lifecycle policy — Standard → Glacier Instant Retrieval at 30 days; objects retained forever ([ADR-006](docs/design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md))
 - **DynamoDB Backup**: Point-in-Time export to S3, idempotent export bucket setup
 - **EventBridge Scheduling**: Create/enable/disable weekly/daily/hourly rules; localised time input and display
 - **Lambda Handler**: EventBridge-triggered backup orchestration (S3 + DynamoDB)
 - **Restore**: S3 (direct copy + S3 Batch Operations) and DynamoDB PITR restore with async status tracking
 - **Testing**: `backup test integrity` (ETag diff + PITR check) and `backup test restore` (sample restore)
 - **Event audit log**: Append-only JSONL log in backup bucket (`_events/`) — all backup/restore events recorded
-- **Daily health report** (`backup health-report`): per-source status + inventory freshness + object-count delta + sampled restore verification, delivered to Slack and SNS-email. Fires automatically at 14:30 NZST; canary (weka) tested daily, large sources rotated through Mon/Wed/Fri. See [docs/user-guide/health-report.md](docs/user-guide/health-report.md).
+- **Daily health report** (`backup health-report`): per-source status + inventory freshness + source-vs-backup divergence (both directions) + class-1 head-check tagging + sampled restore verification, delivered to Slack and SNS-email. Fires automatically at 10:45 NZT (≈60 min after the 09:45 NZT scheduled backup); canary (weka) tested daily, large sources rotated through Mon/Wed/Fri. Signal classification follows ADR-009 (class 1 RED / class 2 ℹ info / class 3 yellow). See [docs/user-guide/health-report.md](docs/user-guide/health-report.md).
 - **Lambda-error alarm**: CloudWatch alarm on backup Lambda `Errors` → SNS → email, fires within ~5 min of any hard failure. Complementary to the daily report (ADR-005 fast path).
 - **YAML-managed notification recipients**: `notifications.alerts.emails` + `notifications.reports.email.addresses` lists in `backup-config.yaml`; `backup notifications apply` reconciles SNS subscriptions to match. See [docs/operations/enabling-notifications.md](docs/operations/enabling-notifications.md).
 - **Dry-run mode**: All mutating operations support `--dry-run`
