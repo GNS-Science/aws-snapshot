@@ -13,14 +13,24 @@ backup schedule show
 backup --output json schedule show
 ```
 
-Output:
+Output (current production state):
 
 ```
-Rule Name                                     State      Schedule               Target     Target detail                        Local time
+Rule Name                                     State      Schedule               Target     Target detail                       Local time
 ----------------------------------------------------------------------------------------------------------------------------------------------------
-nzshm-backup-arkivalist-hourly               ENABLED    cron(0 * * * ? *)      lambda     nzshm-backup-service-prod-backup      → :00 past each hour (NZDT)
-nzshm-backup-ths-weekly                      ENABLED    cron(15 8 ? * WED *)    lambda     nzshm-backup-service-prod-backup     → Wednesday 20:15 NZST locally
+nzshm-backup-health-report-daily              ENABLED    cron(45 22 * * ? *)    lambda     nzshm-backup-service-prod-backup    → 10:45 NZST locally
+nzshm-backup-pitr-watcher                     DISABLED   rate(5 minutes)        lambda     nzshm-backup-service-prod-pitr-watcher
+nzshm-backup-static-daily                     ENABLED    cron(45 21 * * ? *)    lambda     nzshm-backup-service-prod-backup    → 09:45 NZST locally
+nzshm-backup-ths-daily                        ENABLED    cron(45 21 * * ? *)    lambda     nzshm-backup-service-prod-backup    → 09:45 NZST locally
+nzshm-backup-toshi-daily                      ENABLED    cron(45 21 * * ? *)    lambda     nzshm-backup-service-prod-backup    → 09:45 NZST locally
+nzshm-backup-weka-daily                       ENABLED    cron(45 21 * * ? *)    lambda     nzshm-backup-service-prod-backup    → 09:45 NZST locally
 ```
+
+The four daily backup rules fire simultaneously at 09:45 NZT; each
+source's Lambda invocation completes within ~12 minutes (toshi is the
+longest). The health-report rule fires at 10:45 NZT (T+60 from
+backup) so it reads each source's freshest backup state plus the
+~07:00 NZT inventory delivery.
 
 The **Target** and **Target detail** columns show whether the rule triggers
 Lambda or CodeBuild and which function/project is wired.
