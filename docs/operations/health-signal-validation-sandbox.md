@@ -5,7 +5,7 @@ ADR-009 signal classifications end-to-end against real AWS infrastructure.
 Use this runbook when:
 
 - Classification thresholds change (`_classify_source` in `health_report.py`)
-- New signals are added
+- New signals are added (e.g. an ADR-011 4-colour taxonomy classifier)
 - Verifying a claim in [ADR-009](../design/adr/ADR-009-health-check-measurement-model.md)
 - After a significant refactor of `divergence_counts`, `count_delta`, or
   `inventory_health_for_bucket_pair`
@@ -14,11 +14,20 @@ The 24h S3 Inventory cadence is the unavoidable iteration floor; this
 runbook is designed to stack 4+ scenarios per cycle so a full sweep is
 ~48h, not weeks.
 
+> **Current sandbox state (2026-06-11):** the toy sources described
+> below have been decommissioned after the first end-to-end ADR-009
+> validation cycle completed (see PROD-DEPLOY-LOG Steps 20–22 for the
+> validation findings and teardown record). The buckets, schedules,
+> IAM grants, and inventory data documented here no longer exist
+> in AWS — re-running the setup procedure recreates them when a new
+> validation cycle is needed.
+
 ## Topology
 
-Two toy sources live in `backup-config.production.yaml` alongside real
-production sources. Both are backed up by the regular Lambda schedule
-and included in the daily health report.
+When this runbook is in active use, two toy sources are added to
+`backup-config.production.yaml` alongside the real production sources.
+Both are backed up by the regular Lambda schedule and included in the
+daily health report.
 
 | Source | `inventory_enabled` | Steady-state | Purpose |
 |---|---|---|---|
