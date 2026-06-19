@@ -2,6 +2,11 @@
 
 AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
 
+> **Why not AWS Backup?** ~16× cheaper *and* materially better signal
+> coverage (per-key source/backup divergence, sampled restore
+> verification, inventory freshness, signal classification). See
+> [AWS Backup Comparison](aws-backup-comparison.md).
+
 ## Features
 
 - **Automated Scheduling**: Weekly/daily backup schedules via AWS EventBridge
@@ -15,14 +20,11 @@ AWS-native backup management CLI for NSHM datasets (ToshiAPI and THS).
 ## Quick Start
 
 ```bash
-# Install with Poetry
-poetry install
-
-# Activate virtual environment
-poetry shell
+# Install with uv
+uv sync --all-extras
 
 # Run the CLI
-backup --help
+uv run backup --help
 ```
 
 ## Key Commands
@@ -43,6 +45,9 @@ backup restore preview --date 2026-02-15 --source toshi
 # Show schedule
 backup schedule show
 
+# Provision inventory for a source
+backup setup inventory --source ths --source-profile nshm-admin --backup-profile <aws-profile>
+
 # Generate cost report
 backup costs report --period last-month
 ```
@@ -57,11 +62,13 @@ backup costs report --period last-month
 ### User Guide
 - [Backup Operations](user-guide/backup.md)
 - [Restore Operations](user-guide/restore.md)
+- [Provisioning (`backup setup`)](user-guide/setup.md)
 - [Testing & Validation](user-guide/testing.md)
+- [Daily Health Report](user-guide/health-report.md)
 - [Cost Management](user-guide/costs.md)
 
 ### CLI Reference
-- [Complete CLI Documentation](cli-reference.md) (auto-generated)
+- [Complete CLI Documentation](cli-reference.md) (includes quick command tree + auto-generated details)
 
 ### Architecture
 - [Overview](architecture/overview.md)
@@ -70,6 +77,9 @@ backup costs report --period last-month
 
 ### Design Documents
 - [Backup Solution Plan](design/backup-solution-plan.md)
+- [S3 Manifest Bottleneck](design/S3_MANIFEST_BOTTLENECK.md)
+- [Athena Manifest Pipeline](design/ATHENA_MANIFEST_PIPELINE.md)
+- [Architecture Decision Records](design/adr/README.md)
 - [CLI-First Rationale](design/CLI_FIRST_RATIONALE.md)
 - [Typer Framework Decision](design/TYPER_RATIONALE.md)
 

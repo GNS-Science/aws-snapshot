@@ -7,7 +7,7 @@ two ways to invoke it:
 
 ```
 CLI mode (manual, on-demand):
-  your terminal → poetry run backup run → boto3 → S3 / DynamoDB APIs
+  your terminal → uv run backup run → boto3 → S3 / DynamoDB APIs
 
 Lambda mode (scheduled, automated):
   EventBridge cron → Lambda invocation → same Python code → boto3 → S3 / DynamoDB APIs
@@ -37,7 +37,16 @@ that call the same underlying functions — `backup_source()` and
 3. **S3 loop** — for each bucket in `sources.toshi.s3_buckets`:
    - Derive backup bucket name: `bb-{source-key}-s3-{label}-{region}-{source-account-id}`
    - Create backup bucket if it doesn't exist (with lifecycle policy + delete-protection)
-   - Incremental sync: list source objects, compare ETags, copy only changed/new objects
+   - **Inventory mode** (`batch_manifest_mode: inventory`, used by all production sources):
+     1. Discover latest source and backup S3 Inventory snapshots
+     2. Run Athena UNLOAD query to diff source vs backup inventories — writes
+        CSV manifest directly to S3 (server-side, no data through Lambda)
+     3. Run COUNT(*) in parallel for exact row count
+     4. Concatenate UNLOAD output files into single manifest via S3 multipart-copy
+     5. Submit S3 Batch `CreateJob` with the manifest
+   - **Inline mode** (`batch_manifest_mode: inline`, legacy):
+     - List source objects, compare ETags, generate manifest in-process
+     - Only suitable for small buckets; times out for millions of objects
 4. **DynamoDB loop** — for each table ARN in `sources.toshi.dynamodb_tables`:
    - Derive export bucket name: `bb-{source-key}-dynamo-{region}-{source-account-id}`
    - Create export bucket if it doesn't exist (idempotent — no error if already exists)
@@ -57,28 +66,33 @@ target to fire automatically. Until `lambda_arn` is set in `backup-config.yaml`
 and a Lambda is deployed, the rules exist but have no target — running
 `backup run` manually is the only way to trigger a backup.
 
-## Lambda timeout risk with large S3 buckets
+## Lambda timeout and the Athena UNLOAD pipeline
 
-> **Production concern:** The current S3 sync uses per-object `copy_object` API
-> calls inside the Lambda. This does not scale to the production toshi bucket
-> (~8 TB, ~8 million objects).
+The Lambda timeout is 15 minutes (AWS maximum). For large buckets (millions of
+objects), generating the S3 Batch manifest must not stream data through Lambda.
 
-| Step | Cost at 8M objects |
-|------|--------------------|
-| `list_objects_v2` source | ~8,000 API calls, ~80s |
-| `list_objects_v2` backup | ~8,000 API calls, ~80s |
-| `copy_object` (first run / full sync) | ~8M calls, ~22 hours — **impossible** |
-| `copy_object` (incremental, 0.1% changed) | ~8,000 calls, ~80s — feasible |
+**Solution: Athena UNLOAD** — the inventory diff query runs as an Athena UNLOAD
+statement that writes the manifest CSV directly to S3 (server-side). Lambda only
+orchestrates the query and S3 copy operations. This scales to any bucket size —
+the `static` source (39.9M objects, ~2.7 TB) completes manifest generation in
+~28 seconds total Lambda execution.
 
-The Lambda timeout is 15 minutes (AWS maximum). Incremental runs after the
-first sync are likely fine. A first-run or forced full sync will time out.
-
-**Planned fix: S3 Batch Operations** — Lambda generates a diff manifest (CSV),
-submits an `s3control:CreateJob`, and exits immediately. AWS runs the copy
-asynchronously, following the same pattern as DynamoDB PITR exports. See
-`docs/architecture/s3-batch-operations.md` for the implementation plan.
+See `docs/design/ATHENA_MANIFEST_PIPELINE.md` for the full design and
+`docs/architecture/s3-batch-operations.md` for S3 Batch Operations details.
 
 ## How backup data accumulates
+
+### Backup model vs replication model
+
+This tool implements **backup semantics**, not continuous replication semantics.
+
+- Backups run on explicit schedule checkpoints (weekly/daily/manual)
+- Source deletes do not remove backup objects
+- Source mutations create new backup versions (with version retention) rather than
+  erasing the previous recoverable state
+
+The design goal is recoverability under human error and poisoning scenarios, even
+when that differs from source-mirror behaviour.
 
 Each backup run is **incremental and additive** — no existing backup data is
 ever overwritten or deleted by the tool:
@@ -91,8 +105,9 @@ ever overwritten or deleted by the tool:
 | Object deleted from source | Remains in backup bucket (no delete propagation) |
 
 This means the backup bucket is a **superset** of the source at any point in
-time. Data deleted from the source is retained in the backup until the lifecycle
-policy expires it (365 days by default).
+time. Data deleted from the source is retained in the backup indefinitely;
+intentional removal of garbage from a backup bucket is an out-of-band admin
+task (manual-purge runbook, tracked under #23).
 
 ## Delete protection
 
@@ -156,19 +171,18 @@ not the account running the backup Lambda. This means:
 
 ## S3 lifecycle tiers
 
-All backup buckets (both S3 sync and DynamoDB export) get a three-tier
-lifecycle policy applied at creation:
+All backup buckets (both S3 sync and DynamoDB export) get a two-tier
+lifecycle policy applied at creation
+([ADR-006](design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)):
 
 | Tier | Days | Storage class | Access time |
 |------|------|--------------|-------------|
 | Hot | 0–30 | S3 Standard | Immediate |
-| Warm | 31–120 | S3 Glacier Instant (`GLACIER_IR`) | Milliseconds |
-| Cold | 121–365 | S3 Glacier Deep Archive (`DEEP_ARCHIVE`) | 12–48 hours |
-| Expire | 365+ | Deleted | — |
+| Cold | 30+ (forever) | S3 Glacier Instant (`GLACIER_IR`) | Milliseconds |
 
-> **AWS constraint:** The Deep Archive transition must be at least 90 days after
-> the Glacier IR transition. The code enforces this automatically:
-> `deep_archive_days = max(warm_days, hot_days + 90)`.
+Current object versions are never expired. Superseded (non-current) versions
+are expired separately by `NoncurrentVersionExpiration` after
+`version_retention_days` (default 365; set to 0 to keep forever).
 
 ## DynamoDB export is asynchronous
 
@@ -202,3 +216,67 @@ Dry-run output is prefixed with `[DRY RUN]`.
 
 For Lambda runtime, config is passed as a JSON environment variable
 (`BACKUP_CONFIG`) set during `serverless deploy`.
+
+## Daily health report
+
+Independent task type on the same backup Lambda, covering the failure
+modes the per-invocation CloudWatch alarm can't catch (stale inventory,
+silent source-count drops, restore-path failures). See ADR-005 (revised)
+for the full design rationale and the
+[Daily Health Report user guide](user-guide/health-report.md) for the
+operator-facing walkthrough.
+
+### Two notification paths
+
+```
+   ┌──────────────── Lambda Errors metric ────────────────┐
+   │                                                       │
+EventBridge (daily 14:30 NZST)                CloudWatch alarm
+                                               (≥1 error / 5 min)
+   │                                                       │
+   ▼                                                       ▼
+nzshm-backup-service-prod-backup            BackupAlertsTopic (SNS)
+ Lambda handler                                            │
+   │  task.task_type=="health_report"                      │
+   │                                                       │
+   ├── build_report() — status + freshness + delta         │
+   │   + restore (canary + rotation) + PITR                │
+   │                                                       │
+   ├── send() ─────► Slack webhook (Block Kit)             │
+   │       └─────► BackupReportsTopic (SNS) ──► email      │
+   │                                                       │
+   └── append_event("health_report_run")                   │
+                                                           │
+                                                  Subscribers (email)
+```
+
+The same Lambda runs both per-source backups and the health report;
+`BackupTask.task_type` discriminates. The SNS **reports** topic is
+separate from the **alerts** topic so subscribers of one don't
+automatically get the other: alerts → on-call (urgent, per-failure);
+reports → broader audience (daily summary).
+
+### What runs each day
+
+For every source: a programmatic `backup status` (run state + recent
+batch jobs + DynamoDB exports), an inventory-freshness check, and an
+Athena `COUNT(*)` delta against yesterday's inventory partition.
+
+For one or two sources (the canary every day plus a Mon/Wed/Fri rotated
+large source): a 10-object sampled restore test that copies into a
+temporary bucket and verifies checksums or ETags. Provides the
+operator's only continuously-verified evidence that the restore path
+still works end-to-end.
+
+The classifier maps the signals to **green / yellow / red**; the report
+delivery itself acts as a daily heartbeat — its absence is the operator
+signal that something has gone deeply wrong (the alarm path covers
+Lambda-level errors but not a misconfigured EventBridge rule).
+
+### Schedule lives in EventBridge, not config
+
+The cron expression and trigger live on an AWS EventBridge rule, not in
+`backup-config.yaml`. Managed via `backup schedule add --task-type
+health_report ...`. The tunable thresholds (canary, rotation,
+freshness, delta, sample size) **are** in config under
+`notifications.reports.health` — see the user guide for the table.

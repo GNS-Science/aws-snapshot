@@ -3,9 +3,16 @@
 import os
 
 import typer
+from dotenv import load_dotenv
 
-from nzshm_backup import __version__
-from nzshm_backup.state import _state
+# Load .env BEFORE any subcommand modules are imported. Subcommand
+# typer.Option defaults that use os.getenv(...) are evaluated at
+# module-import time, so loading .env inside the @app.callback would be
+# too late — the defaults would already have captured the unloaded env.
+load_dotenv()
+
+from nzshm_backup import __version__  # noqa: E402
+from nzshm_backup.state import _state  # noqa: E402
 
 app = typer.Typer(
     name="backup",
@@ -54,6 +61,11 @@ def main(
     version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ):
     """NSHM Backup Solution - Manage AWS backups for ToshiAPI and THS datasets."""
+    # load_dotenv() already ran at module import (see top of file). This
+    # second call is idempotent and kept so that .env changes since import
+    # (rare; mostly testing) are picked up.
+    load_dotenv()
+
     if version:
         typer.echo(f"backup {__version__}")
         raise typer.Exit()
@@ -65,23 +77,39 @@ def main(
 
 
 # Import and register subcommand groups (must be after main() to avoid circular imports)
+from nzshm_backup.commands.check import app as check_app  # noqa: E402
 from nzshm_backup.commands.config import app as config_app  # noqa: E402
 from nzshm_backup.commands.costs import app as costs_app  # noqa: E402
 from nzshm_backup.commands.events import app as events_app  # noqa: E402
+from nzshm_backup.commands.health_report import app as health_report_app  # noqa: E402
+from nzshm_backup.commands.notifications import app as notifications_app  # noqa: E402
 from nzshm_backup.commands.report import app as report_app  # noqa: E402
 from nzshm_backup.commands.restore import app as restore_app  # noqa: E402
 from nzshm_backup.commands.run_backup import app as run_app  # noqa: E402
 from nzshm_backup.commands.schedule import app as schedule_app  # noqa: E402
+from nzshm_backup.commands.setup import app as setup_app  # noqa: E402
 from nzshm_backup.commands.status import app as status_app  # noqa: E402
 from nzshm_backup.commands.test import app as test_app  # noqa: E402
 
+app.add_typer(check_app, name="check", help="Pre-flight access and configuration checks.")
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")
+app.add_typer(setup_app, name="setup", help="Provision backup infrastructure.")
 app.add_typer(run_app, name="run", help="Execute manual backup.")
 app.add_typer(restore_app, name="restore", help="Manage backup restores. (TODO)")
 app.add_typer(test_app, name="test", help="Run backup tests and validation. (TODO)")
 app.add_typer(status_app, name="status", help="Show current backup status.")
 app.add_typer(events_app, name="events", help="Show backup/restore event log.")
 app.add_typer(report_app, name="report", help="Generate backup reports. (TODO)")
+app.add_typer(
+    health_report_app,
+    name="health-report",
+    help="Run the daily health report (ADR-005 slow path).",
+)
+app.add_typer(
+    notifications_app,
+    name="notifications",
+    help="Manage SNS topic subscriptions from backup-config.yaml.",
+)
 app.add_typer(costs_app, name="costs", help="Manage and report backup costs. (TODO)")
 app.add_typer(config_app, name="config", help="Manage backup configuration.")
 

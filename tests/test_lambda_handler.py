@@ -3,12 +3,18 @@
 import json
 from unittest.mock import patch
 
+import pytest
 from moto import mock_aws
 
 from nzshm_backup.config.models import ConfigModel, GeneralConfig, SourceConfig
 from nzshm_backup.lambda_handler import handler
 
 REGION = "ap-southeast-2"
+
+
+@pytest.fixture(autouse=True)
+def _set_region(monkeypatch):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", REGION)
 
 
 def _make_config(**source_kwargs) -> ConfigModel:
@@ -156,3 +162,61 @@ def test_get_config_uses_env_when_no_stage(monkeypatch):
 
     mock_env.assert_called_once()
     assert result is fallback_config
+
+
+# ---------------------------------------------------------------------------
+# Health-report dispatch (task_type='health_report')
+# ---------------------------------------------------------------------------
+
+
+def test_handler_health_report_invokes_build_and_send():
+    """task_type='health_report' bypasses backup engine and calls health_report.* ."""
+
+    from nzshm_backup.health_report import DeliveryResult, HealthReportData
+
+    config = _make_config()
+    fake_report = HealthReportData(
+        report_date=__import__("datetime").date(2026, 5, 22),
+        canary_source="testsrc",
+    )
+    delivery = DeliveryResult(slack_attempted=True, slack_ok=True)
+
+    with patch("nzshm_backup.lambda_handler.get_config", return_value=config):
+        with patch(
+            "nzshm_backup.health_report.build_report", return_value=fake_report
+        ) as mock_build:
+            with patch(
+                "nzshm_backup.health_report.send", return_value=delivery
+            ) as mock_send:
+                with patch("nzshm_backup.event_log.append_event"):
+                    result = handler(
+                        {"source": "_health", "task_type": "health_report"}, None
+                    )
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["task"]["task_type"] == "health_report"
+    assert body["slack_ok"] is True
+    mock_build.assert_called_once()
+    mock_send.assert_called_once()
+
+
+def test_handler_backup_task_does_not_call_health_report():
+    """Default task_type='backup' must not touch the health-report path."""
+    from unittest.mock import MagicMock
+
+    config = _make_config()
+    fake_source_result = MagicMock()
+    fake_source_result.s3_results = []
+    fake_source_result.dynamodb_results = []
+
+    with patch("nzshm_backup.lambda_handler.get_config", return_value=config):
+        with patch(
+            "nzshm_backup.lambda_handler.run_backup_source",
+            return_value=fake_source_result,
+        ):
+            with patch("nzshm_backup.health_report.build_report") as mock_build:
+                result = handler({"source": "testsrc"}, None)
+
+    assert result["statusCode"] == 200
+    mock_build.assert_not_called()

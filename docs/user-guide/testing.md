@@ -9,10 +9,13 @@ tests to validate that backups are readable and consistent.
 |---------|--------|-------|
 | `test integrity` — S3 object comparison | ✅ Implemented | Full ETag diff; excludes operational prefixes |
 | `test integrity` — DynamoDB PITR check | ✅ Implemented | Read-only; checks PITR enabled + completed exports exist |
-| `test restore` — S3 direct copy sample | ✅ Implemented | Copies N objects to temp bucket, verifies ETags, cleans up |
+| `test restore` — S3 direct copy sample | ✅ Implemented | Copies N objects to temp bucket, verifies via checksum or ETag |
 | `test restore` — S3 Batch Operations path | ✅ Implemented | `--use-batch`; validates production IAM + Batch pipeline |
+| `test restore` — inventory-based sampling | ✅ Implemented | Uses Athena `ORDER BY RAND()` for large buckets; falls back to listing |
 | `test restore` — DynamoDB restorability | ✅ Implemented | Read-only; checks PITR + export bucket accessible |
 | Event log (`test_restore` events) | ✅ Implemented | Emits passed/failed/etag_mismatch to `_events/` |
+| `test alert` — force Lambda-error alarm to ALARM | ✅ Implemented | Fires SNS actions without a real Lambda failure; auto-returns to OK on next datapoint |
+| `health-report run/preview` — daily report | ✅ Implemented (ADR-005) | Combines status + restore + freshness + count-delta. Slack + SNS email delivery. Lambda-scheduled via `backup schedule add --task-type health_report`; manual invocation always available. |
 | `test full-drill` | ⏳ Not yet implemented | Planned quarterly DR drill |
 | Automated scheduling via EventBridge | ⏳ Not yet implemented | Must be triggered manually for now |
 | Glacier/Deep Archive object test path | ⏳ Not yet implemented | Archived objects are skipped in sample restore |
@@ -63,10 +66,17 @@ backup test restore --source arkivalist --sample-size 20
 
 **S3 testing:**
 
-1. Samples N objects from each backup bucket (default 10; reduced if fewer available)
+1. Samples N objects from each backup bucket (default 10; reduced if fewer available).
+   For sources with `batch_manifest_mode: inventory`, sampling uses an Athena query
+   against the backup inventory (`ORDER BY RAND() LIMIT N`) — instant even for
+   multi-million-object buckets. Falls back to `list_objects_v2` pagination when
+   inventory is unavailable.
 2. Creates a temporary bucket (`bb-restore-test-{ts}-{account_id}`)
 3. Copies objects via direct copy or S3 Batch Operations
-4. Verifies ETags match the backup
+4. Verifies each copied object using S3 checksums (CRC64NVME, CRC32, or SHA256 via
+   `GetObjectAttributes`) when available. Falls back to ETag comparison when no
+   checksum is present. Checksums are content-deterministic regardless of upload
+   method, avoiding false mismatches from multipart copy ETag differences.
 5. Deletes the temporary bucket (always, even on failure)
 
 Objects in archived storage tiers (Glacier, Glacier IR, Deep Archive) are automatically skipped —
@@ -81,6 +91,23 @@ A `test_restore` event (result: `passed`, `failed`, or `etag_mismatch`) is appen
 log in the backup bucket.
 
 Exits with code 1 if any check fails.
+
+---
+
+## Inventory availability requirements
+
+For sources configured with `batch_manifest_mode: inventory` (all production
+sources), some test commands require inventory data to be available:
+
+| Command | Inventory required? | Behaviour when unavailable |
+|---------|--------------------|-----------------------------|
+| `test restore` | Yes (for sampling) | Refuses with actionable message — no fallback to listing |
+| `test integrity` | No (uses listing) | Warns that listing may be very slow for large buckets |
+| `test restore` (non-inventory source) | No | Falls back to `list_objects_v2` sampling |
+
+**Common cause of unavailability:** inventory data takes up to 24 hours to
+refresh after a first-ever backup populates a previously empty bucket. Run
+`backup check --source <alias>` to verify inventory freshness before testing.
 
 ---
 

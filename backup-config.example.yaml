@@ -58,10 +58,7 @@ sources:
     use_s3_batch: false  # small scale — direct copy_object is fine
 
 retention:
-  hot_days: 30
-  warm_days: 120  # must be >= hot_days + 90 (AWS constraint: GLACIER_IR → DEEP_ARCHIVE gap)
-  cold_days: 365
-  max_age_days: 365
+  hot_days: 30  # Standard → Glacier Instant Retrieval at this age; objects kept forever (ADR-006)
 
 restore:
   default_destination_type: temporary
@@ -71,6 +68,30 @@ restore:
   dual_approval_threshold: 500
 
 notifications:
+  # Email recipients are list-of-strings; manage them with:
+  #   uv run backup notifications apply
+  # which reconciles SNS subscriptions on each topic to match these lists.
+  alerts:
+    # CloudWatch-Lambda-error alarm recipients (fast path)
+    emails:
+      - oncall@example.com
+  reports:
+    # Daily health-report delivery — distinct topic so the report audience
+    # can differ from the alarm audience (e.g. broader vs on-call only).
+    email:
+      enabled: true
+      addresses:
+        - backup-reports@example.com
+    # Tunable thresholds for the daily health report. All fields are
+    # optional — omit to accept defaults baked into health_report.py.
+    health:
+      canary_source: weka
+      rotation_by_weekday:    # ISO weekday → source to restore-test that day
+        0: ths                # Monday
+        2: toshi              # Wednesday
+        4: static             # Friday
+      freshness_threshold_hours: 30.0
+      restore_sample_size: 10
   ses:
     enabled: true
     source_email: noreply-backup@example.com
@@ -91,24 +112,3 @@ cost_tracking:
   budget_alerts: true
   monthly_budget: 700
   export_to_s3: null
-
-testing:
-  weekly_small_test:
-    enabled: true
-    day: wednesday
-    time: "10:00"
-    sample_size_mb: 100
-  monthly_table_restore:
-    enabled: true
-    day: first-monday
-    time: "09:00"
-    table: ToshiFileObject-PROD
-  quarterly_full_drill:
-    enabled: true
-    months:
-      - january
-      - april
-      - july
-      - october
-    day: 15
-    isolated_environment: true

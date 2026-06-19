@@ -12,7 +12,7 @@ The project uses a `src/` layout. The installed package is `nzshm-backup`; the
 Python import path is `nzshm_backup`.
 
 > **Note:** The project uses `uv` for dependency management. `uv.lock` is the
-> source of truth for pinned versions. `poetry.lock` is no longer maintained.
+> source of truth for pinned versions.
 
 ## Running the CLI locally
 
@@ -33,7 +33,7 @@ backup --help
 ```bash
 make test      # run pytest
 make lint      # ruff check + mypy
-make fmt       # black + ruff --fix (auto-fix formatting and lint)
+make fmt       # ruff format + ruff check --fix
 make check     # lint then test — run before committing
 make upgrade   # upgrade deps (1-week cooldown — see pyproject.toml [tool.uv])
 make sync      # re-sync venv after pulling (uv sync --all-extras)
@@ -43,9 +43,8 @@ make sync      # re-sync venv after pulling (uv sync --all-extras)
 
 | Tool | Purpose | Config |
 |------|---------|--------|
-| `black` | Formatter (line length 100) | `pyproject.toml` |
-| `ruff` | Linter — E, F, W, I, N, UP, B, C4, A rules | `[tool.ruff.lint]` in `pyproject.toml` |
-| `mypy` | Static type checker | `pyproject.toml` |
+| `ruff` | Formatter + linter (line length 100) | `[tool.ruff]` in `pyproject.toml` |
+| `mypy` | Static type checker | `[tool.mypy]` in `pyproject.toml` |
 
 ## Tests
 

@@ -2,6 +2,25 @@
 
 This guide walks through the most common operations after [installation](installation.md).
 
+## Command map
+
+Top-level command groups:
+
+```text
+backup check      # pre-flight readiness checks
+backup schedule   # EventBridge schedule management
+backup setup      # infrastructure/bootstrap helpers
+backup run        # trigger manual backup run
+backup restore    # restore operations
+backup test       # integrity/restore testing helpers
+backup status     # latest backup status view
+backup events     # event log view
+backup config     # config view/push/pull/validate
+```
+
+For the full command tree and all options, see
+[CLI Reference](../cli-reference.md).
+
 ## Prerequisites
 
 - `backup-config.yaml` present in your working directory (or `BACKUP_CONFIG_PATH` set)
@@ -20,17 +39,21 @@ backup status --source toshi
 backup status --output json
 ```
 
-## Run a backup (dry run first)
+## Pre-flight check
 
-Always preview before executing:
+Before running a backup for the first time, validate credentials and permissions:
 
 ```bash
-backup run --source toshi --dry-run
+backup check
+backup check --source toshi
 ```
 
-Output shows how many objects would be copied and their total size. No AWS writes occur.
+Fix any `FAIL` items before proceeding. `WARN` items (e.g. backup bucket doesn't exist yet)
+are expected on first run and will be resolved automatically.
 
-Once satisfied, run for real:
+## Run a backup
+
+Run for real:
 
 ```bash
 backup run --source toshi

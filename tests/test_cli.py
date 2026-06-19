@@ -32,9 +32,6 @@ def temp_config(tmp_path):
         },
         "retention": {
             "hot_days": 30,
-            "warm_days": 90,
-            "cold_days": 365,
-            "max_age_days": 365,
         },
     }
     config_file = tmp_path / "backup-config.yaml"
@@ -75,6 +72,7 @@ def test_subcommand_help(subcommand):
 
 @mock_aws
 def test_dry_run_flag_propagates(temp_config, monkeypatch):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
     monkeypatch.chdir(temp_config.parent)
     s3 = boto3.client("s3", region_name="ap-southeast-2")
     s3.create_bucket(
@@ -88,6 +86,7 @@ def test_dry_run_flag_propagates(temp_config, monkeypatch):
 
 @mock_aws
 def test_run_without_dry_run(temp_config, monkeypatch):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
     monkeypatch.chdir(temp_config.parent)
     s3 = boto3.client("s3", region_name="ap-southeast-2")
     s3.create_bucket(
