@@ -453,7 +453,14 @@ def _download_and_upload(
 
 
 def _cleanup_unload_parts(s3_client, bucket: str, prefix: str) -> None:
-    """Delete ALL objects under the UNLOAD prefix (including 0-byte markers)."""
+    """Delete ALL objects under the UNLOAD prefix (including 0-byte markers).
+
+    Raises RuntimeError if S3 returns any per-key error. ``Quiet: True``
+    suppresses successful-delete entries in the response but still returns
+    the ``Errors`` list — silently ignoring it once let an ``AccessDenied``
+    leave a stale part file that blocked subsequent UNLOAD runs with
+    HIVE_PATH_ALREADY_EXISTS (see issue #40).
+    """
     paginator = s3_client.get_paginator("list_objects_v2")
     keys: list[dict] = []
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -463,10 +470,18 @@ def _cleanup_unload_parts(s3_client, bucket: str, prefix: str) -> None:
         return
     # delete_objects accepts max 1000 keys per call
     for i in range(0, len(keys), 1000):
-        s3_client.delete_objects(
+        response = s3_client.delete_objects(
             Bucket=bucket,
             Delete={"Objects": keys[i : i + 1000], "Quiet": True},
         )
+        errors = response.get("Errors") or []
+        if errors:
+            first = errors[0]
+            raise RuntimeError(
+                f"Failed to delete {len(errors)} UNLOAD part(s) under "
+                f"s3://{bucket}/{prefix}: first error key={first.get('Key')!r} "
+                f"code={first.get('Code')!r} message={first.get('Message')!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

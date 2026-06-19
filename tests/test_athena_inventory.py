@@ -302,6 +302,7 @@ def test_build_inventory_manifest_via_athena_runs_unload_and_count():
         {"Contents": [{"Key": "prefix/part.txt", "Size": 100}]}
     ]
     s3.copy_object.return_value = {"CopyObjectResult": {"ETag": '"manifest-etag"'}}
+    s3.delete_objects.return_value = {"Deleted": [], "Errors": []}
 
     athena = MagicMock()
     athena.get_query_execution.return_value = {
@@ -453,6 +454,7 @@ def test_cleanup_unload_parts_no_objects():
 
 def test_cleanup_unload_parts_single_batch():
     s3 = MagicMock()
+    s3.delete_objects.return_value = {"Deleted": [], "Errors": []}
     keys = [{"Key": f"prefix/part-{i:05d}.txt"} for i in range(5)]
     s3.get_paginator.return_value.paginate.return_value = [
         {"Contents": [{"Key": k["Key"]} for k in keys]}
@@ -465,6 +467,7 @@ def test_cleanup_unload_parts_single_batch():
 
 def test_cleanup_unload_parts_batches_over_1000():
     s3 = MagicMock()
+    s3.delete_objects.return_value = {"Deleted": [], "Errors": []}
     keys = [{"Key": f"prefix/part-{i:05d}.txt"} for i in range(1500)]
     s3.get_paginator.return_value.paginate.return_value = [{"Contents": keys}]
     ai._cleanup_unload_parts(s3, "bucket", "prefix/")
@@ -473,6 +476,28 @@ def test_cleanup_unload_parts_batches_over_1000():
     second_batch = s3.delete_objects.call_args_list[1].kwargs["Delete"]["Objects"]
     assert len(first_batch) == 1000
     assert len(second_batch) == 500
+
+
+def test_cleanup_unload_parts_raises_on_per_key_error():
+    # Regression for issue #40: a silent AccessDenied from delete_objects
+    # left a stale UNLOAD part file which blocked the next Athena UNLOAD
+    # with HIVE_PATH_ALREADY_EXISTS. The function must surface per-key
+    # errors loudly, not swallow them.
+    s3 = MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "prefix/part-00001.txt"}]}
+    ]
+    s3.delete_objects.return_value = {
+        "Errors": [
+            {
+                "Key": "prefix/part-00001.txt",
+                "Code": "AccessDenied",
+                "Message": "Access Denied",
+            }
+        ]
+    }
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        ai._cleanup_unload_parts(s3, "bucket", "prefix/")
 
 
 # ---------------------------------------------------------------------------
