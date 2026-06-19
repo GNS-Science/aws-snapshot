@@ -4,7 +4,7 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
-(no changes since v0.1.0)
+- deps: patch (12 pkgs), minor (22 pkgs), major: cryptography 47→48, mypy 1→2
 
 ## [v0.1.0] - 2026-06-12
 
