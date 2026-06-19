@@ -295,9 +295,7 @@ def test_config_push_auto_upgrades_to_advanced_tier_when_oversized(
         assert meta["Tier"] == "Advanced"
 
 
-def test_config_push_uses_standard_tier_when_small(
-    aws_credentials, cli_runner, temp_config_file
-):
+def test_config_push_uses_standard_tier_when_small(aws_credentials, cli_runner, temp_config_file):
     """A small (default fixture) config stays on Standard tier."""
     from nzshm_backup.commands.config import app
 

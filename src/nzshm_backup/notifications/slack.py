@@ -51,9 +51,7 @@ def send_slack(webhook_url: str, blocks: list[dict[str, Any]], text: str = "") -
     Raises:
         SlackDeliveryError: on HTTP error or non-2xx response.
     """
-    payload = json.dumps({"text": text or "Backup health report", "blocks": blocks}).encode(
-        "utf-8"
-    )
+    payload = json.dumps({"text": text or "Backup health report", "blocks": blocks}).encode("utf-8")
     request = urllib.request.Request(
         webhook_url,
         data=payload,

@@ -123,9 +123,7 @@ def health_report_run(
 
     typer.echo("")
     typer.echo("Delivery:")
-    slack_status = (
-        "ok" if delivery.slack_ok else (delivery.slack_error or "not attempted")
-    )
+    slack_status = "ok" if delivery.slack_ok else (delivery.slack_error or "not attempted")
     typer.echo(f"  Slack: {slack_status}")
     sns_status = (
         f"ok (MessageId={delivery.sns_message_id})"

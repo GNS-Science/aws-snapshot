@@ -83,9 +83,7 @@ def setup_lifecycle(
         "--config",
         help="Config file path",
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Print intended policy without applying"
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print intended policy without applying"),
 ) -> None:
     """Re-apply the lifecycle policy to deployed backup buckets.
 
@@ -152,9 +150,7 @@ def setup_lifecycle(
             "ID": "BackupTierTransition",
             "Status": "Enabled",
             "Filter": {"Prefix": ""},
-            "Transitions": [
-                {"Days": lifecycle_config.hot_days, "StorageClass": "GLACIER_IR"}
-            ],
+            "Transitions": [{"Days": lifecycle_config.hot_days, "StorageClass": "GLACIER_IR"}],
         }
         if lifecycle_config.version_retention_days > 0:
             rule["NoncurrentVersionExpiration"] = {
