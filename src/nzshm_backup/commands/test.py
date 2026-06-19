@@ -300,9 +300,7 @@ def _sample_for_restore(
                 all_objects.append(obj)
 
     sample = (
-        random.sample(all_objects, sample_size)
-        if len(all_objects) >= sample_size
-        else all_objects
+        random.sample(all_objects, sample_size) if len(all_objects) >= sample_size else all_objects
     )
     return sample, archived, None
 
@@ -638,9 +636,7 @@ def test_restore(
                     err=True,
                 )
             elif bucket_result.copy_errors:
-                typer.echo(
-                    f"    ✗ {len(bucket_result.copy_errors)} copy error(s):", err=True
-                )
+                typer.echo(f"    ✗ {len(bucket_result.copy_errors)} copy error(s):", err=True)
                 for err in bucket_result.copy_errors:
                     typer.echo(f"      - {err}", err=True)
                 any_failure = True
@@ -653,9 +649,7 @@ def test_restore(
                     typer.echo(f"      - {key}", err=True)
                 any_failure = True
             else:
-                typer.echo(
-                    f"    ✓ {bucket_result.sample_count} objects copied and verified"
-                )
+                typer.echo(f"    ✓ {bucket_result.sample_count} objects copied and verified")
             typer.echo("")
 
     # ------------------------------------------------------------------

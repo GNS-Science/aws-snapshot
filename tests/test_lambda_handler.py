@@ -185,13 +185,9 @@ def test_handler_health_report_invokes_build_and_send():
         with patch(
             "nzshm_backup.health_report.build_report", return_value=fake_report
         ) as mock_build:
-            with patch(
-                "nzshm_backup.health_report.send", return_value=delivery
-            ) as mock_send:
+            with patch("nzshm_backup.health_report.send", return_value=delivery) as mock_send:
                 with patch("nzshm_backup.event_log.append_event"):
-                    result = handler(
-                        {"source": "_health", "task_type": "health_report"}, None
-                    )
+                    result = handler({"source": "_health", "task_type": "health_report"}, None)
 
     assert result["statusCode"] == 200
     body = json.loads(result["body"])

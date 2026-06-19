@@ -61,8 +61,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         }
 
     logger.info(
-        "Starting task: "
-        f"task_type={task.task_type}, source={task.source}, dry_run={task.dry_run}"
+        f"Starting task: task_type={task.task_type}, source={task.source}, dry_run={task.dry_run}"
     )
 
     try:
@@ -89,9 +88,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 canary_cfg = config.sources.get(canary_alias)
                 if canary_cfg and canary_cfg.s3_buckets:
                     bucket_cfg = canary_cfg.s3_buckets[0]
-                    account_id = canary_cfg.source_account_id or session.client(
-                        "sts"
-                    ).get_caller_identity()["Account"]
+                    account_id = (
+                        canary_cfg.source_account_id
+                        or session.client("sts").get_caller_identity()["Account"]
+                    )
                     canary_bucket = canary_cfg.get_backup_bucket_name(
                         bucket_cfg.label,
                         config.general.region,

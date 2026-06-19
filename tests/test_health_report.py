@@ -54,9 +54,7 @@ def test_classify_red_when_inventory_missing():
 def test_classify_red_when_restore_failed():
     rt = RestoreTestResult(source="x", mode="direct copy")
     rt.buckets = [
-        BucketRestoreResult(
-            source_bucket="s", backup_bucket="b", result="failed", sample_count=0
-        )
+        BucketRestoreResult(source_bucket="s", backup_bucket="b", result="failed", sample_count=0)
     ]
     s = _make_src(restore_test=rt)
     assert hr._classify_source(s) == "red"
@@ -102,9 +100,7 @@ def test_classify_red_when_inventory_disabled_but_restore_failed():
     """Restore-test failure still reds an opted-out source."""
     rt = RestoreTestResult(source="x", mode="direct copy")
     rt.buckets = [
-        BucketRestoreResult(
-            source_bucket="s", backup_bucket="b", result="failed", sample_count=0
-        )
+        BucketRestoreResult(source_bucket="s", backup_bucket="b", result="failed", sample_count=0)
     ]
     s = _make_src(
         inventory_age_hours=None,
@@ -120,9 +116,7 @@ def test_classify_green_despite_large_source_count_change():
     A large day-over-day drop (previously class-1 red) must not flip the
     row to red on its own.
     """
-    s = _make_src(
-        count_delta={"available": True, "delta": -20_000, "delta_pct": -2.0}
-    )
+    s = _make_src(count_delta={"available": True, "delta": -20_000, "delta_pct": -2.0})
     assert hr._classify_source(s) == "green"
 
 
@@ -165,21 +159,27 @@ def _make_report_green() -> hr.HealthReportData:
     data = hr.HealthReportData(report_date=date(2026, 5, 20))
     data.duration_seconds = 12.4
     data.sources = [
-        _make_src(alias="toshi", inventory_age_hours=6.5,
-                  count_delta={"available": True, "delta": 5, "delta_pct": 0.001}),
-        _make_src(alias="weka", inventory_age_hours=6.6,
-                  restore_test=RestoreTestResult(
-                      source="weka",
-                      mode="direct copy",
-                      buckets=[
-                          BucketRestoreResult(
-                              source_bucket="s",
-                              backup_bucket="b",
-                              result="passed",
-                              sample_count=10,
-                          )
-                      ],
-                  )),
+        _make_src(
+            alias="toshi",
+            inventory_age_hours=6.5,
+            count_delta={"available": True, "delta": 5, "delta_pct": 0.001},
+        ),
+        _make_src(
+            alias="weka",
+            inventory_age_hours=6.6,
+            restore_test=RestoreTestResult(
+                source="weka",
+                mode="direct copy",
+                buckets=[
+                    BucketRestoreResult(
+                        source_bucket="s",
+                        backup_bucket="b",
+                        result="passed",
+                        sample_count=10,
+                    )
+                ],
+            ),
+        ),
     ]
     for s in data.sources:
         s.overall = "green"
@@ -229,9 +229,7 @@ def test_format_slack_returns_blocks_with_header_and_sections():
     blocks = hr.format_slack(data)
     assert blocks[0]["type"] == "header"
     assert "GREEN" in blocks[0]["text"]["text"]
-    section_texts = [
-        b["text"]["text"] for b in blocks if b.get("type") == "section"
-    ]
+    section_texts = [b["text"]["text"] for b in blocks if b.get("type") == "section"]
     # one section per source
     assert any("toshi" in t for t in section_texts)
     assert any("weka" in t for t in section_texts)
@@ -259,9 +257,7 @@ def test_send_skips_both_when_disabled():
 def test_send_slack_only_when_only_slack_enabled():
     data = _make_report_green()
     config = MagicMock()
-    config.slack = MagicMock(
-        enabled=True, webhook_url_secret="backup-slack-webhook"
-    )
+    config.slack = MagicMock(enabled=True, webhook_url_secret="backup-slack-webhook")
     config.reports = MagicMock()
     config.reports.email = MagicMock(enabled=False)
     session = MagicMock()
@@ -279,17 +275,13 @@ def test_send_slack_only_when_only_slack_enabled():
 def test_send_continues_to_sns_when_slack_fails():
     data = _make_report_green()
     config = MagicMock()
-    config.slack = MagicMock(
-        enabled=True, webhook_url_secret="backup-slack-webhook"
-    )
+    config.slack = MagicMock(enabled=True, webhook_url_secret="backup-slack-webhook")
     config.reports = MagicMock()
     config.reports.email = MagicMock(enabled=True, address="me@example.com")
     session = MagicMock()
 
     with patch.object(hr, "resolve_webhook_url", return_value="https://hooks/x"):
-        with patch.object(
-            hr, "send_slack", side_effect=hr.SlackDeliveryError("HTTP 500")
-        ):
+        with patch.object(hr, "send_slack", side_effect=hr.SlackDeliveryError("HTTP 500")):
             with patch.object(hr, "publish_report", return_value="msg-1"):
                 result = hr.send(data, config, session, "arn:aws:sns:::topic")
 
@@ -360,9 +352,7 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     config.sources = {"weka": source_cfg, "toshi": source_cfg}
 
     mock_status.return_value = {"weka": {}, "toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": 0,
@@ -373,9 +363,7 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
 
     rt = RestoreTestResult(source="weka", mode="direct copy")
     rt.buckets = [
-        BucketRestoreResult(
-            source_bucket="s", backup_bucket="b", result="passed", sample_count=10
-        )
+        BucketRestoreResult(source_bucket="s", backup_bucket="b", result="passed", sample_count=10)
     ]
     mock_restore.return_value = rt
 
@@ -404,9 +392,7 @@ def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
     config.sources = {"weka": source_cfg, "ths": source_cfg, "toshi": source_cfg}
 
     mock_status.return_value = {"weka": {}, "ths": {}, "toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": 0,
@@ -415,9 +401,7 @@ def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
 
     rt = RestoreTestResult(source="x", mode="direct copy")
     rt.buckets = [
-        BucketRestoreResult(
-            source_bucket="s", backup_bucket="b", result="passed", sample_count=10
-        )
+        BucketRestoreResult(source_bucket="s", backup_bucket="b", result="passed", sample_count=10)
     ]
     mock_restore.return_value = rt
 
@@ -445,11 +429,11 @@ def test_build_report_classifies_red_on_backup_missing(
     config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {
-        "available": True, "delta": 0, "delta_pct": 0.0,
+        "available": True,
+        "delta": 0,
+        "delta_pct": 0.0,
     }
     mock_div.return_value = {
         "available": True,
@@ -482,9 +466,7 @@ def test_build_report_source_count_drop_is_class2_informational_only(
     config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": -50_000,
@@ -497,7 +479,7 @@ def test_build_report_source_count_drop_is_class2_informational_only(
     report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
 
     src = report.sources[0]
-    assert src.overall == "green"          # not red — count delta no longer alarms
+    assert src.overall == "green"  # not red — count delta no longer alarms
     assert any("dropped" in n for n in src.info_notes)
     assert not any("dropped" in n for n in src.notes)
 
@@ -516,11 +498,11 @@ def test_build_report_orphan_count_is_class2_info(
     config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {
-        "available": True, "delta": 0, "delta_pct": 0.0,
+        "available": True,
+        "delta": 0,
+        "delta_pct": 0.0,
     }
     mock_div.return_value = {
         "available": True,
@@ -580,8 +562,13 @@ def _session_with_head_object_results(results: list[object]) -> MagicMock:
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
 def test_build_report_tags_still_missing_when_head_object_404s(
-    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
-    mock_div, mock_sample,
+    _mock_account,
+    mock_status,
+    mock_inv,
+    mock_delta,
+    _mock_restore,
+    mock_div,
+    mock_sample,
 ):
     """Sampled keys all 404 → tag '(still missing live, sampled N)'.
 
@@ -591,9 +578,7 @@ def test_build_report_tags_still_missing_when_head_object_404s(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -613,10 +598,9 @@ def test_build_report_tags_still_missing_when_head_object_404s(
 
     src = report.sources[0]
     assert src.overall == "red"
-    assert any(
-        "missing 1 source keys (still missing live, sampled 1)" in n
-        for n in src.notes
-    ), src.notes
+    assert any("missing 1 source keys (still missing live, sampled 1)" in n for n in src.notes), (
+        src.notes
+    )
 
 
 @patch("nzshm_backup.health_report.divergence_sample_keys")
@@ -627,8 +611,13 @@ def test_build_report_tags_still_missing_when_head_object_404s(
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
 def test_build_report_tags_auto_healed_when_head_object_200s(
-    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
-    mock_div, mock_sample,
+    _mock_account,
+    mock_status,
+    mock_inv,
+    mock_delta,
+    _mock_restore,
+    mock_div,
+    mock_sample,
 ):
     """Sampled keys all 200 → tag '(auto-healed since snapshot, sampled N)'.
 
@@ -639,9 +628,7 @@ def test_build_report_tags_auto_healed_when_head_object_200s(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -662,8 +649,7 @@ def test_build_report_tags_auto_healed_when_head_object_200s(
     src = report.sources[0]
     assert src.overall == "red"  # decision: keep RED regardless of live state
     assert any(
-        "missing 1 source keys (auto-healed since snapshot, sampled 1)" in n
-        for n in src.notes
+        "missing 1 source keys (auto-healed since snapshot, sampled 1)" in n for n in src.notes
     ), src.notes
 
 
@@ -675,16 +661,19 @@ def test_build_report_tags_auto_healed_when_head_object_200s(
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
 def test_build_report_tags_mixed_when_some_still_missing_some_healed(
-    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
-    mock_div, mock_sample,
+    _mock_account,
+    mock_status,
+    mock_inv,
+    mock_delta,
+    _mock_restore,
+    mock_div,
+    mock_sample,
 ):
     """Partial recovery → tag '(X still missing, Y auto-healed, sampled N)'."""
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -696,26 +685,29 @@ def test_build_report_tags_mixed_when_some_still_missing_some_healed(
     mock_sample.return_value = {
         "available": True,
         "source_minus_backup_sample": [
-            "data/file-01.txt", "data/file-02.txt",
-            "data/file-03.txt", "data/file-04.txt",
+            "data/file-01.txt",
+            "data/file-02.txt",
+            "data/file-03.txt",
+            "data/file-04.txt",
         ],
         "sample_size": 4,
     }
 
     # 1 still missing, 3 auto-healed
-    session = _session_with_head_object_results([
-        _client_error("404"),
-        {"ContentLength": 71},
-        {"ContentLength": 72},
-        {"ContentLength": 73},
-    ])
+    session = _session_with_head_object_results(
+        [
+            _client_error("404"),
+            {"ContentLength": 71},
+            {"ContentLength": 72},
+            {"ContentLength": 73},
+        ]
+    )
     report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
 
     src = report.sources[0]
     assert src.overall == "red"
     assert any(
-        "missing 4 source keys (1 still missing, 3 auto-healed, sampled 4)" in n
-        for n in src.notes
+        "missing 4 source keys (1 still missing, 3 auto-healed, sampled 4)" in n for n in src.notes
     ), src.notes
 
 
@@ -727,8 +719,13 @@ def test_build_report_tags_mixed_when_some_still_missing_some_healed(
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
 def test_build_report_falls_back_to_untagged_when_sample_query_fails(
-    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
-    mock_div, mock_sample,
+    _mock_account,
+    mock_status,
+    mock_inv,
+    mock_delta,
+    _mock_restore,
+    mock_div,
+    mock_sample,
 ):
     """A failed sample query falls back to the original untagged note shape.
 
@@ -739,9 +736,7 @@ def test_build_report_falls_back_to_untagged_when_sample_query_fails(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -758,9 +753,7 @@ def test_build_report_falls_back_to_untagged_when_sample_query_fails(
     src = report.sources[0]
     assert src.overall == "red"
     # Untagged note shape — no '(...)' suffix
-    assert any(
-        n == "backup is missing 3 source keys" for n in src.notes
-    ), src.notes
+    assert any(n == "backup is missing 3 source keys" for n in src.notes), src.notes
     # Diagnostic note recording the sample failure
     assert any("head-check sample failed" in n for n in src.notes), src.notes
 
@@ -773,8 +766,13 @@ def test_build_report_falls_back_to_untagged_when_sample_query_fails(
 @patch("nzshm_backup.health_report.get_status_dict")
 @patch("nzshm_backup.health_report.get_account_id", return_value="999")
 def test_build_report_classifier_unchanged_when_all_auto_healed(
-    _mock_account, mock_status, mock_inv, mock_delta, _mock_restore,
-    mock_div, mock_sample,
+    _mock_account,
+    mock_status,
+    mock_inv,
+    mock_delta,
+    _mock_restore,
+    mock_div,
+    mock_sample,
 ):
     """Decision: row stays RED even when all sampled keys are auto-healed.
 
@@ -784,9 +782,7 @@ def test_build_report_classifier_unchanged_when_all_auto_healed(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {
-        "effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)
-    }
+    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -798,17 +794,25 @@ def test_build_report_classifier_unchanged_when_all_auto_healed(
     mock_sample.return_value = {
         "available": True,
         "source_minus_backup_sample": [
-            "data/file-01.txt", "data/file-02.txt", "data/file-03.txt",
-            "data/file-04.txt", "data/file-05.txt",
+            "data/file-01.txt",
+            "data/file-02.txt",
+            "data/file-03.txt",
+            "data/file-04.txt",
+            "data/file-05.txt",
         ],
         "sample_size": 5,
     }
 
     # All 5 succeed → auto_healed = 5, still_missing = 0
-    session = _session_with_head_object_results([
-        {"ContentLength": 71}, {"ContentLength": 72}, {"ContentLength": 73},
-        {"ContentLength": 74}, {"ContentLength": 75},
-    ])
+    session = _session_with_head_object_results(
+        [
+            {"ContentLength": 71},
+            {"ContentLength": 72},
+            {"ContentLength": 73},
+            {"ContentLength": 74},
+            {"ContentLength": 75},
+        ]
+    )
     report = hr.build_report(session, config, today=date(2026, 5, 19), weekday=1)
 
     src = report.sources[0]
