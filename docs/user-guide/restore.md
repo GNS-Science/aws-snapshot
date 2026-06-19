@@ -78,11 +78,13 @@ S3 Batch job progress).
 | Backup age | Storage tier | Retrieval time | Notes |
 |------------|-------------|----------------|-------|
 | 0–30 days | S3 Standard | Immediate | No retrieval cost |
-| 31–120 days | Glacier Instant | Milliseconds | Small retrieval fee |
-| 121–365 days | Glacier Deep Archive | 12–48 hours | Higher retrieval fee; DR use only |
+| 30+ days (forever) | Glacier Instant | Milliseconds | Small retrieval fee (~$0.079/GB) |
 
-For a full DR restore of 9 TB from Deep Archive, retrieval costs ~$1,130 NZD
-(one-time). Plan for 12–48 hour restore time. See
+Per [ADR-006](../design/adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)
+backup objects no longer transition to Deep Archive, so DR restores no longer
+include a 12–48h thaw step — wall-clock time is bound by S3-to-S3 copy
+throughput. A full DR restore of 9 TB from Glacier IR costs ~$709 NZD in
+retrieval (one-time). See
 [Cost Model](../architecture/cost-model.md#storage-tier-reference) for pricing.
 
 ## DR drill checklist

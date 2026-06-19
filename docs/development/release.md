@@ -3,50 +3,37 @@
 ## Versioning
 
 The project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
-Version is set in `pyproject.toml` and exposed via `nzshm_backup/__init__.py`:
-
-```python
-__version__ = "0.3.0"
-```
+Version is derived automatically from git tags via `hatch-vcs`. No manual version
+strings in source code — the version is generated at build time from the most
+recent `vX.Y.Z` tag.
 
 Display with:
 
 ```bash
-backup --version
+uv run backup --version
 ```
+
+Between tags, dev builds get versions like `0.1.1.dev3+gabcdef1`.
 
 ## Release steps
 
-1. **Update version** in `pyproject.toml`:
-   ```toml
-   [tool.poetry]
-   version = "0.4.0"
-   ```
-
-2. **Update `__init__.py`**:
-   ```python
-   __version__ = "0.4.0"
-   ```
-
-3. **Run tests and checks**:
+1. **Run tests and checks**:
    ```bash
-   poetry run pytest
-   poetry run ruff check src/ tests/
-   poetry run mypy src/
+   uv run tox --skip-missing-interpreters -e py312,format,lint,build-linux
    ```
 
-4. **Commit and tag**:
+2. **Tag and push**:
    ```bash
-   git add pyproject.toml src/nzshm_backup/__init__.py
-   git commit -m "chore: bump version to 0.4.0"
    git tag v0.4.0
    git push origin main --tags
    ```
 
-5. **Build and publish** (if publishing to PyPI):
+   The version is derived from the tag — no file edits needed.
+
+3. **Build and publish** (if publishing to PyPI):
    ```bash
-   poetry build
-   poetry publish
+   uv build
+   uv publish
    ```
 
 ## Docs versioning with mike
@@ -56,13 +43,13 @@ The docs site uses [mike](https://github.com/jimporter/mike) for versioned docs
 
 ```bash
 # Deploy a new version
-poetry run mike deploy 0.4.0 latest --update-aliases --push
+uv run mike deploy 0.4.0 latest --update-aliases --push
 
 # List deployed versions
-poetry run mike list
+uv run mike list
 
 # Set the default version shown on the landing page
-poetry run mike set-default latest --push
+uv run mike set-default latest --push
 ```
 
 Docs are served from the `gh-pages` branch.

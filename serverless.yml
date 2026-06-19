@@ -1,6 +1,6 @@
-# "org" ensures this Service is used with the correct Serverless Framework Access Key.
-org: dailyscience
-service: nzshm-backup
+org: gnssciencenshm
+app: nzshm-backup
+service: nzshm-backup-service
 
 frameworkVersion: "4"
 
@@ -8,11 +8,14 @@ provider:
   name: aws
   runtime: python3.10
   region: ap-southeast-2
+  deploymentPrefix: nzshm-backup
+  # accountId guard not supported by Serverless Framework v4 — enforce via AWS SSO profile
   memorySize: 1024
   timeout: 900
   environment:
     NZSHM_STAGE: ${sls:stage}
     PYTHONPATH: /var/task/src
+    BACKUP_REPORTS_TOPIC_ARN: !Ref BackupReportsTopic
   iam:
     role:
       statements:
@@ -23,12 +26,27 @@ provider:
             - s3:PutObject
             - s3:CopyObject
             - s3:CreateBucket
+            - s3:GetBucketLocation
             - s3:GetBucketTagging
+            - s3:GetBucketVersioning
             - s3:PutLifecycleConfiguration
             - s3:PutBucketPolicy
             - s3:PutBucketTagging
+            - s3:PutBucketVersioning
+            - s3:GetBucketAcl
           Resource:
             - "*"
+        # Restore-test temp buckets (bb-restore-test-<ts>-<account>) are
+        # created and deleted by the Lambda each run. Scoped delete so
+        # the no-delete guarantee on real backup buckets (bb-<source>-*)
+        # is preserved.
+        - Effect: Allow
+          Action:
+            - s3:DeleteObject
+            - s3:DeleteBucket
+          Resource:
+            - "arn:aws:s3:::bb-restore-test-*"
+            - "arn:aws:s3:::bb-restore-test-*/*"
         - Effect: Allow
           Action:
             - sts:GetCallerIdentity
@@ -44,10 +62,13 @@ provider:
           Resource: "*"
         - Effect: Allow
           Action:
+            - s3:CreateJob
+            - s3:DescribeJob
+            - s3:ListJobs
             - s3control:CreateJob
             - s3control:DescribeJob
             - s3control:ListJobs
-          Resource: "*"  # s3control does not support resource-level ARN scoping
+          Resource: "*"  # S3 Batch Operations does not support resource-level ARN scoping
         - Effect: Allow
           Action:
             - iam:PassRole
@@ -65,6 +86,44 @@ provider:
             - ssm:GetParameter
             - ssm:PutParameter
           Resource: "arn:aws:ssm:ap-southeast-2:*:parameter/nzshm-backup/*"
+        - Effect: Allow
+          Action:
+            - athena:StartQueryExecution
+            - athena:GetQueryExecution
+            - athena:GetQueryResults
+            - athena:ListDatabases
+            - athena:ListTables
+            - athena:GetDatabase
+            - athena:GetTableMetadata
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - glue:GetDatabase
+            - glue:CreateDatabase
+            - glue:GetTable
+            - glue:GetTables
+            - glue:CreateTable
+            - glue:UpdateTable
+            - glue:DeleteTable
+            - glue:GetPartition
+            - glue:GetPartitions
+            - glue:CreatePartition
+            - glue:BatchCreatePartition
+            - glue:DeletePartition
+            - glue:UpdatePartition
+            - glue:BatchDeletePartition
+          Resource: "*"
+        # Daily health-report delivery (ADR-005 slow path)
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - !Ref BackupReportsTopic
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - arn:aws:secretsmanager:${aws:region}:${aws:accountId}:secret:backup-slack-webhook-*
         # NOTE: NO s3:DeleteObject - backup buckets are delete-protected
 
 functions:
@@ -85,27 +144,62 @@ functions:
   backup:
     handler: nzshm_backup.lambda_handler.handler
     description: Backup orchestration for NSHM datasets
-    events:
-      - eventBridge:
-          enabled: false
-          schedule: rate(7 days)
-          description: Weekly backup trigger
-          input:
-            source: "all"
-            trigger_type: "scheduled"
-      - eventBridge:
-          enabled: false
-          schedule: rate(1 day)
-          description: Daily backup for active experiment mode
-          input:
-            source: "all"
-            trigger_type: "scheduled"
-            full_sync: false
+    # No default EventBridge triggers — schedules are managed per-source via
+    # `backup schedule add` which creates named rules targeting this Lambda.
 
 custom:
+  # Stage name (prod, sandbox) does not match the config file suffix
+  # (production, sandbox). Map explicitly here rather than renaming
+  # files — the existing names are referenced by deploy runbooks and
+  # BACKUP_CONFIG_PATH.
+  configFiles:
+    prod: backup-config.production.yaml
+    sandbox: backup-config.sandbox.yaml
+  config: ${file(${self:custom.configFiles.${sls:stage}, 'backup-config.production.yaml'})}
   pythonRequirements:
     dockerizePip: true
     slim: true
+
+# Subscriptions are NOT managed here — `backup notifications apply`
+# reconciles the topic subscriptions to match the lists in
+# backup-config.{stage}.yaml. This keeps backup-config as the single
+# source of truth for who gets which channel.
+resources:
+  Resources:
+    BackupAlertsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: nzshm-backup-alerts-${sls:stage}
+        DisplayName: NSHM Backup Alerts (${sls:stage})
+
+    BackupLambdaErrorAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: nzshm-backup-lambda-errors-${sls:stage}
+        AlarmDescription: Backup Lambda invocation errors (ADR-005 fast path)
+        Namespace: AWS/Lambda
+        MetricName: Errors
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref BackupLambdaFunction
+        Statistic: Sum
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref BackupAlertsTopic
+        OKActions:
+          - !Ref BackupAlertsTopic
+
+    # ADR-005 slow path: daily health report delivered via SNS -> email.
+    # Separate topic so report subscribers are distinct from alarm subscribers.
+    BackupReportsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: nzshm-backup-reports-${sls:stage}
+        DisplayName: NSHM Backup Daily Reports (${sls:stage})
 
 package:
   individually: true

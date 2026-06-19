@@ -21,22 +21,22 @@ tests/
 
 ```bash
 # All tests
-poetry run pytest
+uv run pytest
 
 # Single file
-poetry run pytest tests/test_s3_backup.py
+uv run pytest tests/test_s3_backup.py
 
 # Single test
-poetry run pytest tests/test_s3_backup.py::test_incremental_sync_skips_matching_etags
+uv run pytest tests/test_s3_backup.py::test_incremental_sync_skips_matching_etags
 
 # Verbose output
-poetry run pytest -v
+uv run pytest -v
 
 # Show captured output (useful for debugging)
-poetry run pytest -s
+uv run pytest -s
 
 # Stop on first failure
-poetry run pytest -x
+uv run pytest -x
 ```
 
 ## Mocking AWS services
@@ -74,7 +74,7 @@ def test_backup_dry_run(make_config):
 ## Coverage
 
 ```bash
-poetry run pytest --cov=nzshm_backup --cov-report=term-missing
+uv run pytest --cov=nzshm_backup --cov-report=term-missing
 ```
 
 Current coverage: ~152 tests. Target: maintain > 70% line coverage.
@@ -91,5 +91,5 @@ explicitly against a sandbox account:
 
 ```bash
 eval "$(aws configure export-credentials --profile sandbox --format env)"
-poetry run pytest -m integration
+uv run pytest -m integration
 ```

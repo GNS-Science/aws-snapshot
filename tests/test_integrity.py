@@ -1,9 +1,16 @@
 """Tests for backup integrity checking using moto mocks."""
 
+from unittest.mock import MagicMock
+
 import boto3
 from moto import mock_aws
 
-from nzshm_backup.integrity import IntegrityResult, ObjectDiff, check_bucket_integrity
+from nzshm_backup.integrity import (
+    IntegrityResult,
+    ObjectDiff,
+    check_bucket_integrity,
+    get_object_checksum,
+)
 
 REGION = "ap-southeast-2"
 
@@ -167,3 +174,167 @@ def test_integrity_result_properties():
     assert result.missing_count == 2
     assert result.mismatch_count == 1
     assert not result.clean
+
+
+# ---------------------------------------------------------------------------
+# get_object_checksum
+# ---------------------------------------------------------------------------
+
+
+def test_get_object_checksum_returns_crc64():
+    s3 = MagicMock()
+    s3.get_object_attributes.return_value = {
+        "Checksum": {"ChecksumCRC64NVME": "abc123", "ChecksumType": "FULL_OBJECT"},
+    }
+    result = get_object_checksum(s3, "bucket", "key")
+    assert result == ("ChecksumCRC64NVME", "abc123")
+
+
+def test_get_object_checksum_returns_sha256_when_no_crc64():
+    s3 = MagicMock()
+    s3.get_object_attributes.return_value = {
+        "Checksum": {"ChecksumSHA256": "sha256val"},
+    }
+    result = get_object_checksum(s3, "bucket", "key")
+    assert result == ("ChecksumSHA256", "sha256val")
+
+
+def test_get_object_checksum_returns_none_when_no_checksum():
+    s3 = MagicMock()
+    s3.get_object_attributes.return_value = {"Checksum": {}}
+    assert get_object_checksum(s3, "bucket", "key") is None
+
+
+def test_get_object_checksum_returns_none_on_error():
+    s3 = MagicMock()
+    s3.get_object_attributes.side_effect = Exception("AccessDenied")
+    assert get_object_checksum(s3, "bucket", "key") is None
+
+
+# ---------------------------------------------------------------------------
+# check_bucket_integrity — checksum fallback on ETag mismatch
+# ---------------------------------------------------------------------------
+
+
+def test_etag_mismatch_resolved_by_matching_checksum():
+    """Different ETags but matching checksums → not flagged as mismatch."""
+    s3 = MagicMock()
+
+    # Simulate listing: one object in each bucket with different ETags
+    source_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"multipart-etag-1"'}]
+    }
+    backup_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"singlepart-etag"'}]
+    }
+    # get_paginator returns different pages for source vs backup
+    call_count = {"n": 0}
+
+    def paginate(**kw):
+        call_count["n"] += 1
+        if call_count["n"] <= 1:
+            return [source_page]
+        return [backup_page]
+
+    s3.get_paginator.return_value.paginate.side_effect = paginate
+
+    # Both objects have matching CRC64 checksum
+    s3.get_object_attributes.return_value = {
+        "Checksum": {"ChecksumCRC64NVME": "same_checksum"},
+    }
+
+    result = check_bucket_integrity(s3, "source", "backup")
+
+    assert result.clean
+    assert result.mismatch_count == 0
+
+
+def test_etag_mismatch_with_different_checksums_still_flagged():
+    """Different single-part ETags AND different checksums → flagged."""
+    s3 = MagicMock()
+
+    source_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"aaa111"'}]
+    }
+    backup_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"bbb222"'}]
+    }
+    call_count = {"n": 0}
+
+    def paginate(**kw):
+        call_count["n"] += 1
+        if call_count["n"] <= 1:
+            return [source_page]
+        return [backup_page]
+
+    s3.get_paginator.return_value.paginate.side_effect = paginate
+
+    # Different checksums
+    checksums = iter([
+        {"Checksum": {"ChecksumCRC64NVME": "checksum_a"}},
+        {"Checksum": {"ChecksumCRC64NVME": "checksum_b"}},
+    ])
+    s3.get_object_attributes.side_effect = lambda **kw: next(checksums)
+
+    result = check_bucket_integrity(s3, "source", "backup")
+
+    assert not result.clean
+    assert result.mismatch_count == 1
+
+
+def test_etag_mismatch_multipart_skipped():
+    """Different ETags where one is multipart → skipped (not flagged)."""
+    s3 = MagicMock()
+
+    source_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"abc123-2"'}]
+    }
+    backup_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"def456"'}]
+    }
+    call_count = {"n": 0}
+
+    def paginate(**kw):
+        call_count["n"] += 1
+        if call_count["n"] <= 1:
+            return [source_page]
+        return [backup_page]
+
+    s3.get_paginator.return_value.paginate.side_effect = paginate
+
+    # No checksums available (cross-account)
+    s3.get_object_attributes.return_value = {"Checksum": {}}
+
+    result = check_bucket_integrity(s3, "source", "backup")
+
+    assert result.clean
+    assert result.mismatch_count == 0
+
+
+def test_etag_mismatch_no_checksums_available_still_flagged():
+    """Different single-part ETags and no checksums → flagged."""
+    s3 = MagicMock()
+
+    source_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"aaa111"'}]
+    }
+    backup_page = {
+        "Contents": [{"Key": "file.txt", "ETag": '"bbb222"'}]
+    }
+    call_count = {"n": 0}
+
+    def paginate(**kw):
+        call_count["n"] += 1
+        if call_count["n"] <= 1:
+            return [source_page]
+        return [backup_page]
+
+    s3.get_paginator.return_value.paginate.side_effect = paginate
+
+    # No checksums
+    s3.get_object_attributes.return_value = {"Checksum": {}}
+
+    result = check_bucket_integrity(s3, "source", "backup")
+
+    assert not result.clean
+    assert result.mismatch_count == 1

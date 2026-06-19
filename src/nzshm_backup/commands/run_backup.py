@@ -22,6 +22,11 @@ def run(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be done without executing"
     ),
+    prepare_only: bool = typer.Option(
+        False,
+        "--prepare-only",
+        help="Build S3 Batch manifest(s) but do not submit S3 Batch jobs",
+    ),
 ):
     """Execute manual backup.
 
@@ -64,7 +69,12 @@ def run(
 
     for source_alias in sources_to_backup:
         result = run_backup_source(
-            session, config, source_alias, dry_run=state.dry_run, full_sync=full_sync
+            session,
+            config,
+            source_alias,
+            dry_run=state.dry_run,
+            full_sync=full_sync,
+            prepare_only=prepare_only,
         )
 
         # Accumulate S3 totals and emit per-bucket output
@@ -73,8 +83,18 @@ def run(
                 logger.error(f"Backup failed for {r['bucket_name']}: {r['error']}")
             elif "batch_job_id" in r:
                 prefix = "[DRY RUN] " if state.dry_run else ""
-                if r["batch_status"] == "SKIPPED":
+                if state.dry_run:
+                    typer.echo(
+                        f"{prefix}Would submit S3 Batch job for {r['bucket_name']} "
+                        f"(object count not enumerated — use 'backup check' for access validation)"
+                    )
+                elif r["batch_status"] == "SKIPPED":
                     typer.echo(f"{prefix}Batch: nothing to copy for {r['bucket_name']}")
+                elif r["batch_status"] == "PREPARED":
+                    typer.echo(
+                        f"{prefix}Manifest prepared for {r['bucket_name']} "
+                        f"({r['objects_in_manifest']} objects): {r['manifest_key']}"
+                    )
                 else:
                     typer.echo(
                         f"{prefix}Batch job submitted: {r['batch_job_id']} "
@@ -102,8 +122,7 @@ def run(
             if r["status"] == "success":
                 prefix = "[DRY RUN] " if state.dry_run else ""
                 typer.echo(
-                    f"{prefix}Export initiated: {r['table_name']} → "
-                    f"{r['export_arn'] or 'skipped'}"
+                    f"{prefix}Export initiated: {r['table_name']} → {r['export_arn'] or 'skipped'}"
                 )
 
         total_results["errors"].extend(result.errors)

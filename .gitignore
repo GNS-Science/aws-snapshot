@@ -3,16 +3,18 @@
 __pycache__/
 .DS_Store
 *.egg-info/
+src/nzshm_backup/_version.py
 dist/
 build/
 site/
-.llm/.session
+.llm/
 .env
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
 htmlcov/
 .coverage
+coverage.xml
 
 # Serverless
 .serverless/
@@ -20,4 +22,4 @@ node_modules/
 
 # Local config (contains account IDs and ARNs)
 backup-config.sandbox.yaml
-poetry.lock
+

@@ -1,22 +1,31 @@
 """Configuration management commands."""
 
 import json
+import os
 from pathlib import Path
 
 import boto3
 import typer
 
 from nzshm_backup.config import ConfigModel, load_config, save_config
-from nzshm_backup.config.loader import load_config_from_ssm
+from nzshm_backup.config.loader import (
+    CONFIG_PATH_ENV_VAR,
+    DEFAULT_CONFIG_PATH,
+    load_config_from_ssm,
+)
 from nzshm_backup.state import get_state
 
 app = typer.Typer()
 
 
 def _get_config_path() -> Path:
-    """Get config file path from state or default."""
+    """Get config file path from state, BACKUP_CONFIG_PATH env var, or default."""
     state = get_state()
-    return getattr(state, "config_path", Path("backup-config.yaml"))
+    config_path: Path | None = getattr(state, "config_path", None)
+    if config_path is not None:
+        return config_path
+    env_path = os.environ.get(CONFIG_PATH_ENV_VAR)
+    return Path(env_path) if env_path else DEFAULT_CONFIG_PATH
 
 
 @app.command("show")
@@ -129,13 +138,23 @@ def push_config(
         return
 
     ssm = boto3.client("ssm")
+    # Standard tier caps Value at 4 KB. Auto-upgrade to Advanced when the
+    # JSON exceeds that; Advanced caps at 8 KB and costs ~$0.05/parameter/
+    # month. The upgrade is one-way per parameter — once Advanced, the SSM
+    # parameter stays Advanced even if a future push fits in 4 KB.
+    payload_bytes = len(json_str.encode("utf-8"))
+    tier = "Advanced" if payload_bytes > 4096 else "Standard"
     ssm.put_parameter(
         Name=param_name,
         Value=json_str,
         Type="String",
+        Tier=tier,
         Overwrite=True,
     )
-    typer.echo(f"Config pushed to SSM parameter: {param_name}")
+    typer.echo(
+        f"Config pushed to SSM parameter: {param_name} "
+        f"({payload_bytes} bytes, Tier={tier})"
+    )
 
 
 @app.command("pull")

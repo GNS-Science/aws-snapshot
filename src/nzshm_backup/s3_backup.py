@@ -38,14 +38,11 @@ class SyncResult:
 class LifecycleConfig:
     """S3 lifecycle policy configuration.
 
-    AWS constraint: DEEP_ARCHIVE transition must be >= hot_days + 90.
-    Default warm_days=120 satisfies this for hot_days=30.
+    Single transition from Standard to Glacier Instant Retrieval at
+    ``hot_days``. Current object versions are never expired (ADR-006).
     """
 
     hot_days: int = 30
-    warm_days: int = 120
-    cold_days: int = 365
-    max_age_days: int = 365
     version_retention_days: int = 365  # how long superseded object versions are kept; 0 = forever
 
 
@@ -183,9 +180,6 @@ def apply_lifecycle_policy(
     if config is None:
         config = LifecycleConfig()
 
-    # AWS requires DEEP_ARCHIVE to be at least 90 days after GLACIER_IR
-    deep_archive_days = max(config.warm_days, config.hot_days + 90)
-
     rule: dict = {
         "ID": "BackupTierTransition",
         "Status": "Enabled",
@@ -195,14 +189,7 @@ def apply_lifecycle_policy(
                 "Days": config.hot_days,
                 "StorageClass": "GLACIER_IR",
             },
-            {
-                "Days": deep_archive_days,
-                "StorageClass": "DEEP_ARCHIVE",
-            },
         ],
-        "Expiration": {
-            "Days": config.max_age_days,
-        },
     }
 
     # version_retention_days=0 means retain superseded versions forever (no expiry rule)
@@ -260,11 +247,25 @@ def enable_versioning(s3_client, bucket_name: str) -> None:
         s3_client:   boto3 S3 client
         bucket_name: Name of bucket to enable versioning on
     """
-    s3_client.put_bucket_versioning(
-        Bucket=bucket_name,
-        VersioningConfiguration={"Status": "Enabled"},
-    )
-    logger.info(f"Enabled versioning on {bucket_name}")
+    try:
+        s3_client.put_bucket_versioning(
+            Bucket=bucket_name,
+            VersioningConfiguration={"Status": "Enabled"},
+        )
+        logger.info(f"Enabled versioning on {bucket_name}")
+    except ClientError as e:
+        code = e.response["Error"].get("Code", "Unknown")
+        if code == "AccessDenied":
+            raise RuntimeError(
+                "Failed to enable versioning on backup bucket "
+                f"{bucket_name}: missing s3:PutBucketVersioning permission. "
+                "Grant this permission to the backup execution role, then run: "
+                f"aws s3api put-bucket-versioning --bucket {bucket_name} "
+                "--versioning-configuration Status=Enabled"
+            ) from e
+        raise RuntimeError(
+            f"Failed to enable versioning on backup bucket {bucket_name}: {code}"
+        ) from e
 
 
 def sync_bucket(
