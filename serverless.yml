@@ -47,6 +47,16 @@ provider:
           Resource:
             - "arn:aws:s3:::bb-restore-test-*"
             - "arn:aws:s3:::bb-restore-test-*/*"
+        # Athena UNLOAD writes part files under
+        # nzshm-backup-inventory-<account>/_manifests/unload/<alias>/<bucket>/
+        # which must be deleted before the next run (Athena UNLOAD refuses to
+        # overwrite a non-empty target — HIVE_PATH_ALREADY_EXISTS). Scoped
+        # narrowly so the rest of the control bucket remains delete-protected.
+        - Effect: Allow
+          Action:
+            - s3:DeleteObject
+          Resource:
+            - "arn:aws:s3:::nzshm-backup-inventory-*/_manifests/unload/*"
         - Effect: Allow
           Action:
             - sts:GetCallerIdentity
