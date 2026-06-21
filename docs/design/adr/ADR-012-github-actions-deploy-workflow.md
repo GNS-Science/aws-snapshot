@@ -85,17 +85,7 @@ with the following shape:
 
 Tag-trigger ties production deploys to **explicit semver releases**.
 Each `v*.*.*` tag is a deliberate "this changeset is going to prod"
-decision; each deploy maps to release notes humans wrote. Main-merge
-auto-deploy treats every PR merge as a release, which:
-
-- Couples PR-review cadence to deploy frequency (uncomfortable when
-  a doc-only PR ships alongside ten code changes)
-- Removes the human gating moment where the operator decides "ship
-  now"
-- Makes the CHANGELOG fight with reality (which PR was the release?)
-
-Tag-trigger preserves the release-notes-as-canonical pattern that
-v0.1.0 (PR #38) just established.
+decision. 
 
 ### Why OIDC rather than stored access keys
 
