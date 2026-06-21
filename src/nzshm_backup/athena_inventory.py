@@ -1043,9 +1043,7 @@ def divergence_counts(
     account_id = session.client("sts").get_caller_identity()["Account"]
     control_bucket = f"nzshm-backup-inventory-{account_id}"
     database = "nzshm_backup_inventory"
-    output_location = (
-        f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
-    )
+    output_location = f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
 
     source_prefix = _expected_prefix(source_alias, "source", source_bucket)
     backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
@@ -1083,23 +1081,29 @@ def divergence_counts(
         athena_client, output_location, database, backup_table, control_bucket, backup_hive
     )
     _ensure_partition(
-        athena_client, output_location, database, source_table, control_bucket,
-        source_hive, source_dt,
+        athena_client,
+        output_location,
+        database,
+        source_table,
+        control_bucket,
+        source_hive,
+        source_dt,
     )
     _ensure_partition(
-        athena_client, output_location, database, backup_table, control_bucket,
-        backup_hive, backup_dt,
+        athena_client,
+        output_location,
+        database,
+        backup_table,
+        control_bucket,
+        backup_hive,
+        backup_dt,
     )
 
     prefix_exclusions = " AND ".join(f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES)
     source_filter = f"dt = '{source_dt}' AND {_VERSION_FILTER}"
-    backup_filter = (
-        f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {prefix_exclusions}"
-    )
+    backup_filter = f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {prefix_exclusions}"
 
-    query = _build_divergence_count_query(
-        source_table, source_filter, backup_table, backup_filter
-    )
+    query = _build_divergence_count_query(source_table, source_filter, backup_table, backup_filter)
     qid = _run_athena_query(athena_client, query, output_location, database=database)
     _wait_for_athena_query(athena_client, qid)
     exec_info = athena_client.get_query_execution(QueryExecutionId=qid)
@@ -1203,9 +1207,7 @@ def divergence_sample_keys(
     account_id = session.client("sts").get_caller_identity()["Account"]
     control_bucket = f"nzshm-backup-inventory-{account_id}"
     database = "nzshm_backup_inventory"
-    output_location = (
-        f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
-    )
+    output_location = f"s3://{control_bucket}/athena-results/{source_alias}/{source_bucket}/"
 
     source_prefix = _expected_prefix(source_alias, "source", source_bucket)
     backup_prefix = _expected_prefix(source_alias, "backup", backup_bucket)
@@ -1243,19 +1245,27 @@ def divergence_sample_keys(
         athena_client, output_location, database, backup_table, control_bucket, backup_hive
     )
     _ensure_partition(
-        athena_client, output_location, database, source_table, control_bucket,
-        source_hive, source_dt,
+        athena_client,
+        output_location,
+        database,
+        source_table,
+        control_bucket,
+        source_hive,
+        source_dt,
     )
     _ensure_partition(
-        athena_client, output_location, database, backup_table, control_bucket,
-        backup_hive, backup_dt,
+        athena_client,
+        output_location,
+        database,
+        backup_table,
+        control_bucket,
+        backup_hive,
+        backup_dt,
     )
 
     prefix_exclusions = " AND ".join(f"key NOT LIKE '{p}%'" for p in OPERATIONAL_PREFIXES)
     source_filter = f"dt = '{source_dt}' AND {_VERSION_FILTER}"
-    backup_filter = (
-        f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {prefix_exclusions}"
-    )
+    backup_filter = f"dt = '{backup_dt}' AND {_VERSION_FILTER} AND {prefix_exclusions}"
 
     query = _build_divergence_sample_query(
         source_table, source_filter, backup_table, backup_filter, limit

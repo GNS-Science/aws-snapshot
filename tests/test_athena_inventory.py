@@ -142,8 +142,10 @@ def test_build_divergence_count_query_returns_both_directions_in_one_scan():
     separate queries).
     """
     q = ai._build_divergence_count_query(
-        "inv_src", "dt = '2026-05-25'",
-        "inv_dst", "dt = '2026-05-25'",
+        "inv_src",
+        "dt = '2026-05-25'",
+        "inv_dst",
+        "dt = '2026-05-25'",
     )
     assert "FULL OUTER JOIN" in q
     assert "source_minus_backup" in q
@@ -170,8 +172,10 @@ def test_build_divergence_sample_query_returns_missing_keys_only():
     verification (decision recorded in the implementation plan).
     """
     q = ai._build_divergence_sample_query(
-        "inv_src", "dt = '2026-05-25'",
-        "inv_dst", "dt = '2026-05-25'",
+        "inv_src",
+        "dt = '2026-05-25'",
+        "inv_dst",
+        "dt = '2026-05-25'",
         limit=10,
     )
     assert "LEFT JOIN" in q
@@ -810,14 +814,12 @@ def _make_two_partition_s3_mock():
             "Contents": [
                 {
                     "Key": (
-                        "inventory/ths/source/ths-dataset-prod/"
-                        "hive/dt=2026-05-19-01-00/symlink.txt"
+                        "inventory/ths/source/ths-dataset-prod/hive/dt=2026-05-19-01-00/symlink.txt"
                     )
                 },
                 {
                     "Key": (
-                        "inventory/ths/source/ths-dataset-prod/"
-                        "hive/dt=2026-05-20-01-00/symlink.txt"
+                        "inventory/ths/source/ths-dataset-prod/hive/dt=2026-05-20-01-00/symlink.txt"
                     )
                 },
             ]
@@ -862,8 +864,7 @@ def test_count_delta_handles_single_partition():
             "Contents": [
                 {
                     "Key": (
-                        "inventory/ths/source/ths-dataset-prod/"
-                        "hive/dt=2026-05-20-01-00/symlink.txt"
+                        "inventory/ths/source/ths-dataset-prod/hive/dt=2026-05-20-01-00/symlink.txt"
                     )
                 }
             ]

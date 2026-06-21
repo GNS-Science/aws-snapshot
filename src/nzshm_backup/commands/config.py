@@ -151,10 +151,7 @@ def push_config(
         Tier=tier,
         Overwrite=True,
     )
-    typer.echo(
-        f"Config pushed to SSM parameter: {param_name} "
-        f"({payload_bytes} bytes, Tier={tier})"
-    )
+    typer.echo(f"Config pushed to SSM parameter: {param_name} ({payload_bytes} bytes, Tier={tier})")
 
 
 @app.command("pull")
