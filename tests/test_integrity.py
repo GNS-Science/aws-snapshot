@@ -221,12 +221,8 @@ def test_etag_mismatch_resolved_by_matching_checksum():
     s3 = MagicMock()
 
     # Simulate listing: one object in each bucket with different ETags
-    source_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"multipart-etag-1"'}]
-    }
-    backup_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"singlepart-etag"'}]
-    }
+    source_page = {"Contents": [{"Key": "file.txt", "ETag": '"multipart-etag-1"'}]}
+    backup_page = {"Contents": [{"Key": "file.txt", "ETag": '"singlepart-etag"'}]}
     # get_paginator returns different pages for source vs backup
     call_count = {"n": 0}
 
@@ -253,12 +249,8 @@ def test_etag_mismatch_with_different_checksums_still_flagged():
     """Different single-part ETags AND different checksums → flagged."""
     s3 = MagicMock()
 
-    source_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"aaa111"'}]
-    }
-    backup_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"bbb222"'}]
-    }
+    source_page = {"Contents": [{"Key": "file.txt", "ETag": '"aaa111"'}]}
+    backup_page = {"Contents": [{"Key": "file.txt", "ETag": '"bbb222"'}]}
     call_count = {"n": 0}
 
     def paginate(**kw):
@@ -270,10 +262,12 @@ def test_etag_mismatch_with_different_checksums_still_flagged():
     s3.get_paginator.return_value.paginate.side_effect = paginate
 
     # Different checksums
-    checksums = iter([
-        {"Checksum": {"ChecksumCRC64NVME": "checksum_a"}},
-        {"Checksum": {"ChecksumCRC64NVME": "checksum_b"}},
-    ])
+    checksums = iter(
+        [
+            {"Checksum": {"ChecksumCRC64NVME": "checksum_a"}},
+            {"Checksum": {"ChecksumCRC64NVME": "checksum_b"}},
+        ]
+    )
     s3.get_object_attributes.side_effect = lambda **kw: next(checksums)
 
     result = check_bucket_integrity(s3, "source", "backup")
@@ -286,12 +280,8 @@ def test_etag_mismatch_multipart_skipped():
     """Different ETags where one is multipart → skipped (not flagged)."""
     s3 = MagicMock()
 
-    source_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"abc123-2"'}]
-    }
-    backup_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"def456"'}]
-    }
+    source_page = {"Contents": [{"Key": "file.txt", "ETag": '"abc123-2"'}]}
+    backup_page = {"Contents": [{"Key": "file.txt", "ETag": '"def456"'}]}
     call_count = {"n": 0}
 
     def paginate(**kw):
@@ -315,12 +305,8 @@ def test_etag_mismatch_no_checksums_available_still_flagged():
     """Different single-part ETags and no checksums → flagged."""
     s3 = MagicMock()
 
-    source_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"aaa111"'}]
-    }
-    backup_page = {
-        "Contents": [{"Key": "file.txt", "ETag": '"bbb222"'}]
-    }
+    source_page = {"Contents": [{"Key": "file.txt", "ETag": '"aaa111"'}]}
+    backup_page = {"Contents": [{"Key": "file.txt", "ETag": '"bbb222"'}]}
     call_count = {"n": 0}
 
     def paginate(**kw):

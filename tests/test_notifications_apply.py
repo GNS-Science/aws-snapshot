@@ -68,9 +68,7 @@ def test_diff_handles_mixed_add_remove_keep():
             },
         ]
     )
-    diff = _diff_subscriptions(
-        sns, "arn:t", "topic", ["keep@example.com", "new@example.com"]
-    )
+    diff = _diff_subscriptions(sns, "arn:t", "topic", ["keep@example.com", "new@example.com"])
     assert diff.to_add == ["new@example.com"]
     assert diff.to_remove == [("stale@example.com", "arn:sub:stale")]
     assert diff.kept == ["keep@example.com"]
@@ -87,9 +85,7 @@ def test_diff_skips_pending_when_email_already_pending_confirmation():
             }
         ]
     )
-    diff = _diff_subscriptions(
-        sns, "arn:t", "topic", ["still-confirming@example.com"]
-    )
+    diff = _diff_subscriptions(sns, "arn:t", "topic", ["still-confirming@example.com"])
     assert diff.to_add == []
     assert diff.pending == ["still-confirming@example.com"]
 
@@ -121,9 +117,7 @@ def test_diff_is_case_insensitive_for_emails():
             }
         ]
     )
-    diff = _diff_subscriptions(
-        sns, "arn:t", "topic", ["mixed.case@example.com"]
-    )
+    diff = _diff_subscriptions(sns, "arn:t", "topic", ["mixed.case@example.com"])
     assert diff.kept == ["mixed.case@example.com"]
     assert diff.to_add == []
     assert diff.to_remove == []

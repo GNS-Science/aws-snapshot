@@ -61,9 +61,7 @@ def test_send_slack_raises_on_http_error():
     import urllib.error
 
     def fake_urlopen(request, timeout):
-        raise urllib.error.HTTPError(
-            request.full_url, 500, "Internal Error", {}, io.BytesIO(b"")
-        )
+        raise urllib.error.HTTPError(request.full_url, 500, "Internal Error", {}, io.BytesIO(b""))
 
     with patch.object(slack.urllib.request, "urlopen", side_effect=fake_urlopen):
         with pytest.raises(slack.SlackDeliveryError, match="HTTP 500"):

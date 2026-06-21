@@ -24,7 +24,9 @@ def get_object_checksum(s3_client, bucket: str, key: str) -> tuple[str, str] | N
     """Return (algorithm, value) for the first available checksum, or None."""
     try:
         resp = s3_client.get_object_attributes(
-            Bucket=bucket, Key=key, ObjectAttributes=["Checksum"],
+            Bucket=bucket,
+            Key=key,
+            ObjectAttributes=["Checksum"],
         )
         checksum = resp.get("Checksum", {})
         for ck in CHECKSUM_KEYS:
@@ -173,9 +175,7 @@ def check_bucket_integrity(
                 )
 
     if checksum_verified:
-        logger.info(
-            f"{checksum_verified} object(s) with differing ETags verified via checksum"
-        )
+        logger.info(f"{checksum_verified} object(s) with differing ETags verified via checksum")
 
     result.end_time = datetime.now(timezone.utc)
     logger.info(

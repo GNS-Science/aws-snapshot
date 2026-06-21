@@ -1043,9 +1043,7 @@ class TestTestAlert:
         mock_boto.client.return_value = cw
 
         runner = CliRunner()
-        result = runner.invoke(
-            app, ["alert", "--stage", "sandbox", "--region", "us-east-1"]
-        )
+        result = runner.invoke(app, ["alert", "--stage", "sandbox", "--region", "us-east-1"])
 
         assert result.exit_code == 0
         mock_boto.client.assert_called_once_with("cloudwatch", region_name="us-east-1")

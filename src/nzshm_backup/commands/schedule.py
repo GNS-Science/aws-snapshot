@@ -606,9 +606,7 @@ def remove_schedule(
             raise
 
 
-def _resolve_rule_name(
-    source: str, frequency: str, task_type: str
-) -> str:
+def _resolve_rule_name(source: str, frequency: str, task_type: str) -> str:
     if task_type == "health_report":
         return f"nzshm-backup-health-report-{frequency}"
     return _rule_name(source, frequency)

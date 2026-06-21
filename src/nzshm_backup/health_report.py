@@ -66,11 +66,11 @@ logger = logging.getLogger(__name__)
 
 _CANARY_SOURCE = "weka"
 _ROTATION_BY_WEEKDAY: dict[int, str] = {
-    0: "ths",      # Monday
-    2: "toshi",    # Wednesday
-    4: "static",   # Friday
+    0: "ths",  # Monday
+    2: "toshi",  # Wednesday
+    4: "static",  # Friday
 }
-_FRESHNESS_THRESHOLD_HOURS = 30.0   # ADR-007 mit. 4
+_FRESHNESS_THRESHOLD_HOURS = 30.0  # ADR-007 mit. 4
 _RESTORE_SAMPLE_SIZE = 10
 
 Status = Literal["green", "yellow", "red"]
@@ -88,9 +88,9 @@ class SourceHealthData:
     inventory_age_hours: float | None  # None if no inventory present
     inventory_stale: bool
     count_delta: dict[str, Any] | None  # None if delta unavailable
-    divergence: dict[str, Any] | None   # None if not computed (e.g. no inventory)
+    divergence: dict[str, Any] | None  # None if not computed (e.g. no inventory)
     # Class-1 alert: backup is missing source keys (system has actually failed).
-    backup_missing_count: int | None    # None if divergence unavailable
+    backup_missing_count: int | None  # None if divergence unavailable
     # Class-2 info: backup carries keys source no longer has.
     backup_orphan_count: int | None
     restore_test: RestoreTestResult | None  # None if not tested this run
@@ -302,9 +302,7 @@ def build_report(
             # Source-vs-backup divergence (class 1 backup-missing + class 2 orphans).
             if source_bucket and backup_bucket:
                 try:
-                    divergence = divergence_counts(
-                        session, alias, source_bucket, backup_bucket
-                    )
+                    divergence = divergence_counts(session, alias, source_bucket, backup_bucket)
                     if divergence.get("available"):
                         backup_missing = divergence["source_minus_backup"]
                         backup_orphans = divergence["backup_minus_source"]
@@ -321,24 +319,21 @@ def build_report(
                             sample_size = 0
                             try:
                                 sample = divergence_sample_keys(
-                                    session, alias, source_bucket, backup_bucket,
+                                    session,
+                                    alias,
+                                    source_bucket,
+                                    backup_bucket,
                                     limit=10,
                                 )
                                 if sample.get("available"):
                                     backup_s3 = session.client("s3")
-                                    for k in sample.get(
-                                        "source_minus_backup_sample", []
-                                    ):
+                                    for k in sample.get("source_minus_backup_sample", []):
                                         sample_size += 1
                                         try:
-                                            backup_s3.head_object(
-                                                Bucket=backup_bucket, Key=k
-                                            )
+                                            backup_s3.head_object(Bucket=backup_bucket, Key=k)
                                             auto_healed += 1
                                         except ClientError as e:
-                                            code = e.response.get("Error", {}).get(
-                                                "Code", ""
-                                            )
+                                            code = e.response.get("Error", {}).get("Code", "")
                                             if code in ("404", "NoSuchKey", "NotFound"):
                                                 still_missing += 1
                                             else:
@@ -349,23 +344,16 @@ def build_report(
                             if sample_size == 0:
                                 tag = ""
                             elif still_missing == sample_size:
-                                tag = (
-                                    f" (still missing live, sampled {sample_size})"
-                                )
+                                tag = f" (still missing live, sampled {sample_size})"
                             elif auto_healed == sample_size:
-                                tag = (
-                                    " (auto-healed since snapshot, "
-                                    f"sampled {sample_size})"
-                                )
+                                tag = f" (auto-healed since snapshot, sampled {sample_size})"
                             else:
                                 tag = (
                                     f" ({still_missing} still missing, "
                                     f"{auto_healed} auto-healed, "
                                     f"sampled {sample_size})"
                                 )
-                            notes.append(
-                                f"backup is missing {backup_missing:,} source keys{tag}"
-                            )
+                            notes.append(f"backup is missing {backup_missing:,} source keys{tag}")
                         if backup_orphans and backup_orphans > 0:
                             info_notes.append(
                                 f"backup has {backup_orphans:,} orphans "
@@ -393,9 +381,7 @@ def build_report(
             except Exception as e:
                 notes.append(f"restore test exception: {e}")
 
-        pitr = _check_dynamodb_pitr(
-            session, source_config, source_config.source_account_role_arn
-        )
+        pitr = _check_dynamodb_pitr(session, source_config, source_config.source_account_role_arn)
 
         src = SourceHealthData(
             alias=alias,
@@ -449,17 +435,11 @@ def format_email_text(data: HealthReportData) -> str:
     lines.append("Per source:")
     for s in data.sources:
         icon = _STATUS_ICON[s.overall]
-        age = (
-            f"{s.inventory_age_hours:.1f}h"
-            if s.inventory_age_hours is not None
-            else "n/a"
-        )
+        age = f"{s.inventory_age_hours:.1f}h" if s.inventory_age_hours is not None else "n/a"
         rt = "—"
         if s.restore_test:
             rt = s.restore_test.overall
-        lines.append(
-            f"  {icon} {s.alias:<10}  inventory_age={age:<8}  restore={rt}"
-        )
+        lines.append(f"  {icon} {s.alias:<10}  inventory_age={age:<8}  restore={rt}")
         for note in s.notes:
             lines.append(f"        ⚠ {note}")
         if s.pitr_tables:
@@ -472,8 +452,7 @@ def format_email_text(data: HealthReportData) -> str:
     lines.append("Configuration:")
     lines.append(f"  Canary (daily): {data.canary_source}")
     lines.append(
-        f"  Today's rotated source: "
-        f"{data.rotation_by_weekday.get(data.report_date.weekday(), '—')}"
+        f"  Today's rotated source: {data.rotation_by_weekday.get(data.report_date.weekday(), '—')}"
     )
     lines.append(f"  Freshness threshold: {data.freshness_threshold_hours}h")
     return "\n".join(lines)
@@ -588,11 +567,7 @@ def send(
 
     reports_cfg = getattr(notifications_config, "reports", None)
     reports_email_cfg = getattr(reports_cfg, "email", None) if reports_cfg else None
-    if (
-        reports_email_cfg
-        and getattr(reports_email_cfg, "enabled", False)
-        and reports_topic_arn
-    ):
+    if reports_email_cfg and getattr(reports_email_cfg, "enabled", False) and reports_topic_arn:
         result.sns_attempted = True
         try:
             result.sns_message_id = publish_report(

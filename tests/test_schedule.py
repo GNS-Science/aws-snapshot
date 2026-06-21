@@ -247,9 +247,7 @@ def test_add_health_report_uses_fixed_rule_name_and_payload(events_client):
     assert len(rules) == 1
     assert rules[0]["Name"] == "nzshm-backup-health-report-daily"
 
-    targets = events_client.list_targets_by_rule(Rule="nzshm-backup-health-report-daily")[
-        "Targets"
-    ]
+    targets = events_client.list_targets_by_rule(Rule="nzshm-backup-health-report-daily")["Targets"]
     assert len(targets) == 1
     payload = json.loads(targets[0]["Input"])
     assert payload["task_type"] == "health_report"

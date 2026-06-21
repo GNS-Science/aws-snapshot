@@ -35,9 +35,7 @@ class _SubscriptionDiff:
     kept: list[str] = field(default_factory=list)
 
 
-def _resolve_topic_arns(
-    session: boto3.Session, stage: str
-) -> tuple[str, str]:
+def _resolve_topic_arns(session: boto3.Session, stage: str) -> tuple[str, str]:
     """Construct ARNs for the alerts + reports topics for a given stage."""
     region = session.region_name or "ap-southeast-2"
     account = session.client("sts").get_caller_identity()["Account"]
@@ -90,9 +88,7 @@ def _apply_diff(sns_client, diff: _SubscriptionDiff, dry_run: bool) -> None:
         if dry_run:
             typer.echo(f"  + would subscribe {email}")
         else:
-            sns_client.subscribe(
-                TopicArn=diff.topic_arn, Protocol="email", Endpoint=email
-            )
+            sns_client.subscribe(TopicArn=diff.topic_arn, Protocol="email", Endpoint=email)
             typer.echo(f"  + subscribed {email}  (awaiting confirmation email)")
 
     for email, sub_arn in diff.to_remove:
@@ -122,9 +118,7 @@ def _print_summary(channel: str, diff: _SubscriptionDiff) -> None:
 
 @app.command("apply")
 def apply(
-    stage: str = typer.Option(
-        "prod", "--stage", help="Stage name (used to derive topic ARNs)"
-    ),
+    stage: str = typer.Option("prod", "--stage", help="Stage name (used to derive topic ARNs)"),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would change without modifying SNS"
     ),
