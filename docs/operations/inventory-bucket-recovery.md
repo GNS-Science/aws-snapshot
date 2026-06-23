@@ -1,6 +1,6 @@
 # Inventory Bucket Recovery Runbook
 
-**Bucket:** `nzshm-backup-inventory-737696831915` (backup account `737696831915`, region `ap-southeast-2`)
+**Bucket:** `nzshm-backup-inventory-123456789012` (backup account `123456789012`, region `ap-southeast-2`)
 
 **When to use this runbook:** the inventory bucket has been deleted,
 its contents have been deleted or corrupted, or freshness checks in the
@@ -34,21 +34,21 @@ on what is actually broken.
 
 ```bash
 # 1. Authenticate to the backup account
-eval "$(aws configure export-credentials --profile nshm-backup-admin --format env)"
-aws sts get-caller-identity   # confirm Account: 737696831915
+eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
+aws sts get-caller-identity   # confirm Account: 123456789012
 
 # 2. Does the bucket exist?
-aws s3api head-bucket --bucket nzshm-backup-inventory-737696831915 2>&1
+aws s3api head-bucket --bucket nzshm-backup-inventory-123456789012 2>&1
 # → exit 0 = exists; 404 = deleted; 403 = exists in another account
 
 # 3. What top-level prefixes are present?
-aws s3 ls s3://nzshm-backup-inventory-737696831915/
+aws s3 ls s3://nzshm-backup-inventory-123456789012/
 # expected: inventory/, athena-results/, _manifests/
 
 # 4. Inventory freshness per source
 for src in toshi ths static weka; do
   echo "=== $src ==="
-  aws s3 ls s3://nzshm-backup-inventory-737696831915/inventory/$src/source/ --recursive \
+  aws s3 ls s3://nzshm-backup-inventory-123456789012/inventory/$src/source/ --recursive \
     | tail -3
 done
 ```
@@ -75,7 +75,7 @@ Scenario C.
 ```bash
 # 1. Recreate the bucket with the same name and region.
 aws s3api create-bucket \
-  --bucket nzshm-backup-inventory-737696831915 \
+  --bucket nzshm-backup-inventory-123456789012 \
   --region ap-southeast-2 \
   --create-bucket-configuration LocationConstraint=ap-southeast-2
 
@@ -83,17 +83,17 @@ aws s3api create-bucket \
 #    The canonical policy is built by setup-inventory.py and stored in
 #    serverless.yml. Re-deploy or apply via:
 aws s3api put-bucket-policy \
-  --bucket nzshm-backup-inventory-737696831915 \
+  --bucket nzshm-backup-inventory-123456789012 \
   --policy file://<path-to-saved-policy.json>
 
 # 3. Enable versioning (per ADR-007).
 aws s3api put-bucket-versioning \
-  --bucket nzshm-backup-inventory-737696831915 \
+  --bucket nzshm-backup-inventory-123456789012 \
   --versioning-configuration Status=Enabled
 
 # 4. Re-apply lifecycle (30-day NoncurrentVersionExpiration).
 aws s3api put-bucket-lifecycle-configuration \
-  --bucket nzshm-backup-inventory-737696831915 \
+  --bucket nzshm-backup-inventory-123456789012 \
   --lifecycle-configuration file://<saved-lifecycle.json>
 
 # 5. Recreate the Glue database and tables. The scripted form lives in
@@ -147,7 +147,7 @@ uv run backup schedule disable --source static
 uv run backup schedule disable --source weka
 
 # 2. Delete the entire inventory/ prefix.
-aws s3 rm s3://nzshm-backup-inventory-737696831915/inventory/ --recursive
+aws s3 rm s3://nzshm-backup-inventory-123456789012/inventory/ --recursive
 
 # 3. (Optional) Drop and recreate Glue tables to clear cached partition
 #    metadata.
@@ -155,7 +155,7 @@ uv run python scripts/setup-inventory.py --all-sources --recreate-glue-only
 
 # 4. Wait for the next scheduled Inventory run (24h window typically).
 #    Monitor:
-aws s3 ls s3://nzshm-backup-inventory-737696831915/inventory/ --recursive | tail
+aws s3 ls s3://nzshm-backup-inventory-123456789012/inventory/ --recursive | tail
 ```
 
 Once at least one fresh inventory report has landed for every source +
@@ -215,10 +215,10 @@ hours. If this fires but the bucket and contents look intact:
 # 1. When did the most recent Inventory report actually land per source?
 for src in toshi ths static weka; do
   echo "=== $src source ==="
-  aws s3 ls s3://nzshm-backup-inventory-737696831915/inventory/$src/source/ \
+  aws s3 ls s3://nzshm-backup-inventory-123456789012/inventory/$src/source/ \
     --recursive | tail -1
   echo "=== $src backup ==="
-  aws s3 ls s3://nzshm-backup-inventory-737696831915/inventory/$src/backup/ \
+  aws s3 ls s3://nzshm-backup-inventory-123456789012/inventory/$src/backup/ \
     --recursive | tail -1
 done
 
@@ -252,7 +252,7 @@ genuinely needs to be deleted (decommission, rebuild for unrelated
 reasons), the policy must be removed first:
 
 ```bash
-aws s3api delete-bucket-policy --bucket nzshm-backup-inventory-737696831915
+aws s3api delete-bucket-policy --bucket nzshm-backup-inventory-123456789012
 # only then is `aws s3api delete-bucket` permitted
 ```
 

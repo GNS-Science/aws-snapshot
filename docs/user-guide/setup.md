@@ -50,7 +50,7 @@ uv run backup setup iam source-roles \
 ```
 
 - `--profile` is the AWS CLI profile authenticated to the **source**
-  account (e.g. `nshm-admin`, not `nshm-backup-admin`).
+  account (e.g. `nshm-admin`, not `<aws-profile>`).
 - `--batch-role-arn` is rarely needed; the default is derived from
   `general.s3_batch_role_arn` in config.
 
@@ -68,7 +68,7 @@ backup bucket) and restore-direction copies (backup bucket → source).
 
 ```bash
 uv run backup setup iam backup-batch-role \
-  --profile nshm-backup-admin \
+  --profile <aws-profile> \
   --config backup-config.production.yaml \
   [--no-write-back] \
   [--dry-run]
@@ -96,7 +96,7 @@ prefix layout that `athena_inventory.py` expects.
 uv run backup setup inventory \
   --source ths \
   --source-profile nshm-admin \
-  --backup-profile nshm-backup-admin \
+  --backup-profile <aws-profile> \
   --config backup-config.production.yaml \
   [--control-bucket alternate-control-bucket] \
   [--control-prefix inventory] \
@@ -168,7 +168,7 @@ uv run backup setup iam source-roles \
 
 # 2. Backup-account IAM (only if any source uses S3 Batch)
 uv run backup setup iam backup-batch-role \
-  --profile nshm-backup-admin \
+  --profile <aws-profile> \
   --config backup-config.production.yaml
 
 # 3. First backup (creates backup bucket + applies lifecycle on creation)
@@ -177,7 +177,7 @@ uv run backup run --source <alias> --config backup-config.production.yaml
 # 4. Inventory pipeline (only if inventory_enabled is true for this source)
 uv run backup setup inventory \
   --source <alias> \
-  --source-profile nshm-admin --backup-profile nshm-backup-admin \
+  --source-profile nshm-admin --backup-profile <aws-profile> \
   --config backup-config.production.yaml
 
 # 5. (Optional) re-apply lifecycle if you've since changed RetentionConfig

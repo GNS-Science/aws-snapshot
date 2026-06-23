@@ -35,7 +35,7 @@ Inspect the orphans before deciding to purge:
    verification). Easiest from `backup health-report` working state:
 
    ```bash
-   eval "$(aws configure export-credentials --profile nshm-backup-admin --format env)"
+   eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
    unset AWS_PROFILE
 
    # Resolve the relevant partitions from the latest inventory drops,
@@ -84,7 +84,7 @@ buckets and must not be granted it. The purge runs from an operator
 workstation with admin credentials assumed for the duration:
 
 ```bash
-eval "$(aws configure export-credentials --profile nshm-backup-admin --format env)"
+eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
 aws sts get-caller-identity   # confirm AdministratorAccess role
 ```
 
@@ -112,7 +112,7 @@ small one-off cleanups this is the simplest path.
    ```bash
    while read -r KEY; do
      aws s3api head-object \
-       --bucket bb-static-s3-static-reports-ap-southeast-2-461564345538 \
+       --bucket bb-static-s3-static-reports-ap-southeast-2-210987654321 \
        --key "$KEY" \
        --query 'ContentLength' --output text || echo "MISSING: $KEY"
    done < /tmp/orphans.txt
@@ -123,7 +123,7 @@ small one-off cleanups this is the simplest path.
    ```bash
    jq -Rn '{Objects: [inputs | {Key: .}]}' /tmp/orphans.txt > /tmp/orphans.json
    aws s3api delete-objects \
-     --bucket bb-static-s3-static-reports-ap-southeast-2-461564345538 \
+     --bucket bb-static-s3-static-reports-ap-southeast-2-210987654321 \
      --delete file:///tmp/orphans.json
    ```
 
@@ -141,7 +141,7 @@ versions across two buckets).
 
    ```bash
    aws s3api list-object-versions \
-     --bucket bb-static-s3-static-reports-ap-southeast-2-461564345538 \
+     --bucket bb-static-s3-static-reports-ap-southeast-2-210987654321 \
      --query 'Versions[?IsLatest==`false`].[Key,VersionId,Size]' \
      --output text \
    | awk -F'\t' '{ printf "bb-static-...,%s,%s\n", $1, $2 }' \
@@ -156,7 +156,7 @@ versions across two buckets).
    ```bash
    STAMP=$(date -u +%Y%m%dT%H%M%SZ)
    aws s3 cp /tmp/purge-manifest.csv \
-     s3://nzshm-backup-inventory-461564345538/_purge-manifests/$STAMP.csv
+     s3://nzshm-backup-inventory-210987654321/_purge-manifests/$STAMP.csv
    ```
 
 3. Submit the S3 Batch Delete job, scoped to the affected backup bucket
@@ -164,12 +164,12 @@ versions across two buckets).
 
    ```bash
    aws s3control create-job \
-     --account-id 461564345538 \
+     --account-id 210987654321 \
      --operation '{"S3DeleteObject":{}}' \
-     --report '{"Bucket":"arn:aws:s3:::nzshm-backup-inventory-461564345538","Prefix":"_purge-reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}' \
-     --manifest "{\"Spec\":{\"Format\":\"S3BatchOperations_CSV_20180820\",\"Fields\":[\"Bucket\",\"Key\",\"VersionId\"]},\"Location\":{\"ObjectArn\":\"arn:aws:s3:::nzshm-backup-inventory-461564345538/_purge-manifests/$STAMP.csv\",\"ETag\":\"<paste-etag-from-step-2>\"}}" \
+     --report '{"Bucket":"arn:aws:s3:::nzshm-backup-inventory-210987654321","Prefix":"_purge-reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}' \
+     --manifest "{\"Spec\":{\"Format\":\"S3BatchOperations_CSV_20180820\",\"Fields\":[\"Bucket\",\"Key\",\"VersionId\"]},\"Location\":{\"ObjectArn\":\"arn:aws:s3:::nzshm-backup-inventory-210987654321/_purge-manifests/$STAMP.csv\",\"ETag\":\"<paste-etag-from-step-2>\"}}" \
      --priority 10 \
-     --role-arn arn:aws:iam::461564345538:role/nzshm-backup-batch \
+     --role-arn arn:aws:iam::210987654321:role/nzshm-backup-batch \
      --no-confirmation-required \
      --description "Manual purge of orphans from bb-static — see audit note $STAMP"
    ```
@@ -177,7 +177,7 @@ versions across two buckets).
 4. Poll the job to completion and inspect the failure report:
 
    ```bash
-   aws s3control describe-job --account-id 461564345538 --job-id <id>
+   aws s3control describe-job --account-id 210987654321 --job-id <id>
    ```
 
 5. Record the audit trail.
@@ -192,9 +192,9 @@ Append an entry to `docs/PROD-DEPLOY-LOG.md` (or create a new
 
 - Trigger: <link to health-report run that surfaced the orphans, or issue>
 - Decision rationale: <why the deletions were intentional>
-- Manifest: s3://nzshm-backup-inventory-461564345538/_purge-manifests/<STAMP>.csv
+- Manifest: s3://nzshm-backup-inventory-210987654321/_purge-manifests/<STAMP>.csv
 - Result: <N succeeded / M failed>; failure report at
-  s3://nzshm-backup-inventory-461564345538/_purge-reports/<job-id>/
+  s3://nzshm-backup-inventory-210987654321/_purge-reports/<job-id>/
 - Operator: <github handle>
 ```
 

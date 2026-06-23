@@ -80,7 +80,7 @@ uv run backup health-report run --weekday 0
 
 # Override the SNS topic (auto-resolved from session + stage otherwise).
 uv run backup health-report run --send \
-    --topic-arn arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-reports-prod
+    --topic-arn arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod
 ```
 
 Flags:

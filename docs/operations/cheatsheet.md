@@ -11,14 +11,14 @@ independently. This table maps "I want to change X" to "do Y".
 | **Health-report thresholds** (canary, rotation, freshness, delta, sample size) | `notifications.reports.health` block | `backup config push --stage prod` | No |
 | **Schedule cadence/time** (backup or health report) | n/a — EventBridge lives outside config | `backup schedule remove --task-type ... --frequency daily` then `add` with new `--time` | No |
 | **Source-bucket list, retention, IAM, anything else in YAML** | `backup-config.production.yaml` | `backup config push --stage prod` | No |
-| **Lambda code, IAM permissions, CFN resources, SNS topics** | source files / `serverless.yml` | `make check`, commit | **Yes** (`AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod`) |
+| **Lambda code, IAM permissions, CFN resources, SNS topics** | source files / `serverless.yml` | `make check`, commit | **Yes** (`AWS_PROFILE=<aws-profile> npx sls deploy --stage prod`) |
 
 ---
 
 ## Standard prefix for live AWS commands
 
 ```bash
-eval "$(aws configure export-credentials --profile nshm-backup-admin --format env)"
+eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
 ```
 
 All commands below assume this is in your shell. Re-run if you get
@@ -139,7 +139,7 @@ git push -u origin <branch>
 gh pr create --base pre-release ...
 
 # 3. After review/merge — deploy
-AWS_PROFILE=nshm-backup-admin npx sls deploy --stage prod
+AWS_PROFILE=<aws-profile> npx sls deploy --stage prod
 
 # 4. Smoke test
 uv run backup health-report run --send
@@ -164,13 +164,13 @@ uv run backup test alert
 
 | Resource | ARN/Name |
 |---|---|
-| Backup Lambda | `arn:aws:lambda:ap-southeast-2:737696831915:function:nzshm-backup-service-prod-backup` |
-| Alerts SNS topic | `arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-alerts-prod` |
-| Reports SNS topic | `arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-reports-prod` |
+| Backup Lambda | `arn:aws:lambda:ap-southeast-2:123456789012:function:nzshm-backup-service-prod-backup` |
+| Alerts SNS topic | `arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-alerts-prod` |
+| Reports SNS topic | `arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod` |
 | Lambda-error alarm | `nzshm-backup-lambda-errors-prod` |
 | Health-report rule | `nzshm-backup-health-report-daily` |
-| Inventory bucket | `nzshm-backup-inventory-737696831915` |
-| Backup buckets | `bb-{source}-s3-{label}-ap-southeast-2-461564345538` (per source) |
+| Inventory bucket | `nzshm-backup-inventory-123456789012` |
+| Backup buckets | `bb-{source}-s3-{label}-ap-southeast-2-210987654321` (per source) |
 | Slack webhook secret | Secrets Manager: `backup-slack-webhook` |
 | Config SSM parameter | `/nzshm-backup/prod/config` |
 
