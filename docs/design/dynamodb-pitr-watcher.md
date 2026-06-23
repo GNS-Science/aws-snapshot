@@ -146,7 +146,7 @@ parameter can be replaced with an SSM StringList or a DynamoDB table.
 
 **Implemented and tested** (2026-03-18).
 
-- [x] `pitr-watcher` Lambda (`src/nzshm_backup/lambda_pitr_watcher.py`)
+- [x] `pitr-watcher` Lambda (`src/aws_snapshot/lambda_pitr_watcher.py`)
 - [x] `restore_state.py` — SSM read/write helpers
 - [x] EventBridge rule + IAM in `serverless.yml`
 - [x] `restore run`: writes to SSM, enables rule, `--no-pitr` flag

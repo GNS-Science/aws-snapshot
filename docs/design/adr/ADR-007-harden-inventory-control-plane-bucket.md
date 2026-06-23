@@ -151,7 +151,7 @@ the expected 24–48h exposure window.
 | Enable versioning + 30-day NoncurrentVersionExpiration | `serverless.yml` or `create-backup-roles.py` (wherever the bucket is provisioned) | Trivial |
 | Bucket policy DENY on `s3:DeleteBucket` | same | Trivial |
 | Scoped Lambda delete permissions | `serverless.yml` IAM role | Small |
-| Freshness watchdog in health report | `src/nzshm_backup/health_report.py` (depends on #16) | Small |
+| Freshness watchdog in health report | `src/aws_snapshot/health_report.py` (depends on #16) | Small |
 | Recovery runbook | `docs/operations/inventory-bucket-recovery.md` (new — drafted alongside this ADR) | Small |
 | Apply changes to deployed bucket | One-off `aws s3api put-bucket-versioning` + `put-bucket-policy` | Trivial |
 

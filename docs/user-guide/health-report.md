@@ -238,7 +238,7 @@ notifications:
 > so the thresholds no longer apply. Remove them from your YAML when
 > upgrading; Pydantic will reject the unknown keys.
 
-Defaults are baked into `src/nzshm_backup/health_report.py`; the YAML
+Defaults are baked into `src/aws_snapshot/health_report.py`; the YAML
 overrides are read with `getattr` fallback so omitting the block is
 safe.
 
@@ -370,18 +370,18 @@ milliseconds on the poll loop — not worth it.
 
 | Concern | File |
 |---|---|
-| Orchestration, classification, formatting | `src/nzshm_backup/health_report.py` |
-| CLI commands | `src/nzshm_backup/commands/health_report.py` |
-| Tunable defaults / config schema | `src/nzshm_backup/config/models.py` (`HealthReportConfig`) |
-| Slack delivery | `src/nzshm_backup/notifications/slack.py` |
-| SNS delivery | `src/nzshm_backup/notifications/sns.py` |
-| Inventory freshness reuse | `src/nzshm_backup/inventory_state.py` |
-| Object-count delta query (class-2 info) | `src/nzshm_backup/athena_inventory.py` (`count_delta`) |
-| Source-vs-backup divergence (class-1 + class-2 in one scan) | `src/nzshm_backup/athena_inventory.py` (`divergence_counts`) |
-| Restore test reuse | `src/nzshm_backup/commands/test.py` (`restore_test_source`) |
+| Orchestration, classification, formatting | `src/aws_snapshot/health_report.py` |
+| CLI commands | `src/aws_snapshot/commands/health_report.py` |
+| Tunable defaults / config schema | `src/aws_snapshot/config/models.py` (`HealthReportConfig`) |
+| Slack delivery | `src/aws_snapshot/notifications/slack.py` |
+| SNS delivery | `src/aws_snapshot/notifications/sns.py` |
+| Inventory freshness reuse | `src/aws_snapshot/inventory_state.py` |
+| Object-count delta query (class-2 info) | `src/aws_snapshot/athena_inventory.py` (`count_delta`) |
+| Source-vs-backup divergence (class-1 + class-2 in one scan) | `src/aws_snapshot/athena_inventory.py` (`divergence_counts`) |
+| Restore test reuse | `src/aws_snapshot/commands/test.py` (`restore_test_source`) |
 | AWS infrastructure (SNS topic, IAM) | `serverless.yml` (`BackupReportsTopic`) |
-| Lambda dispatch | `src/nzshm_backup/lambda_handler.py`, `src/nzshm_backup/lambda_schema.py` |
-| EventBridge schedule CLI | `src/nzshm_backup/commands/schedule.py` (`--task-type` flag) |
+| Lambda dispatch | `src/aws_snapshot/lambda_handler.py`, `src/aws_snapshot/lambda_schema.py` |
+| EventBridge schedule CLI | `src/aws_snapshot/commands/schedule.py` (`--task-type` flag) |
 
 ---
 
