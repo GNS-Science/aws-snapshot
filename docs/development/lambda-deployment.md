@@ -2,7 +2,16 @@
 
 The backup CLI can run entirely from your terminal for on-demand use. To enable
 **scheduled** backups (EventBridge → Lambda), the package must be deployed as an
-AWS Lambda function using the Serverless Framework.
+AWS Lambda function.
+
+> **Migration in progress.** The project is moving from Serverless Framework v4
+> to AWS SAM (see [issue #48](https://github.com/GNS-Science/nzshm-backup/issues/48)).
+> The instructions below remain accurate for the **legacy sls path**, which is
+> the production deploy mechanism today. For the **new SAM path** (preferred
+> going forward), see [SAM deploy verification](sam-deploy-verification.md) which
+> covers prerequisites, validation, and the side-stack verification procedure.
+> Once SAM has been used for at least one real production deploy, `serverless.yml`
+> is removed and this page is rewritten around SAM.
 
 ## Serverless Framework version
 
