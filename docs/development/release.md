@@ -68,6 +68,9 @@ sam deploy
 ```
 
 See [Lambda Deployment](lambda-deployment.md) for prerequisites (Docker, `aws-sam-cli`).
+For first-time SAM verification — `sam validate`, `sam build`, side-stack
+deploy, and parity diff vs the legacy sls stack — see
+[SAM deploy verification](sam-deploy-verification.md).
 
 ### Serverless Framework (legacy — to be removed once SAM parity is confirmed)
 
