@@ -2,7 +2,7 @@
 
 ## Two entry points, one engine
 
-The backup logic lives in a shared Python library (`nzshm_backup`). There are
+The backup logic lives in a shared Python library (`aws_snapshot`). There are
 two ways to invoke it:
 
 ```
@@ -21,14 +21,14 @@ that call the same underlying functions — `backup_source()` and
 
 | Component | File | Role |
 |-----------|------|------|
-| CLI entry point | `src/nzshm_backup/cli.py` | Registers all subcommand groups |
-| Manual backup command | `src/nzshm_backup/commands/run_backup.py` | `backup run` — calls backup engine directly |
-| Lambda entry point | `src/nzshm_backup/lambda_handler.py` | Handles EventBridge events, calls same engine |
-| S3 backup engine | `src/nzshm_backup/s3_backup.py` | Incremental sync, bucket creation, lifecycle policy |
-| DynamoDB backup engine | `src/nzshm_backup/dynamodb_backup.py` | PITR export initiation, export bucket setup |
-| Schedule management | `src/nzshm_backup/commands/schedule.py` | Creates/enables/disables EventBridge rules |
-| Config loader | `src/nzshm_backup/config/loader.py` | Reads `backup-config.yaml` (or `BACKUP_CONFIG_PATH`) |
-| Config models | `src/nzshm_backup/config/models.py` | Pydantic schema for all config fields |
+| CLI entry point | `src/aws_snapshot/cli.py` | Registers all subcommand groups |
+| Manual backup command | `src/aws_snapshot/commands/run_backup.py` | `backup run` — calls backup engine directly |
+| Lambda entry point | `src/aws_snapshot/lambda_handler.py` | Handles EventBridge events, calls same engine |
+| S3 backup engine | `src/aws_snapshot/s3_backup.py` | Incremental sync, bucket creation, lifecycle policy |
+| DynamoDB backup engine | `src/aws_snapshot/dynamodb_backup.py` | PITR export initiation, export bucket setup |
+| Schedule management | `src/aws_snapshot/commands/schedule.py` | Creates/enables/disables EventBridge rules |
+| Config loader | `src/aws_snapshot/config/loader.py` | Reads `backup-config.yaml` (or `BACKUP_CONFIG_PATH`) |
+| Config models | `src/aws_snapshot/config/models.py` | Pydantic schema for all config fields |
 
 ## What happens when `backup run --source toshi` executes
 

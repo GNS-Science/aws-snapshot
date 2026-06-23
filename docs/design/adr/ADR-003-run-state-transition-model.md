@@ -4,7 +4,7 @@
 - Date: 2026-04-21
 - Updated: 2026-05-19
 
-> **Outcome:** The phase model is live in `src/nzshm_backup/run_state.py`
+> **Outcome:** The phase model is live in `src/aws_snapshot/run_state.py`
 > and consumed by `backup status` (`commands/status.py:186-252`). Two
 > phases from the original proposal were intentionally collapsed during
 > implementation:

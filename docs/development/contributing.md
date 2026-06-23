@@ -8,8 +8,8 @@ cd nzshm-backup
 uv sync --all-extras      # installs all deps including dev and docs extras
 ```
 
-The project uses a `src/` layout. The installed package is `nzshm-backup`; the
-Python import path is `nzshm_backup`.
+The project uses a `src/` layout. The installed package is `aws-snapshot`; the
+Python import path is `aws_snapshot`.
 
 > **Note:** The project uses `uv` for dependency management. `uv.lock` is the
 > source of truth for pinned versions.
@@ -83,10 +83,10 @@ Commit granularity: one logical change per commit. Do not batch unrelated change
 
 ## Adding a new subcommand
 
-1. Create `src/nzshm_backup/commands/my_command.py` with a `typer.Typer()` app
+1. Create `src/aws_snapshot/commands/my_command.py` with a `typer.Typer()` app
 2. Add the command in `cli.py`:
    ```python
-   from nzshm_backup.commands.my_command import app as my_app
+   from aws_snapshot.commands.my_command import app as my_app
    app.add_typer(my_app, name="my-cmd", help="Description.")
    ```
 3. Add tests in `tests/test_my_command.py`

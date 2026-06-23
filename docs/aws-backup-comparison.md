@@ -125,7 +125,7 @@ ADR-009 formalises three signal classes:
 | **2** | ℹ info | Noteworthy but expected; no action required | "backup has 89 orphans (source deletions retained per ADR-006)" |
 | **3** | ⚠ yellow | Operationally degraded but not failing yet | "inventory > 30h stale" |
 
-The classifier (`src/nzshm_backup/health_report.py`) drives the daily
+The classifier (`src/aws_snapshot/health_report.py`) drives the daily
 Slack + email report; each class renders distinctly so operators don't
 chase informational lines.
 

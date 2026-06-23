@@ -69,7 +69,7 @@ Kept (CloudFormation continues to own these):
 
 ### New CLI
 
-`src/nzshm_backup/commands/notifications.py`:
+`src/aws_snapshot/commands/notifications.py`:
 
 - `backup notifications apply [--stage prod] [--dry-run] [--only alerts|reports|all]`
   - Reads desired lists from config.
@@ -177,7 +177,7 @@ Rejected as a regression from the existing CFN-managed behaviour.
 
 ## Links
 
-- `src/nzshm_backup/commands/notifications.py` — implementation
+- `src/aws_snapshot/commands/notifications.py` — implementation
 - `tests/test_notifications_apply.py` — diff unit tests
 - `docs/operations/enabling-notifications.md` — operator runbook
   rewritten for this design

@@ -259,13 +259,13 @@ results — no extra query.
 
 | Component | File | Effort |
 |---|---|---|
-| Add `BLUE` literal to `Status` type | `src/nzshm_backup/health_report.py` | Trivial |
-| Rewrite `_classify_source` for 4-colour rules | `src/nzshm_backup/health_report.py` | Small |
-| `SourceHealthData` may gain `prev_orphan_count` for delta detection | `src/nzshm_backup/health_report.py` | Small |
-| Headline math: rewrite `HealthReportData.overall` for 4-colour precedence | `src/nzshm_backup/health_report.py` | Trivial |
-| Slack formatter: 4 emoji + per-row colour bar (existing pattern) | `src/nzshm_backup/health_report.py` | Small |
-| Email formatter: 4-character glyph + headline math | `src/nzshm_backup/health_report.py` | Small |
-| Subject-line format: `(M GREEN / N AMBER / K BLUE / J RED of TOTAL)` | `src/nzshm_backup/health_report.py` | Small |
+| Add `BLUE` literal to `Status` type | `src/aws_snapshot/health_report.py` | Trivial |
+| Rewrite `_classify_source` for 4-colour rules | `src/aws_snapshot/health_report.py` | Small |
+| `SourceHealthData` may gain `prev_orphan_count` for delta detection | `src/aws_snapshot/health_report.py` | Small |
+| Headline math: rewrite `HealthReportData.overall` for 4-colour precedence | `src/aws_snapshot/health_report.py` | Trivial |
+| Slack formatter: 4 emoji + per-row colour bar (existing pattern) | `src/aws_snapshot/health_report.py` | Small |
+| Email formatter: 4-character glyph + headline math | `src/aws_snapshot/health_report.py` | Small |
+| Subject-line format: `(M GREEN / N AMBER / K BLUE / J RED of TOTAL)` | `src/aws_snapshot/health_report.py` | Small |
 | Update existing classifier tests (~10 tests) | `tests/test_health_report.py` | Small |
 | New tests: AMBER auto-healed path, BLUE idle path, GREEN active path | `tests/test_health_report.py` | Small |
 | Update `ADR-009` with a "Superseded in part by ADR-011" header | `docs/design/adr/ADR-009-…md` | Trivial |
