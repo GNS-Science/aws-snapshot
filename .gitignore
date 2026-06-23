@@ -16,9 +16,13 @@ htmlcov/
 .coverage
 coverage.xml
 
-# Serverless
+# Serverless (legacy — kept alongside SAM during transition; see #48)
 .serverless/
 node_modules/
+
+# SAM
+.aws-sam/
+samconfig.toml
 
 # Local config (contains account IDs and ARNs)
 backup-config.sandbox.yaml

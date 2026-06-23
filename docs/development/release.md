@@ -56,12 +56,26 @@ Docs are served from the `gh-pages` branch.
 
 ## Lambda deployment after release
 
-After bumping the version, redeploy the Lambda so it reports the new version:
+After bumping the version, redeploy the Lambda so it reports the new version.
+
+### SAM (preferred, post-#48 migration)
 
 ```bash
 eval "$(aws configure export-credentials --profile backup-account --format env)"
-export BACKUP_CONFIG=$(...yaml to json...)
+cp samconfig.example.toml samconfig.toml   # first time only — then edit parameter_overrides
+sam build --use-container
+sam deploy
+```
+
+See [Lambda Deployment](lambda-deployment.md) for prerequisites (Docker, `aws-sam-cli`).
+
+### Serverless Framework (legacy — to be removed once SAM parity is confirmed)
+
+```bash
+eval "$(aws configure export-credentials --profile backup-account --format env)"
 sls deploy --stage prod
 ```
 
-See [Lambda Deployment](lambda-deployment.md) for full instructions.
+Both deploy paths exist in the repo during the SAM transition (issue #48). Once
+the SAM template has been used for at least one real production deploy and
+verified equivalent, `serverless.yml` is removed in a follow-up PR.

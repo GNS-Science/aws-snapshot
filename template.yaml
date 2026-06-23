@@ -1,0 +1,402 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  nzshm-backup — AWS-native incremental backup CLI for S3 + DynamoDB.
+  SAM template replacing the previous serverless.yml. Deploy with
+  `sam build --use-container && sam deploy`. Default parameters work
+  for a fresh single-account install; override via samconfig.toml or
+  `sam deploy --parameter-overrides` for multi-account / cross-account
+  setups.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [prod, sandbox]
+    Description: Deployment stage selector. Drives per-stage resource names and the SSM config namespace.
+
+  ServiceName:
+    Type: String
+    Default: nzshm-backup-service
+    Description: Prefix used for resource names. Override if you operate multiple parallel installs in one account.
+
+  BatchRoleArn:
+    Type: String
+    Default: arn:aws:iam::*:role/nzshm-backup-batch-role
+    Description: ARN passed to S3 Batch Operations jobs via iam:PassRole. Wildcard-account default works for in-account use; pin to a specific account in cross-account setups.
+
+  SlackWebhookSecretName:
+    Type: String
+    Default: backup-slack-webhook
+    Description: Secrets Manager secret holding the Slack incoming-webhook URL for the alarm-bridge. Leave the default unless you renamed the secret.
+
+Globals:
+  Function:
+    Runtime: python3.10
+    MemorySize: 1024
+    Timeout: 900
+    CodeUri: ./
+    Environment:
+      Variables:
+        NZSHM_STAGE: !Ref Stage
+        PYTHONPATH: /var/task/src
+        BACKUP_REPORTS_TOPIC_ARN: !Ref BackupReportsTopic
+
+Resources:
+
+  # ----------------------------------------------------------------------------
+  # Shared IAM role for all three Lambda functions. Matches the role
+  # serverless.yml produced (one role attached to every function), with the
+  # same scoped statements transcribed.
+  # ----------------------------------------------------------------------------
+  BackupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${ServiceName}-${Stage}-lambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:CopyObject
+                  - s3:CreateBucket
+                  - s3:GetBucketLocation
+                  - s3:GetBucketTagging
+                  - s3:GetBucketVersioning
+                  - s3:PutLifecycleConfiguration
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketTagging
+                  - s3:PutBucketVersioning
+                  - s3:GetBucketAcl
+                Resource: '*'
+              # Restore-test temp buckets (bb-restore-test-<ts>-<account>) are
+              # created and deleted by the Lambda each run. Scoped delete so
+              # the no-delete guarantee on real backup buckets (bb-<source>-*)
+              # is preserved.
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:DeleteBucket
+                Resource:
+                  - arn:aws:s3:::bb-restore-test-*
+                  - arn:aws:s3:::bb-restore-test-*/*
+              # Athena UNLOAD writes part files under
+              # nzshm-backup-inventory-<account>/_manifests/unload/<alias>/<bucket>/
+              # which must be deleted before the next run (Athena UNLOAD refuses
+              # to overwrite a non-empty target — HIVE_PATH_ALREADY_EXISTS).
+              # Scoped narrowly so the rest of the control bucket remains
+              # delete-protected.
+              - Effect: Allow
+                Action: s3:DeleteObject
+                Resource: arn:aws:s3:::nzshm-backup-inventory-*/_manifests/unload/*
+              - Effect: Allow
+                Action:
+                  - sts:GetCallerIdentity
+                  - sts:AssumeRole
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:ExportTableToPointInTime
+                  - dynamodb:DescribeExport
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:TagResource
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:CreateJob
+                  - s3:DescribeJob
+                  - s3:ListJobs
+                  - s3control:CreateJob
+                  - s3control:DescribeJob
+                  - s3control:ListJobs
+                Resource: '*'  # S3 Batch Operations does not support resource-level ARN scoping
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Ref BatchRoleArn
+              - Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:ListRules
+                  - events:EnableRule
+                  - events:DisableRule
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:*:parameter/nzshm-backup/*
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:ListDatabases
+                  - athena:ListTables
+                  - athena:GetDatabase
+                  - athena:GetTableMetadata
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:CreateDatabase
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                  - glue:DeleteTable
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                  - glue:CreatePartition
+                  - glue:BatchCreatePartition
+                  - glue:DeletePartition
+                  - glue:UpdatePartition
+                  - glue:BatchDeletePartition
+                Resource: '*'
+              # Daily health-report delivery (ADR-005 slow path)
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref BackupReportsTopic
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SlackWebhookSecretName}-*
+              # NOTE: NO s3:DeleteObject on backup buckets — they are delete-protected.
+
+  # ----------------------------------------------------------------------------
+  # Lambda functions
+  # ----------------------------------------------------------------------------
+
+  PitrWatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ServiceName}-${Stage}-pitr-watcher
+      Description: Re-enable PITR on DynamoDB tables after restore completes
+      Handler: nzshm_backup.lambda_pitr_watcher.handler
+      Role: !GetAtt BackupLambdaRole.Arn
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          PITR_WATCHER_RULE_NAME: nzshm-backup-pitr-watcher
+      Events:
+        ScheduledPoll:
+          Type: Schedule
+          Properties:
+            Name: nzshm-backup-pitr-watcher
+            Schedule: rate(5 minutes)
+            Description: Poll SSM for pending DynamoDB restores and re-enable PITR
+            Enabled: false  # Enabled on demand via `backup restore dynamodb`
+    Metadata:
+      BuildMethod: python3.10
+
+  BackupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ServiceName}-${Stage}-backup
+      Description: Backup orchestration for NSHM datasets
+      Handler: nzshm_backup.lambda_handler.handler
+      Role: !GetAtt BackupLambdaRole.Arn
+      # No EventBridge events here — per-source schedules are managed via
+      # `backup schedule add` which creates named rules targeting this Lambda.
+    Metadata:
+      BuildMethod: python3.10
+
+  AlarmBridgeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ServiceName}-${Stage}-alarm-bridge
+      Description: SNS -> Slack bridge for backup alerts
+      Handler: nzshm_backup.lambda_alarm_bridge.handler
+      Role: !GetAtt BackupLambdaRole.Arn
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_SECRET_ID: !Ref SlackWebhookSecretName
+    Metadata:
+      BuildMethod: python3.10
+
+  # ----------------------------------------------------------------------------
+  # SNS topics
+  # ----------------------------------------------------------------------------
+
+  BackupAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub nzshm-backup-alerts-${Stage}
+      DisplayName: !Sub NSHM Backup Alerts (${Stage})
+
+  # ADR-005 slow path: daily health report delivered via SNS -> email.
+  # Separate topic so report subscribers are distinct from alarm subscribers.
+  BackupReportsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub nzshm-backup-reports-${Stage}
+      DisplayName: !Sub NSHM Backup Daily Reports (${Stage})
+
+  # ----------------------------------------------------------------------------
+  # Alarms — layered: AWS/Lambda Errors (uncaught) + log-metric-filter (caught
+  # & logged) + pitr-watcher errors. See #41.
+  # ----------------------------------------------------------------------------
+
+  # Tier 1: AWS/Lambda Errors on the backup function. Only fires on uncaught
+  # exceptions (handler raise, init failure, OOM, timeout). The backup handler
+  # catches per-source failures and returns statusCode 500 without raising, so
+  # this alarm is a backstop for catastrophic failures only — caught-and-
+  # logged failures need the log-metric-filter alarm below.
+  BackupLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub nzshm-backup-lambda-errors-${Stage}
+      AlarmDescription: Backup Lambda uncaught-error invocations (ADR-005 fast path)
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref BackupFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref BackupAlertsTopic
+      OKActions:
+        - !Ref BackupAlertsTopic
+
+  # Tier 2: ERROR-level log lines in the backup Lambda. Catches caught-and-
+  # logged failures the Lambda Errors alarm above misses — e.g. the
+  # 2026-06-18 toshi UNLOAD failure (#40) which propagated via result.errors
+  # and statusCode 500 without ever raising in the handler.
+  BackupLambdaLogErrorFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${BackupFunction}
+      FilterPattern: '"[ERROR]"'
+      MetricTransformations:
+        - MetricName: BackupLambdaLogErrors
+          MetricNamespace: NZSHMBackup
+          MetricValue: '1'
+          DefaultValue: 0
+
+  BackupLambdaLogErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub nzshm-backup-lambda-log-errors-${Stage}
+      AlarmDescription: ERROR-level log lines in the backup Lambda (caught-and-logged failures)
+      Namespace: NZSHMBackup
+      MetricName: BackupLambdaLogErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref BackupAlertsTopic
+      OKActions:
+        - !Ref BackupAlertsTopic
+
+  # Tier 1 for the pitr-watcher function. Smaller blast radius than the backup
+  # function but still worth alerting — a wedged PITR-watcher would silently
+  # leave DynamoDB tables in continuous-backups=disabled after a restore.
+  PitrWatcherLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub nzshm-backup-pitr-watcher-errors-${Stage}
+      AlarmDescription: PITR-watcher Lambda uncaught-error invocations
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PitrWatcherFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref BackupAlertsTopic
+      OKActions:
+        - !Ref BackupAlertsTopic
+
+  # ----------------------------------------------------------------------------
+  # Slack delivery for alarm fires. The alarm-bridge Lambda subscribes to
+  # BackupAlertsTopic, decodes the CloudWatch alarm payload, and POSTs a
+  # Block Kit message to the existing Slack webhook. Email subscribers
+  # (managed via `backup notifications apply`) remain in parallel — operators
+  # get both channels.
+  # ----------------------------------------------------------------------------
+
+  AlarmBridgeSnsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      TopicArn: !Ref BackupAlertsTopic
+      Endpoint: !GetAtt AlarmBridgeFunction.Arn
+
+  AlarmBridgeInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      FunctionName: !Ref AlarmBridgeFunction
+      SourceArn: !Ref BackupAlertsTopic
+
+# Subscriptions to BackupAlertsTopic / BackupReportsTopic are NOT managed
+# here — `backup notifications apply` reconciles topic subscriptions to
+# match the lists in backup-config.{stage}.yaml. This keeps backup-config
+# as the single source of truth for who gets which channel.
+
+Outputs:
+  BackupFunctionName:
+    Description: Name of the backup Lambda function
+    Value: !Ref BackupFunction
+    Export:
+      Name: !Sub ${AWS::StackName}-BackupFunctionName
+
+  BackupFunctionArn:
+    Description: ARN of the backup Lambda function
+    Value: !GetAtt BackupFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-BackupFunctionArn
+
+  PitrWatcherFunctionName:
+    Description: Name of the pitr-watcher Lambda function
+    Value: !Ref PitrWatcherFunction
+    Export:
+      Name: !Sub ${AWS::StackName}-PitrWatcherFunctionName
+
+  AlarmBridgeFunctionName:
+    Description: Name of the alarm-bridge Lambda function
+    Value: !Ref AlarmBridgeFunction
+    Export:
+      Name: !Sub ${AWS::StackName}-AlarmBridgeFunctionName
+
+  BackupAlertsTopicArn:
+    Description: SNS topic for alarm fires (alarms + alarm-bridge fan-out)
+    Value: !Ref BackupAlertsTopic
+    Export:
+      Name: !Sub ${AWS::StackName}-BackupAlertsTopicArn
+
+  BackupReportsTopicArn:
+    Description: SNS topic for the daily health report
+    Value: !Ref BackupReportsTopic
+    Export:
+      Name: !Sub ${AWS::StackName}-BackupReportsTopicArn
