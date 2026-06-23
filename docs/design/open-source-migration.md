@@ -35,30 +35,38 @@ Pitch: *"Replace AWS Backup at 97% lower cost with a CLI that takes 30 minutes t
 | `aws-incremental-backup` | Accurate, descriptive |
 | `glacierback` | Short, memorable |
 
-### 2. Replace Serverless Framework with boto3 deploy script
+### 2. Replace Serverless Framework with AWS SAM template
 
 Serverless Framework v4 requires a mandatory account login with the Serverless organisation —
 a barrier for open-source users. Options considered:
 
 | Option | Verdict |
 |--------|---------|
-| Serverless v3 (downgrade) | Still an external tool (`npm` dependency) |
-| AWS CDK | Requires `cdk bootstrap` stack in target account — same overhead as Serverless |
-| **boto3 deploy script** | **Preferred — zero extra tools, pure Python + AWS credentials** |
+| Serverless Framework v3 (downgrade) | Rejected: `npm` dependency + abandonware risk. |
+| Serverless Framework v4 (status quo) | Rejected: forced Serverless-org account (the migration trigger). |
+| AWS CDK | Rejected: requires `cdk bootstrap` stack in target account — same overhead as Serverless. |
+| boto3 deploy script | Rejected: ~300-500 lines of orchestration code the OSS maintainer carries forever. Eventual consistency, stuck rollbacks, and concurrent-deploy edge cases all become our problem. Hard to test cleanly (requires mocking CFN/S3/Lambda APIs). |
+| **AWS SAM template (`template.yaml`)** | **Preferred — first-party AWS tool, no bootstrap stack, no subscription, declaration not orchestration.** |
 
-**Plan:** replace `serverless.yml` with `scripts/deploy.py` (boto3). The script:
-- Zips the package (equivalent to Serverless packaging)
-- Creates or updates the Lambda function
-- Attaches the execution IAM role
-- Sets environment variables
-- Registers EventBridge permissions
+**Why SAM specifically.** SAM is a thin CloudFormation transform — `sam deploy` renders the template to CFN and calls `aws cloudformation deploy`. It inherits all of CloudFormation's atomic-update + rollback behaviour without the maintenance load of writing that logic ourselves. Unlike CDK, no special stack needs to exist in the target account before first deploy. Unlike Serverless Framework, the tool is AWS-first-party and can't pivot to a SaaS model (which is exactly the failure mode that prompted this migration).
+
+The "external tool" cost is real but small:
+- Install: `pip install aws-sam-cli` (native to the Python audience this package targets).
+- Docker for `sam build --use-container` — same requirement as Serverless Framework today.
+
+**Plan:** replace `serverless.yml` with `template.yaml` (SAM) at the package root, plus a thin `samconfig.toml` for default deploy parameters. The template mirrors today's serverless.yml resources almost line-for-line (Lambda function, log group, IAM role, EventBridge rules, SNS topic, alarms, subscriptions). The translation is mechanical — declaration syntax differs, but the resource shape is identical.
 
 Users deploy with:
 ```bash
-uv run python scripts/deploy.py --stage prod --region ap-southeast-2
+sam build --use-container
+sam deploy --stage prod --region ap-southeast-2
 ```
 
-~150 lines of boto3, fully readable, no mystery stacks, no external accounts.
+Once it works, `serverless.yml` is removed in the same PR.
+
+#### Why not "reference templates only" (option C, for the record)
+
+A third option considered was: the OSS package ships only the engine + CLI, and the deploy story lives entirely in user-supplied tooling (with reference templates in `examples/`). Rejected for now because (a) "batteries included" lowers first-impression friction for new adopters, and (b) GNS itself benefits from a canonical template to fork into `nzshm-backup-ops` rather than from a blank slate. We can revisit if the canonical template ever feels like it's holding back adopters who want CDK / Terraform / Pulumi flows.
 
 ### 3. Remove GNS/NSHM-specific content
 
@@ -163,8 +171,8 @@ to the repo, covering:
 
 1. **Choose package name.**
 2. **Stand up `nzshm-backup-ops` (private)** as the shim destination — empty repo + README + `pyproject.toml` placeholder. Doesn't depend on anything else; first concrete step.
-3. Write `scripts/deploy.py` (boto3) + verify it deploys cleanly.
-4. Remove `serverless.yml` (or keep as legacy/optional alongside deploy script).
+3. Write `template.yaml` (SAM) + `samconfig.toml` and verify `sam deploy` produces a working stack equivalent to the current `serverless.yml` deploy.
+4. Remove `serverless.yml` once SAM parity is confirmed.
 5. **Scrub NSHM-specific content from docs and config**, moving the GNS-specific pieces into `nzshm-backup-ops` per the destination table in section 3.
 6. Write README.
 7. Publish to PyPI (test index first).
@@ -176,5 +184,5 @@ to the repo, covering:
 ---
 
 **Created:** 2026-04-15
-**Amended:** 2026-06-23 — shim-repo strategy (section 3a), destination table in section 3, sequencing reflects cutover safety
+**Amended:** 2026-06-23 — shim-repo strategy (section 3a), destination table in section 3, sequencing reflects cutover safety, deploy story moved from boto3 script to AWS SAM template (section 2)
 **Status:** Draft — work beginning under issue tracked separately
