@@ -157,6 +157,17 @@ functions:
     # No default EventBridge triggers — schedules are managed per-source via
     # `backup schedule add` which creates named rules targeting this Lambda.
 
+  alarm-bridge:
+    handler: nzshm_backup.lambda_alarm_bridge.handler
+    description: SNS -> Slack bridge for backup alerts (#41)
+    memorySize: 256
+    timeout: 30
+    environment:
+      SLACK_WEBHOOK_SECRET_ID: backup-slack-webhook
+    # Subscription wired explicitly in resources block below so it can
+    # reference the CFN-managed BackupAlertsTopic without a chicken-and-egg
+    # cycle between sls events and resources.
+
 custom:
   # Stage name (prod, sandbox) does not match the config file suffix
   # (production, sandbox). Map explicitly here rather than renaming
@@ -182,11 +193,16 @@ resources:
         TopicName: nzshm-backup-alerts-${sls:stage}
         DisplayName: NSHM Backup Alerts (${sls:stage})
 
+    # Tier 1: AWS/Lambda Errors. Only fires on uncaught exceptions (handler
+    # raise, init failure, OOM, timeout). The backup handler catches
+    # per-source failures and returns statusCode 500 without raising, so
+    # this alarm is a backstop for catastrophic failures only — caught-and-
+    # logged failures need the log-metric-filter alarm below. See #41 / #40.
     BackupLambdaErrorAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
         AlarmName: nzshm-backup-lambda-errors-${sls:stage}
-        AlarmDescription: Backup Lambda invocation errors (ADR-005 fast path)
+        AlarmDescription: Backup Lambda uncaught-error invocations (ADR-005 fast path)
         Namespace: AWS/Lambda
         MetricName: Errors
         Dimensions:
@@ -202,6 +218,84 @@ resources:
           - !Ref BackupAlertsTopic
         OKActions:
           - !Ref BackupAlertsTopic
+
+    # Tier 2: ERROR-level log lines in the backup Lambda. Catches caught-
+    # and-logged failures the Lambda Errors alarm above misses — e.g. the
+    # 2026-06-18 toshi UNLOAD failure (#40) which propagated via
+    # result.errors and statusCode 500 without ever raising in the handler.
+    BackupLambdaLogErrorFilter:
+      Type: AWS::Logs::MetricFilter
+      Properties:
+        LogGroupName: !Ref BackupLogGroup
+        FilterPattern: '"[ERROR]"'
+        MetricTransformations:
+          - MetricName: BackupLambdaLogErrors
+            MetricNamespace: NZSHMBackup
+            MetricValue: '1'
+            DefaultValue: 0
+
+    BackupLambdaLogErrorAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: nzshm-backup-lambda-log-errors-${sls:stage}
+        AlarmDescription: ERROR-level log lines in the backup Lambda (caught-and-logged failures)
+        Namespace: NZSHMBackup
+        MetricName: BackupLambdaLogErrors
+        Statistic: Sum
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref BackupAlertsTopic
+        OKActions:
+          - !Ref BackupAlertsTopic
+
+    # Tier 1 for the pitr-watcher function. Smaller blast radius than the
+    # backup function but still worth alerting — a wedged PITR-watcher
+    # would silently leave DynamoDB tables in continuous-backups=disabled
+    # after a restore.
+    PitrWatcherLambdaErrorAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: nzshm-backup-pitr-watcher-errors-${sls:stage}
+        AlarmDescription: PITR-watcher Lambda uncaught-error invocations
+        Namespace: AWS/Lambda
+        MetricName: Errors
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref PitrDashwatcherLambdaFunction
+        Statistic: Sum
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          - !Ref BackupAlertsTopic
+        OKActions:
+          - !Ref BackupAlertsTopic
+
+    # Slack delivery for alarm fires. The alarm-bridge Lambda subscribes
+    # to BackupAlertsTopic, decodes the CloudWatch alarm payload, and
+    # POSTs a Block Kit message to the existing backup-slack-webhook.
+    # Email subscribers (managed via `backup notifications apply`) remain
+    # in parallel — operators get both channels.
+    AlarmBridgeSnsSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: lambda
+        TopicArn: !Ref BackupAlertsTopic
+        Endpoint: !GetAtt AlarmDashbridgeLambdaFunction.Arn
+
+    AlarmBridgeInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        Principal: sns.amazonaws.com
+        FunctionName: !Ref AlarmDashbridgeLambdaFunction
+        SourceArn: !Ref BackupAlertsTopic
 
     # ADR-005 slow path: daily health report delivered via SNS -> email.
     # Separate topic so report subscribers are distinct from alarm subscribers.
