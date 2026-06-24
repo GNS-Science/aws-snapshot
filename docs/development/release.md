@@ -68,9 +68,13 @@ sam deploy
 ```
 
 See [Lambda Deployment](lambda-deployment.md) for prerequisites (Docker, `aws-sam-cli`).
-For first-time SAM verification — `sam validate`, `sam build`, side-stack
-deploy, and parity diff vs the legacy sls stack — see
-[SAM deploy verification](sam-deploy-verification.md).
+
+For the **one-time cutover** from Serverless Framework to SAM (Activity B),
+see [SAM cutover runbook](sam-cutover-runbook.md). For first-time SAM
+verification — `sam validate`, `sam build`, side-stack deploy, and parity
+diff vs the legacy sls stack — see
+[SAM deploy verification](sam-deploy-verification.md). The verification
+runbook is a prerequisite for the cutover runbook.
 
 ### Serverless Framework (legacy — to be removed once SAM parity is confirmed)
 
