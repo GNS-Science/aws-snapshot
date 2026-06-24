@@ -12,8 +12,8 @@ Parameters:
   Stage:
     Type: String
     Default: prod
-    AllowedValues: [prod, sandbox]
-    Description: Deployment stage selector. Drives per-stage resource names and the SSM config namespace.
+    AllowedPattern: ^[a-z][a-z0-9-]{0,15}$
+    Description: Deployment stage selector. Drives per-stage resource names and the SSM config namespace. Lowercase alphanumeric plus dashes, starting with a letter; max 16 chars.
 
   ServiceName:
     Type: String
@@ -35,11 +35,14 @@ Globals:
     Runtime: python3.10
     MemorySize: 1024
     Timeout: 900
+    # Each function uses BuildMethod: makefile (see per-function
+    # Metadata). CodeUri must be present for SAM to pick a working
+    # directory; the Makefile target is the authority on what
+    # actually gets packaged.
     CodeUri: ./
     Environment:
       Variables:
         NZSHM_STAGE: !Ref Stage
-        PYTHONPATH: /var/task/src
         BACKUP_REPORTS_TOPIC_ARN: !Ref BackupReportsTopic
 
 Resources:
@@ -191,17 +194,31 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          PITR_WATCHER_RULE_NAME: nzshm-backup-pitr-watcher
+          # Stage-scoped rule name so multiple stacks in the same account
+          # (e.g. prod alongside a side-stack verification) don't collide.
+          # The watcher reads this env var to find its own rule for
+          # enable/disable cycling.
+          PITR_WATCHER_RULE_NAME: !Sub nzshm-backup-pitr-watcher-${Stage}
       Events:
         ScheduledPoll:
           Type: Schedule
           Properties:
-            Name: nzshm-backup-pitr-watcher
+            Name: !Sub nzshm-backup-pitr-watcher-${Stage}
             Schedule: rate(5 minutes)
             Description: Poll SSM for pending DynamoDB restores and re-enable PITR
             Enabled: false  # Enabled on demand via `backup restore dynamodb`
     Metadata:
-      BuildMethod: python3.10
+      BuildMethod: makefile
+
+  # Explicit log group so the BackupLambdaLogErrorFilter (below) can
+  # reference it via !Ref. Without an explicit declaration, Lambda creates
+  # the log group lazily on first invocation, which means the MetricFilter
+  # would fail at CREATE time with "log group does not exist".
+  BackupLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ServiceName}-${Stage}-backup
+      RetentionInDays: 90
 
   BackupFunction:
     Type: AWS::Serverless::Function
@@ -210,10 +227,12 @@ Resources:
       Description: Backup orchestration for NSHM datasets
       Handler: nzshm_backup.lambda_handler.handler
       Role: !GetAtt BackupLambdaRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref BackupLogGroup
       # No EventBridge events here — per-source schedules are managed via
       # `backup schedule add` which creates named rules targeting this Lambda.
     Metadata:
-      BuildMethod: python3.10
+      BuildMethod: makefile
 
   AlarmBridgeFunction:
     Type: AWS::Serverless::Function
@@ -228,7 +247,7 @@ Resources:
         Variables:
           SLACK_WEBHOOK_SECRET_ID: !Ref SlackWebhookSecretName
     Metadata:
-      BuildMethod: python3.10
+      BuildMethod: makefile
 
   # ----------------------------------------------------------------------------
   # SNS topics
@@ -286,7 +305,7 @@ Resources:
   BackupLambdaLogErrorFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
-      LogGroupName: !Sub /aws/lambda/${BackupFunction}
+      LogGroupName: !Ref BackupLogGroup
       FilterPattern: '"[ERROR]"'
       MetricTransformations:
         - MetricName: BackupLambdaLogErrors

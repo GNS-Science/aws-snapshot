@@ -18,12 +18,11 @@ s3_prefix       = "nzshm-backup-sam"
 capabilities    = "CAPABILITY_NAMED_IAM"
 confirm_changeset = true
 fail_on_empty_changeset = false
-parameter_overrides = """
-  Stage=prod
-  ServiceName=nzshm-backup-service
-  BatchRoleArn=arn:aws:iam::123456789012:role/nzshm-backup-batch-role
-  SlackWebhookSecretName=backup-slack-webhook
-"""
+# NOTE: parameter_overrides MUST be a single-line string. SAM passes the
+# multi-line TOML form (""" """) through with embedded newlines, which
+# CloudFormation rejects with "Parameter 'Stage' must be one of AllowedValues"
+# (the trailing newline ends up in the value of each parameter).
+parameter_overrides = "Stage=prod ServiceName=nzshm-backup-service BatchRoleArn=arn:aws:iam::123456789012:role/nzshm-backup-batch-role SlackWebhookSecretName=backup-slack-webhook"
 
 [default.build.parameters]
 use_container = true
@@ -34,7 +33,4 @@ use_container = true
 # [sandbox.deploy.parameters]
 # stack_name      = "nzshm-backup-service-sandbox"
 # region          = "ap-southeast-2"
-# parameter_overrides = """
-#   Stage=sandbox
-#   ...
-# """
+# parameter_overrides = "Stage=sandbox ..."
