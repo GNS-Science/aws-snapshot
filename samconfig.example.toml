@@ -1,0 +1,36 @@
+# samconfig example for nzshm-backup
+#
+# Copy to `samconfig.toml` and customise. The committed file in this
+# repo is the OSS template — operational installs should override the
+# parameters below for their account / region / IAM names.
+#
+# For GNS-internal installs, the pinned-values version of this file
+# lives in the private `nzshm-backup-ops` shim repo. See
+# https://github.com/GNS-Science/nzshm-backup/issues/48.
+
+version = 0.1
+
+[default]
+[default.deploy.parameters]
+stack_name      = "nzshm-backup-service-prod"
+region          = "ap-southeast-2"
+s3_prefix       = "nzshm-backup-sam"
+capabilities    = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
+# NOTE: parameter_overrides MUST be a single-line string. SAM passes the
+# multi-line TOML form (""" """) through with embedded newlines, which
+# CloudFormation rejects with "Parameter 'Stage' must be one of AllowedValues"
+# (the trailing newline ends up in the value of each parameter).
+parameter_overrides = "Stage=prod ServiceName=nzshm-backup-service BatchRoleArn=arn:aws:iam::123456789012:role/nzshm-backup-batch-role SlackWebhookSecretName=backup-slack-webhook"
+
+[default.build.parameters]
+use_container = true
+
+# Optional: a separate sandbox profile for non-prod testing.
+#
+# [sandbox]
+# [sandbox.deploy.parameters]
+# stack_name      = "nzshm-backup-service-sandbox"
+# region          = "ap-southeast-2"
+# parameter_overrides = "Stage=sandbox ..."
