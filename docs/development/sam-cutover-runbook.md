@@ -29,6 +29,25 @@ deployed. Scheduled backups firing in this window will fail; nothing
 else breaks (source buckets, backup buckets, Athena DB, SSM config,
 and `backup-config.production.yaml` are all outside the stack).
 
+### Scope summary
+
+| | Touched during cutover | Not touched |
+|---|---|---|
+| Backup-account CFN stack (`nzshm-backup-service-prod`) | ✅ Replaced | |
+| Backup-account Lambdas, IAM role, SNS, alarms (inside the stack) | ✅ Replaced | |
+| Backup-account backup buckets (`bb-*`), inventory bucket, Athena DB, Glue tables | | ✅ Outside the stack |
+| Backup-account SSM hierarchy `/nzshm-backup/*` | | ✅ Read at runtime |
+| Backup-account Secrets Manager (`backup-slack-webhook`) | | ✅ Read at runtime |
+| Backup-account per-source EventBridge schedules (CLI-created) | | ✅ Survive sls remove; step 6 refreshes the lost `lambda:InvokePermission` |
+| **Source-account buckets, DynamoDB tables, S3 inventory configs** | | ✅ **Never modified by cutover** |
+| **Source-account IAM roles + trust policies** | | ✅ **Never modified by cutover** |
+
+The cross-account assume-role path keeps working because the
+source-account trust trusts the backup-account *principal* with
+ExternalId `"nzshm-backup"`, not a specific role ARN. The backup-
+account role being renamed by the cutover is transparent to the
+trust. Empirically confirmed at step 8 (first real `backup run`).
+
 ## Pre-cutover checklist
 
 Tick all of these before starting. Stop if any one fails.
@@ -347,6 +366,24 @@ Expect successful Athena UNLOAD, manifest, and S3 Batch job
 submission (or `row_count=0` if there's no diff — that's fine
 too). The full per-source pipeline gets exercised end-to-end on
 real resources.
+
+> **Cross-account assume-role is first exercised here.** The
+> verification runbook (Activity A) ran in the backup account only
+> — it never called `sts:AssumeRole` into the source account
+> because the smoke tests were a dry-run Lambda invoke and a
+> synthetic alarm publish, neither of which touches cross-account.
+> This step is the first time the new SAM-deployed IAM role
+> assumes the source-account `nzshm-backup-reader` role via the
+> `ExternalId="nzshm-backup"` trust path. The assume should
+> succeed — the source-account trust policy trusts the
+> backup-account *principal* (any role in the backup account with
+> the right ExternalId), not a specific role ARN, so the rename
+> of the backup-account role between sls and SAM doesn't break
+> trust. But the empirical confirmation lands here. If this step
+> fails with `AccessDenied` on `sts:AssumeRole`, the source-account
+> trust is shaped differently than expected (e.g. hardcodes a role
+> ARN) — roll back via the procedure below and investigate trust
+> before retrying.
 
 Then check the next day's daily health report (fires 09:45 NZST).
 That's the first time the SAM-deployed stack handles a scheduled
