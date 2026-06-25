@@ -1,7 +1,7 @@
 # Configuration
 
 The CLI reads configuration from a YAML file validated against Pydantic models in
-`src/nzshm_backup/config/models.py`.
+`src/aws_snapshot/config/models.py`.
 
 ## Config file location
 

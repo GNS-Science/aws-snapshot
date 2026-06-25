@@ -115,10 +115,10 @@ SES from `noreply-backup@<domain>` to configured recipients.
 | CloudWatch alarm + SNS topic | `serverless.yml` (resources block) | Small |
 | SNS → Slack subscription | Lambda subscriber or AWS Chatbot | Small |
 | SNS → email subscription | `serverless.yml` (manual confirm step) | Trivial |
-| Health check runner | `src/nzshm_backup/health_report.py` (new) | Medium |
-| Slack sender | `src/nzshm_backup/notifications/slack.py` (new) | Small |
-| SES sender | `src/nzshm_backup/notifications/ses.py` (new) | Small |
-| Lambda handler extension | `src/nzshm_backup/lambda_handler.py` | Small |
+| Health check runner | `src/aws_snapshot/health_report.py` (new) | Medium |
+| Slack sender | `src/aws_snapshot/notifications/slack.py` (new) | Small |
+| SES sender | `src/aws_snapshot/notifications/ses.py` (new) | Small |
+| Lambda handler extension | `src/aws_snapshot/lambda_handler.py` | Small |
 | EventBridge rule | `backup schedule add --source health --frequency daily` | Trivial |
 | Config enablement | `backup-config.production.yaml` notifications section | Trivial |
 | SES domain verification | AWS console / CLI (one-time) | Small |

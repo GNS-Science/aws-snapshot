@@ -45,7 +45,7 @@ once per year.
 ### 2. Deep Archive restore is not implemented
 
 `backup restore run` calls `s3:CopyObject` directly
-(`src/nzshm_backup/s3_restore.py:191`). On a Deep Archive object that
+(`src/aws_snapshot/s3_restore.py:191`). On a Deep Archive object that
 returns `InvalidObjectState: The operation is not valid for the object's
 storage class`. To actually restore a Deep Archive object the code would
 need to:
@@ -224,9 +224,9 @@ backup data on its own.
 
 | Component | File | Effort |
 |-----------|------|--------|
-| Remove Deep Archive transition + Expiration | `src/nzshm_backup/s3_backup.py` (`apply_lifecycle_policy`) | Trivial |
-| Remove `cold_days` from `LifecycleConfig` | `src/nzshm_backup/s3_backup.py` | Trivial |
-| Remove `cold_days` from Pydantic model | `src/nzshm_backup/config/models.py` | Trivial |
+| Remove Deep Archive transition + Expiration | `src/aws_snapshot/s3_backup.py` (`apply_lifecycle_policy`) | Trivial |
+| Remove `cold_days` from `LifecycleConfig` | `src/aws_snapshot/s3_backup.py` | Trivial |
+| Remove `cold_days` from Pydantic model | `src/aws_snapshot/config/models.py` | Trivial |
 | Remove `cold_days` from production config | `backup-config.production.yaml` | Trivial |
 | Update tests for new lifecycle shape | `tests/test_s3_backup.py`, `tests/test_config.py`, `tests/test_cli.py` | Small |
 | Update storage-tier table | `docs/architecture/storage-tiers.md` | Small |
@@ -235,7 +235,7 @@ backup data on its own.
 | Update retention-strategy doc | `docs/design/retention-strategy-and-costs.md` | Small |
 | Update DR scenario doc (Phase 2 collapses) | `docs/design/disaster-recovery-scenario.md` | Small |
 | Re-apply lifecycle policy to deployed buckets | One-off via `backup setup` or `aws s3api put-bucket-lifecycle-configuration` | Small |
-| Mitigation 1: object-count delta in health report | `src/nzshm_backup/health_report.py` (see ADR-005) | Small |
+| Mitigation 1: object-count delta in health report | `src/aws_snapshot/health_report.py` (see ADR-005) | Small |
 | Mitigation 2: manual-purge runbook | `docs/operations/purge-from-backup.md` (new) | Small |
 
 ### Migration of existing data
@@ -287,5 +287,5 @@ volume of currently-archived data is small.
 - Cost model: `docs/architecture/cost-model.md`
 - Retention strategy: `docs/design/retention-strategy-and-costs.md`
 - DR scenario: `docs/design/disaster-recovery-scenario.md`
-- Lifecycle code: `src/nzshm_backup/s3_backup.py:171-215`
-- Diff predicate: `src/nzshm_backup/athena_inventory.py:248-256`
+- Lifecycle code: `src/aws_snapshot/s3_backup.py:171-215`
+- Diff predicate: `src/aws_snapshot/athena_inventory.py:248-256`

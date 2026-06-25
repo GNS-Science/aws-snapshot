@@ -74,7 +74,7 @@ def test_backup_dry_run(make_config):
 ## Coverage
 
 ```bash
-uv run pytest --cov=nzshm_backup --cov-report=term-missing
+uv run pytest --cov=aws_snapshot --cov-report=term-missing
 ```
 
 Current coverage: ~152 tests. Target: maintain > 70% line coverage.
