@@ -58,31 +58,21 @@ Docs are served from the `gh-pages` branch.
 
 After bumping the version, redeploy the Lambda so it reports the new version.
 
-### SAM (preferred, post-#48 migration)
-
 ```bash
-eval "$(aws configure export-credentials --profile backup-account --format env)"
+eval "$(aws configure export-credentials --profile <aws-profile> --format env)"
 cp samconfig.example.toml samconfig.toml   # first time only — then edit parameter_overrides
-sam build --use-container
+make sam-build
 sam deploy
 ```
 
-See [Lambda Deployment](lambda-deployment.md) for prerequisites (Docker, `aws-sam-cli`).
+See [Lambda Deployment](lambda-deployment.md) for prerequisites (Docker,
+SAM CLI is bundled via the dev dependency group). The
+[SAM deploy verification](sam-deploy-verification.md) runbook walks through
+a side-stack `sam build` / `sam deploy` against a real AWS account if
+you want a parity check before deploying to prod.
 
-For the **one-time cutover** from Serverless Framework to SAM (Activity B),
-see [SAM cutover runbook](sam-cutover-runbook.md). For first-time SAM
-verification — `sam validate`, `sam build`, side-stack deploy, and parity
-diff vs the legacy sls stack — see
-[SAM deploy verification](sam-deploy-verification.md). The verification
-runbook is a prerequisite for the cutover runbook.
-
-### Serverless Framework (legacy — to be removed once SAM parity is confirmed)
-
-```bash
-eval "$(aws configure export-credentials --profile backup-account --format env)"
-sls deploy --stage prod
-```
-
-Both deploy paths exist in the repo during the SAM transition (issue #48). Once
-the SAM template has been used for at least one real production deploy and
-verified equivalent, `serverless.yml` is removed in a follow-up PR.
+The one-time historical cutover from Serverless Framework to SAM is
+recorded in the [SAM cutover runbook](sam-cutover-runbook.md) and was
+executed 2026-06-24; the runbook is preserved as a reference in case a
+future restore-from-cold-start scenario requires re-deploying the stack
+from scratch.

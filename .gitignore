@@ -16,10 +16,6 @@ htmlcov/
 .coverage
 coverage.xml
 
-# Serverless (legacy — kept alongside SAM during transition; see #48)
-.serverless/
-node_modules/
-
 # SAM
 .aws-sam/
 samconfig.toml

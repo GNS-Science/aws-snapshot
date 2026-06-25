@@ -46,7 +46,7 @@ a barrier for open-source users. Options considered:
 | Serverless Framework v4 (status quo) | Rejected: forced Serverless-org account (the migration trigger). |
 | AWS CDK | Rejected: requires `cdk bootstrap` stack in target account — same overhead as Serverless. |
 | boto3 deploy script | Rejected: ~300-500 lines of orchestration code the OSS maintainer carries forever. Eventual consistency, stuck rollbacks, and concurrent-deploy edge cases all become our problem. Hard to test cleanly (requires mocking CFN/S3/Lambda APIs). |
-| **AWS SAM template (`template.yaml`)** | **Preferred — first-party AWS tool, no bootstrap stack, no subscription, declaration not orchestration.** |
+| **AWS SAM template (`sam.yaml`)** | **Preferred — first-party AWS tool, no bootstrap stack, no subscription, declaration not orchestration.** |
 
 **Why SAM specifically.** SAM is a thin CloudFormation transform — `sam deploy` renders the template to CFN and calls `aws cloudformation deploy`. It inherits all of CloudFormation's atomic-update + rollback behaviour without the maintenance load of writing that logic ourselves. Unlike CDK, no special stack needs to exist in the target account before first deploy. Unlike Serverless Framework, the tool is AWS-first-party and can't pivot to a SaaS model (which is exactly the failure mode that prompted this migration).
 
@@ -54,7 +54,7 @@ The "external tool" cost is real but small:
 - Install: `pip install aws-sam-cli` (native to the Python audience this package targets).
 - Docker for `sam build --use-container` — same requirement as Serverless Framework today.
 
-**Plan:** replace `serverless.yml` with `template.yaml` (SAM) at the package root, plus a thin `samconfig.toml` for default deploy parameters. The template mirrors today's serverless.yml resources almost line-for-line (Lambda function, log group, IAM role, EventBridge rules, SNS topic, alarms, subscriptions). The translation is mechanical — declaration syntax differs, but the resource shape is identical.
+**Plan:** replace `serverless.yml` with `sam.yaml` (SAM) at the package root, plus a thin `samconfig.toml` for default deploy parameters. The template mirrors today's serverless.yml resources almost line-for-line (Lambda function, log group, IAM role, EventBridge rules, SNS topic, alarms, subscriptions). The translation is mechanical — declaration syntax differs, but the resource shape is identical.
 
 Users deploy with:
 ```bash
@@ -171,7 +171,7 @@ to the repo, covering:
 
 1. **Choose package name.**
 2. **Stand up `nzshm-backup-ops` (private)** as the shim destination — empty repo + README + `pyproject.toml` placeholder. Doesn't depend on anything else; first concrete step.
-3. Write `template.yaml` (SAM) + `samconfig.toml` and verify `sam deploy` produces a working stack equivalent to the current `serverless.yml` deploy.
+3. Write `sam.yaml` (SAM) + `samconfig.toml` and verify `sam deploy` produces a working stack equivalent to the current `serverless.yml` deploy.
 4. Remove `serverless.yml` once SAM parity is confirmed.
 5. **Scrub NSHM-specific content from docs and config**, moving the GNS-specific pieces into `nzshm-backup-ops` per the destination table in section 3.
 6. Write README.

@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Deploy mechanism
+
+- **AWS SAM replaces Serverless Framework as the production deploy mechanism.** Translated `serverless.yml` to `sam.yaml`; introduced a Makefile-driven SAM build that produces clean ~55 MB Lambda artefacts (vs the bloated builds the default SAM Python builder would have produced); side-stack-verified 2026-06-23; cut over in production 2026-06-24. The legacy npm-based Serverless Framework toolchain (`serverless.yml`, `package.json`, `package-lock.json`, `node_modules/`) is removed in this release. SAM CLI is now a declared dev dependency in `pyproject.toml`. Issue #48, PR #51 (cutover) + the `serverless.yml`-removal follow-up.
+- `template.yaml` renamed to `sam.yaml`; `samconfig.toml` gains `template_file = "sam.yaml"` for SAM CLI discovery transparency. (Per @voj review feedback.)
+
+### Internal
+
+- `docs/PROD-DEPLOY-LOG.md` retired in the public repo; authoritative copy now lives in the private `nzshm-backup-ops` shim repo per the shim-strategy decision in PR #49. A redirect note remains at the old path.
+
+### Other
+
 - deps: patch (12 pkgs), minor (22 pkgs), major: cryptography 47→48, mypy 1→2
 
 ## [v0.1.0] - 2026-06-12

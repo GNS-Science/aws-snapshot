@@ -1,6 +1,6 @@
 # SAM deploy verification
 
-A step-by-step runbook for verifying that `template.yaml` (SAM)
+A step-by-step runbook for verifying that `sam.yaml` (the SAM template)
 produces a CloudFormation stack equivalent to the legacy
 `serverless.yml` deploy. Run before merging
 [PR #51](https://github.com/GNS-Science/nzshm-backup/pull/51), and
@@ -20,13 +20,14 @@ ongoing cost or operational footprint.
 ## Prerequisites
 
 ```bash
-# AWS SAM CLI — native Python package, installs alongside the
-# existing uv-managed env.
-pip install --user aws-sam-cli
+# SAM CLI is a dev dependency — pulled in by `uv sync --all-extras`
+# (or just by `make sync`). No separate install step needed.
+uv sync --all-extras
+uv run sam --version   # should print "SAM CLI, version 1.x"
 
 # Docker — required by `sam build --use-container` which mirrors
-# the dockerizePip behaviour serverless-python-requirements gives us
-# today. Start Docker Desktop (or your local docker daemon).
+# the dockerizePip behaviour serverless-python-requirements gave us
+# previously. Start Docker Desktop (or your local docker daemon).
 docker info >/dev/null   # should succeed
 ```
 
@@ -246,24 +247,31 @@ stack.
 
 ## Cutover criteria
 
-Before this PR (#51) can be marked ready for review:
+Before PR #51 was marked ready for review (all ticked during
+Activity A side-stack verification, 2026-06-23):
 
-- [ ] Track 1 (1a, 1b, 1c) passes locally.
-- [ ] Track 2 (2a-2e) completes against a real AWS account, with
+- [x] Track 1 (1a, 1b, 1c) passes locally.
+- [x] Track 2 (2a-2e) completes against a real AWS account, with
       all 12 resources `CREATE_COMPLETE` and parity diffs clean.
-- [ ] Smoke test on the deployed stack: backup Lambda dry-run
+- [x] Smoke test on the deployed stack: backup Lambda dry-run
       completes without `[ERROR]` logs, synthetic alarm appears in
       Slack.
 
-Before `serverless.yml` can be removed (separate follow-up PR):
+Before `serverless.yml` could be removed (this follow-up PR — all
+ticked, hence this PR exists):
 
-- [ ] A real production deploy uses SAM successfully (either by
-      replacing the existing sls stack, or by deploying SAM to the
-      prod stack name and tearing down the sls stack).
-- [ ] At least one full daily backup cycle runs cleanly on the
-      SAM-deployed Lambda (one EventBridge fire, one
-      `backup run --source <alias>` invocation, no alarm fires).
-- [ ] PROD-DEPLOY-LOG (in `nzshm-backup-ops`) records the cutover.
+- [x] A real production deploy uses SAM successfully — Activity B
+      cutover landed 2026-06-24 16:25 NZST. The sls stack was
+      removed; the SAM stack of the same name took over with 15
+      resources `CREATE_COMPLETE`.
+- [x] At least one full daily backup cycle runs cleanly on the
+      SAM-deployed Lambda. Two clean cycles to date: 2026-06-25
+      and 2026-06-26 mornings — all 5 schedules fired, all three
+      alarms remained OK, daily health report = GREEN 4/4.
+- [x] PROD-DEPLOY-LOG records the cutover. Step 23 entry in
+      `nzshm-backup-ops/docs/PROD-DEPLOY-LOG.md`.
 
 This is the cutover safety rule from PR #49 / migration-doc §3a
-applied to this specific migration step.
+applied to this specific migration step. The rule is now
+satisfied, which is why this PR (removing `serverless.yml`) can
+land.
