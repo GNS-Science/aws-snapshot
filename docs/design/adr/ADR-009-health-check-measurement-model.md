@@ -174,18 +174,18 @@ an abstract spec.
 
 | Component | File | Effort |
 |---|---|---|
-| Two new Athena queries (`count(source - backup)`, `count(backup - source)`) | `src/nzshm_backup/athena_inventory.py` | Medium |
-| `SourceHealthData` gains `backup_missing_count`, `backup_orphan_count`, and class fields | `src/nzshm_backup/health_report.py` | Small |
-| Per-source classifier rewritten per the rules above | `src/nzshm_backup/health_report.py` | Small |
-| Slack + email formatters render class-2 distinctly | `src/nzshm_backup/health_report.py` | Small |
-| Existing source-delta check repurposed (class-2 informational; stops firing red) | `src/nzshm_backup/health_report.py` + `backup-config.production.yaml` | Trivial |
+| Two new Athena queries (`count(source - backup)`, `count(backup - source)`) | `src/aws_snapshot/athena_inventory.py` | Medium |
+| `SourceHealthData` gains `backup_missing_count`, `backup_orphan_count`, and class fields | `src/aws_snapshot/health_report.py` | Small |
+| Per-source classifier rewritten per the rules above | `src/aws_snapshot/health_report.py` | Small |
+| Slack + email formatters render class-2 distinctly | `src/aws_snapshot/health_report.py` | Small |
+| Existing source-delta check repurposed (class-2 informational; stops firing red) | `src/aws_snapshot/health_report.py` + `backup-config.production.yaml` | Trivial |
 | Manual-purge runbook | `docs/operations/purge-from-backup.md` (new) | Medium |
 | ADR-006 mit. 1, ADR-007 mit. 4 cross-reference this ADR | those ADR files | Trivial |
 | #23 closed as superseded | GitHub | Trivial |
 | User-guide health-report doc updated for class taxonomy | `docs/user-guide/health-report.md` | Small |
 | Unit tests for new signals + classifier | `tests/test_health_report.py` | Small |
-| Per-source `inventory_enabled` opt-out (no-Inventory floor mode) | `src/nzshm_backup/config/models.py` + `health_report.py` + tests | Small |
-| Class-1 RED head-check tag — `(still missing live)` vs `(auto-healed since snapshot)` | `src/nzshm_backup/athena_inventory.py` (`divergence_sample_keys`) + `health_report.py` + tests | Small |
+| Per-source `inventory_enabled` opt-out (no-Inventory floor mode) | `src/aws_snapshot/config/models.py` + `health_report.py` + tests | Small |
+| Class-1 RED head-check tag — `(still missing live)` vs `(auto-healed since snapshot)` | `src/aws_snapshot/athena_inventory.py` (`divergence_sample_keys`) + `health_report.py` + tests | Small |
 
 ## Consequences
 

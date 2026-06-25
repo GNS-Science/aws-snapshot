@@ -43,7 +43,7 @@ backup
 ## Full command reference
 
 ::: mkdocs-click
-    :module: nzshm_backup.cli
+    :module: aws_snapshot.cli
     :command: click_app
     :depth: 1
     :style: table

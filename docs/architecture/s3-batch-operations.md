@@ -169,10 +169,10 @@ and interactive CLI usage where immediate results are valuable.
 
 | File | Change |
 |------|--------|
-| `src/nzshm_backup/s3_batch.py` | **New** — `BatchJobResult`, `build_manifest_csv`, `write_manifest_to_s3`, `batch_backup_source` |
-| `src/nzshm_backup/config/models.py` | Add `use_s3_batch` to `SourceConfig`, `s3_batch_role_arn` to `GeneralConfig`, cross-field validator |
-| `src/nzshm_backup/lambda_handler.py` | Branch on `use_s3_batch` |
-| `src/nzshm_backup/commands/run_backup.py` | Branch on `use_s3_batch` |
+| `src/aws_snapshot/s3_batch.py` | **New** — `BatchJobResult`, `build_manifest_csv`, `write_manifest_to_s3`, `batch_backup_source` |
+| `src/aws_snapshot/config/models.py` | Add `use_s3_batch` to `SourceConfig`, `s3_batch_role_arn` to `GeneralConfig`, cross-field validator |
+| `src/aws_snapshot/lambda_handler.py` | Branch on `use_s3_batch` |
+| `src/aws_snapshot/commands/run_backup.py` | Branch on `use_s3_batch` |
 | `serverless.yml` | Add `s3control` + `iam:PassRole` to Lambda role |
 | `backup-config.example.yaml` | Add new fields |
 | `scripts/create-backup-roles.py` | **New** — one-time IAM role creation |

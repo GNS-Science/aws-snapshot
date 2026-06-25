@@ -39,7 +39,7 @@ All sources are cross-account: source account `210987654321` → backup account 
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    AWS Lambda                               │
-│              (nzshm-backup CLI)                             │
+│              (aws-snapshot CLI)                             │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  • Schedule orchestration                            │   │
 │  │  • S3 → S3 Glacier transition                        │   │
