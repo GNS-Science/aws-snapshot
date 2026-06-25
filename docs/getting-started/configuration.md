@@ -35,11 +35,11 @@ sources:
       - arn: arn:aws:s3:::nzshm-toshi-api-data
         label: api
     dynamodb_tables:
-      - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiAPI-FileTable
-      - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiAPI-ThingTable
-    source_account_id: "461564345538"
-    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
-    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+      - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiAPI-FileTable
+      - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiAPI-ThingTable
+    source_account_id: "210987654321"
+    source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
 ```
 
 ## Full config reference

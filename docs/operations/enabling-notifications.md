@@ -14,8 +14,8 @@ setup, separate from the SNS list workflow.
 
 ## Prerequisites
 
-- `AWS_PROFILE=nshm-backup-admin` SSO session in the backup account
-  (`737696831915`).
+- `AWS_PROFILE=<aws-profile>` SSO session in the backup account
+  (`123456789012`).
 - Edit access to `backup-config.production.yaml`.
 - Permission to deploy via `npx sls deploy --stage prod` (only needed
   for code/CloudFormation changes — recipient changes do not require a
@@ -65,7 +65,7 @@ Example output:
 
 ```
 [alerts] nzshm-backup-alerts-prod
-  topic: arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-alerts-prod
+  topic: arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-alerts-prod
   desired=2  current=2  add=1  remove=1  pending=0
   + subscribed oncall2@example.com  (awaiting confirmation email)
   - unsubscribed old-oncall@example.com

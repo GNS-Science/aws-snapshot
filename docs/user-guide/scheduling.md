@@ -89,8 +89,8 @@ backup schedule add \
   --frequency weekly \
   --time '2026-04-22 20:15 NZST' \
   --target codebuild \
-  --codebuild-project-arn arn:aws:codebuild:ap-southeast-2:737696831915:project/nzshm-backup-ths \
-  --target-role-arn arn:aws:iam::737696831915:role/nzshm-backup-events-codebuild
+  --codebuild-project-arn arn:aws:codebuild:ap-southeast-2:123456789012:project/nzshm-backup-ths \
+  --target-role-arn arn:aws:iam::123456789012:role/nzshm-backup-events-codebuild
 ```
 
 `--target codebuild` requires both `--codebuild-project-arn` and
@@ -207,7 +207,7 @@ use this checklist to avoid drift:
 ### Trigger a CodeBuild run manually
 
 ```bash
-AWS_PROFILE=nshm-backup-admin aws codebuild start-build \
+AWS_PROFILE=<aws-profile> aws codebuild start-build \
   --region ap-southeast-2 \
   --project-name nzshm-backup-ths-backup
 ```
@@ -217,13 +217,13 @@ AWS_PROFILE=nshm-backup-admin aws codebuild start-build \
 1) Poll build status:
 
 ```bash
-AWS_PROFILE=nshm-backup-admin aws codebuild list-builds-for-project \
+AWS_PROFILE=<aws-profile> aws codebuild list-builds-for-project \
   --region ap-southeast-2 \
   --project-name nzshm-backup-ths-backup \
   --sort-order DESCENDING \
   --max-items 1
 
-AWS_PROFILE=nshm-backup-admin aws codebuild batch-get-builds \
+AWS_PROFILE=<aws-profile> aws codebuild batch-get-builds \
   --region ap-southeast-2 \
   --ids <BUILD_ID> \
   --query 'builds[0].{Status:buildStatus,Start:startTime,End:endTime,Log:logs.deepLink}'
@@ -232,7 +232,7 @@ AWS_PROFILE=nshm-backup-admin aws codebuild batch-get-builds \
 2) Follow build logs:
 
 ```bash
-AWS_PROFILE=nshm-backup-admin aws logs tail \
+AWS_PROFILE=<aws-profile> aws logs tail \
   "/aws/codebuild/nzshm-backup-ths-backup" \
   --region ap-southeast-2 \
   --follow
@@ -247,7 +247,7 @@ Use `backup schedule health` to confirm scheduler/build-side progress while stil
 in pre-submit phases.
 
 ```bash
-AWS_PROFILE=nshm-backup-admin \
+AWS_PROFILE=<aws-profile> \
 BACKUP_CONFIG_PATH=backup-config.production.yaml \
 uv run backup status --source ths --output json
 ```

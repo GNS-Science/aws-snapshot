@@ -12,7 +12,7 @@ resilience — the backup account is a separate blast radius from production.
 
 **Current:**
 ```
-Prod account (461564345538)
+Prod account (210987654321)
   ├── Source S3 buckets
   ├── DynamoDB tables
   ├── Backup S3 buckets          ← same account
@@ -22,7 +22,7 @@ Prod account (461564345538)
 
 **Isolated:**
 ```
-Prod account (461564345538)        Backup account (new or 595842668254)
+Prod account (210987654321)        Backup account (new or 595842668254)
   ├── Source S3 buckets      ←──────── Lambda reads across account
   ├── DynamoDB tables        ←──────── Lambda assumes role to export
   └── IAM role (assumed by         ├── Lambda
@@ -106,13 +106,13 @@ with account isolation is worth the engineering time.
 ## Implementation plan
 
 Cross-account backup will be implemented and validated against **Arkivalist**
-(account `816711409078`) before being applied to NSHM production (`461564345538`).
+(account `816711409078`) before being applied to NSHM production (`210987654321`).
 
 | Account | Role | Status |
 |---------|------|--------|
 | `595842668254` (spike/backup) | Runs Lambda, holds backup buckets | Active |
 | `816711409078` (Arkivalist) | Cross-account source — restore lifecycle demo | **Implemented & verified** |
-| `461564345538` (NSHM production) | Cross-account source — toshi + ths | After restore path validated |
+| `210987654321` (NSHM production) | Cross-account source — toshi + ths | After restore path validated |
 
 This sequencing means the cross-account IAM pattern is proven on a lower-risk
 target before any NSHM production data is involved.

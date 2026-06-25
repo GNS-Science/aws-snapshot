@@ -24,7 +24,7 @@
 | `weka` | nzshm22-weka-ui-prod | 80 MB | S3 | Incremental sync |
 | **Total** | | **~11.7 TB + 18.3 GB** | | |
 
-All sources are cross-account: source account `461564345538` → backup account `737696831915`.
+All sources are cross-account: source account `210987654321` → backup account `123456789012`.
 
 ---
 
@@ -409,9 +409,9 @@ $ backup costs export --format csv --output-to s3://finance-reports/
 - [x] Cross-account session support (`get_cross_account_session`)
 - [x] IAM roles created in Arkivalist account (`nzshm-backup-reader`, `nzshm-backup-restore`)
 - [x] Full backup→restore→validate cycle verified on Arkivalist (S3 + DynamoDB)
-- [x] Apply cross-account pattern to NSHM production (`461564345538`) — all 4 sources configured
+- [x] Apply cross-account pattern to NSHM production (`210987654321`) — all 4 sources configured
 - [x] IAM roles created in source account (`nzshm-backup-reader`, `nzshm-backup-restore`)
-- [x] Lambda deployed to backup account (`737696831915`), config pushed to SSM
+- [x] Lambda deployed to backup account (`123456789012`), config pushed to SSM
 - [x] Pre-flight `backup check` command verified against all sources
 - [x] Athena UNLOAD manifest pipeline — all sources on Lambda (28s for 40M objects)
 - [x] Smart ETag comparison — eliminates false-positive re-copies from multipart uploads

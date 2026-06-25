@@ -193,12 +193,12 @@ Deletes (with confirmation prompt):
 
 | Resource | Production name | Prod account |
 |----------|----------------|--------------|
-| S3 | `nzshm22-toshi-api-prod` | 461564345538 |
-| S3 | `ths-dataset-prod` | 461564345538 |
-| DynamoDB | `ToshiFileObject-PROD` | 461564345538 |
-| DynamoDB | `ToshiIdentity-PROD` | 461564345538 |
-| DynamoDB | `ToshiTableObject-PROD` | 461564345538 |
-| DynamoDB | `ToshiThingObject-PROD` | 461564345538 |
+| S3 | `nzshm22-toshi-api-prod` | 210987654321 |
+| S3 | `ths-dataset-prod` | 210987654321 |
+| DynamoDB | `ToshiFileObject-PROD` | 210987654321 |
+| DynamoDB | `ToshiIdentity-PROD` | 210987654321 |
+| DynamoDB | `ToshiTableObject-PROD` | 210987654321 |
+| DynamoDB | `ToshiThingObject-PROD` | 210987654321 |
 
 See `backup-config.example.yaml` for the full production config template.
 

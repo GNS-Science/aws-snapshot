@@ -5,8 +5,8 @@
 
 ## Context
 
-The bucket `nzshm-backup-inventory-737696831915` (in the backup account
-`737696831915`) is the **control plane** for the entire backup system.
+The bucket `nzshm-backup-inventory-123456789012` (in the backup account
+`123456789012`) is the **control plane** for the entire backup system.
 Despite its criticality, it has weaker protections than the per-source
 backup buckets that hold the actual data.
 
@@ -91,7 +91,7 @@ session.
   "Effect": "Deny",
   "Principal": "*",
   "Action": "s3:DeleteBucket",
-  "Resource": "arn:aws:s3:::nzshm-backup-inventory-737696831915"
+  "Resource": "arn:aws:s3:::nzshm-backup-inventory-123456789012"
 }
 ```
 

@@ -2,7 +2,7 @@
 
 ## Scenario
 
-A malicious attacker gains access to the NSHM PROD account (`461564345538`) and
+A malicious attacker gains access to the NSHM PROD account (`210987654321`) and
 deletes every S3 bucket and every DynamoDB table. The breach is detected within
 24 hours. The backup account (`595842668254`) was **not** accessed.
 
