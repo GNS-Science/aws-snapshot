@@ -1,253 +1,191 @@
 # Lambda Deployment
 
-The backup CLI can run entirely from your terminal for on-demand use. To enable
-**scheduled** backups (EventBridge → Lambda), the package must be deployed as an
-AWS Lambda function.
+The backup CLI runs entirely from your terminal for on-demand use. To
+enable **scheduled** backups (EventBridge → Lambda), the package must
+be deployed as an AWS Lambda function via AWS SAM.
 
-> **Migration in progress.** The project is moving from Serverless Framework v4
-> to AWS SAM (see [issue #48](https://github.com/GNS-Science/nzshm-backup/issues/48)).
-> The instructions below remain accurate for the **legacy sls path**, which is
-> the production deploy mechanism today. For the **new SAM path** (preferred
-> going forward), see [SAM deploy verification](sam-deploy-verification.md) which
-> covers prerequisites, validation, and the side-stack verification procedure.
-> Once SAM has been used for at least one real production deploy, `serverless.yml`
-> is removed and this page is rewritten around SAM.
-
-## Serverless Framework version
-
-This project targets **Serverless Framework v4** (`frameworkVersion: "4"` in
-`serverless.yml`).
-
-> **v4 account requirement:** v4 prompts for a Serverless dashboard login on
-> first run. For basic AWS Lambda deployments this is optional — you can skip
-> the dashboard entirely. v4 has a free tier; review
-> [Serverless pricing](https://www.serverless.com/pricing) if deploying at scale.
+This document covers prerequisites and the day-to-day deploy command.
+For the side-stack verification procedure see
+[SAM deploy verification](sam-deploy-verification.md). For the
+historical one-time cutover from Serverless Framework see
+[SAM cutover runbook](sam-cutover-runbook.md).
 
 ---
 
 ## Prerequisites
 
-### 1. Node.js
+### 1. uv-managed Python environment
 
-Serverless Framework v3 requires Node.js 18 (Node 20 works; Node 22 is untested):
-
-```bash
-node --version    # v18.x or v20.x recommended
-```
-
-If not installed, use [nvm](https://github.com/nvm-sh/nvm) or download from nodejs.org.
-
-### 2. Serverless Framework v4
-
-Prefer a **local install** — version is pinned in `package.json` and the cache
-is easier to reason about:
+SAM CLI is a dev dependency declared in `pyproject.toml`. The standard
+`make sync` (or `uv sync --all-extras`) brings it in:
 
 ```bash
-npm install                          # installs from package.json (already configured)
-npx sls --version                   # should show Framework Core: 4.x
+make sync
+uv run sam --version    # should print "SAM CLI, version 1.x"
 ```
 
-If you prefer a global install:
-```bash
-npm install -g serverless
-sls --version
-```
+No separate `pip install` step needed.
 
-> **Cache note:** the Python requirements cache lives at
-> `~/Library/Caches/serverless-python-requirements/` regardless of whether
-> Serverless is installed locally or globally. `rm -rf .serverless` does **not**
-> clear it — see Troubleshooting if Docker isn't being invoked.
+### 2. Docker
 
-### 3. Serverless Python Requirements plugin
+Required by `sam build --use-container`, which mirrors the
+`dockerizePip` behaviour that `serverless-python-requirements` provided
+previously. Start Docker Desktop (or your local docker daemon):
 
 ```bash
-sls plugin install -n serverless-python-requirements
+docker info >/dev/null   # should succeed
 ```
 
-### 4. uv (used by serverless-python-requirements to package deps)
+The first `sam build` after a clean install pulls
+`public.ecr.aws/sam/build-python3.10:latest-x86_64` (~600 MB). Subsequent
+builds reuse the image.
+
+### 3. AWS credentials
+
+SAM honours the standard AWS SDK credential-chain. The recommended
+pattern is to export SSO credentials into the current shell:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv --version
+aws sso login --profile <your-sso-profile>
+eval "$(aws configure export-credentials --profile <your-sso-profile> --format env)"
+aws sts get-caller-identity   # confirm correct account
 ```
 
----
+`AWS_PROFILE` alone does not work with SSO profiles — you must `eval`
+the credentials into env vars.
 
-## AWS SSO credentials
+### 4. samconfig.toml
 
-Serverless Framework v3 does not understand AWS SSO profiles — it reads plain
-`AWS_*` environment variables or `~/.aws/credentials` static keys.
-
-Export your SSO session credentials as environment variables before deploying:
+`samconfig.toml` holds deploy parameters (stack name, region, parameter
+overrides). It is `.gitignore`d (each install carries its own). A
+committed example exists at `samconfig.example.toml`:
 
 ```bash
-# Log in to SSO first (if session has expired)
-aws sso login --profile your-sso-profile
-
-# Export credentials into the current shell
-eval "$(aws configure export-credentials --profile your-sso-profile --format env)"
-
-# Verify the right account is active
-aws sts get-caller-identity
+cp samconfig.example.toml samconfig.toml
+$EDITOR samconfig.toml   # update stack_name, region, parameter_overrides
 ```
 
-The `eval` step sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
-`AWS_SESSION_TOKEN` in your shell. These are picked up automatically by `sls deploy`.
+The key parameters in `parameter_overrides`:
 
-> **Session lifetime:** SSO sessions typically last 8–12 hours. Re-run the
-> `eval` line if deploy fails with an `ExpiredTokenException` after a long break.
-
-> **`AWS_PROFILE` does not work** with Serverless v3 for SSO profiles —
-> `AWS_PROFILE=your-sso-profile sls deploy` will fail with a credentials error.
+- `Stage` — `prod`, `sandbox`, or whatever stage convention your
+  install uses
+- `ServiceName` — resource-name prefix (default `nzshm-backup-service`)
+- `BatchRoleArn` — the IAM role passed to S3 Batch Operations
+  (`iam:PassRole` target)
+- `SlackWebhookSecretName` — Secrets Manager secret holding the Slack
+  webhook URL (default `backup-slack-webhook`)
 
 ---
 
 ## Deploy
 
-The Lambda reads its config from the `BACKUP_CONFIG` environment variable
-(JSON-encoded). You must export this before running `sls deploy` — Serverless
-reads it from your shell and bakes it into the Lambda at deploy time.
+Build, then deploy:
 
 ```bash
-# Convert your config YAML to JSON and export it
-export BACKUP_CONFIG=$(.venv/bin/python3 -c \
-  "import yaml, json; print(json.dumps(yaml.safe_load(open('backup-config.yaml'))))")
-
-# For the sandbox config:
-export BACKUP_CONFIG=$(.venv/bin/python3 -c \
-  "import yaml, json; print(json.dumps(yaml.safe_load(open('backup-config.sandbox.yaml'))))")
+make sam-build      # uv export → requirements.txt + sam build --use-container
+sam deploy          # uses samconfig.toml; confirm_changeset=true gives a Y/n pause
 ```
 
-Then deploy:
+`make sam-build` wraps two steps: it generates `requirements.txt` from
+`uv.lock` (the SAM container doesn't have `uv`), then runs
+`sam build --use-container`. The build produces three Lambda artefacts
+in `.aws-sam/build/`.
 
-```bash
-# Deploy to default stage (dev)
-sls deploy
+`sam deploy` creates a CFN changeset, prompts you to review it (resource
+adds/changes/deletes), and applies on confirmation. Resource-level
+duration is typically 2-4 minutes for an update; 5-7 minutes for a fresh
+deploy.
 
-# Deploy to a named stage
-sls deploy --stage prod
-```
-
-Serverless will:
-1. Package the Python source + dependencies (via `serverless-python-requirements`)
-2. Upload the zip to a staging S3 bucket
-3. Create/update the CloudFormation stack with the Lambda function and IAM role
-4. Print the deployed function ARN on completion
+> **Note: `.venv` and `sam build --use-container`.** The SAM build
+> container mounts the repo as a read-only volume and walks it to copy
+> sources. Broken symlinks (e.g. `.venv/bin/python3` pointing at the
+> host's Python install) cause the copy step to fail. The standard
+> workaround is to move `.venv` out of the source tree for the duration
+> of the build:
+>
+> ```bash
+> mv .venv /tmp/saved-venv && make sam-build && sam deploy && mv /tmp/saved-venv .venv
+> ```
 
 ---
 
-## Lambda IAM permissions
+## Stack contents
 
-The Lambda execution role (managed by `serverless.yml`) includes:
+A successful deploy produces 15 CloudFormation resources:
 
-- **S3** — `ListBucket`, `GetObject`, `PutObject`, `CopyObject`, bucket management
-- **DynamoDB** — `ExportTableToPointInTime`, `DescribeExport`, `ListExports`,
-  `DescribeContinuousBackups`, `UpdateContinuousBackups`
-- **STS** — `AssumeRole` (cross-account access to source accounts)
-- **S3 Control** — `CreateJob`, `DescribeJob` (S3 Batch Operations)
-- **SSM** — `GetParameter`, `PutParameter` (config + run state)
-- **Athena** — `StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`,
-  `ListDatabases`, `ListTables`, `GetDatabase`, `GetTableMetadata`
-- **Glue Data Catalog** — full CRUD for databases, tables, and partitions
-  (`Get*`, `Create*`, `Update*`, `Delete*`, `BatchCreatePartition`,
-  `BatchDeletePartition`)
+| Resource | Purpose |
+|---|---|
+| 3 × `AWS::Lambda::Function` | `backup`, `pitr-watcher`, `alarm-bridge` |
+| 1 × `AWS::IAM::Role` | shared execution role for all three functions |
+| 1 × `AWS::Logs::LogGroup` | explicit log group for the backup function (90-day retention) |
+| 2 × `AWS::SNS::Topic` | `nzshm-backup-alerts-<stage>`, `nzshm-backup-reports-<stage>` |
+| 3 × `AWS::CloudWatch::Alarm` | uncaught-error backstop, ERROR-line log-metric, pitr-watcher errors |
+| 1 × `AWS::Logs::MetricFilter` | counts `[ERROR]` log lines into a custom metric |
+| 1 × `AWS::Events::Rule` | the pitr-watcher's 5-min schedule (disabled by default) |
+| 2 × `AWS::Lambda::Permission` | SNS-invoke + EventBridge-invoke grants |
+| 1 × `AWS::SNS::Subscription` | alarm-bridge Lambda subscribed to alerts topic |
 
-The Athena and Glue permissions are required for inventory-based manifest
-generation (`batch_manifest_mode: inventory`), which uses Athena to diff
-S3 Inventory snapshots via Glue Data Catalog tables.
-
-> **Note:** if you add new Athena query patterns that touch additional Glue
-> resources (e.g. new databases or partition schemes), verify the Lambda role
-> has the required Glue actions — Athena delegates all catalog operations to Glue.
+Per-source backup schedules (one EventBridge rule per source, daily fire
+at 09:45 local) are **not** in the CFN stack — they're created and
+managed via the `backup schedule add` CLI command, which writes
+EventBridge rules directly and sets the Lambda permission for each.
 
 ---
 
-## Post-deploy: register the Lambda target
+## Post-deploy
 
-After deploy, copy the printed function ARN into `backup-config.yaml`:
-
-```yaml
-general:
-  lambda_arn: "arn:aws:lambda:ap-southeast-2:595842668254:function:nzshm-backup-prod-backup"
-```
-
-Then wire up EventBridge rules to point at it:
+After a fresh deploy or a stack replacement, three CLI commands tie
+together the operational pieces the CFN stack doesn't manage:
 
 ```bash
-export BACKUP_CONFIG_PATH=backup-config.yaml   # or sandbox variant
+backup notifications apply
+# Reconciles SNS subscribers on the alerts + reports topics against
+# the email lists in backup-config.<stage>.yaml. Subscribers get a
+# confirmation email per topic.
 
-backup schedule add --source toshi --frequency weekly --time 14:00
-backup schedule add --source ths   --frequency weekly --time 14:30
-backup schedule show
+backup schedule add --source <alias> --frequency daily --time "09:45 NZST"
+# (Repeat per source. Creates the EventBridge rule + Lambda permission.)
+
+backup health-report preview
+# Dry-run the daily report against current state. Useful for confirming
+# the deployed Lambda can reach SSM config, source buckets, etc.
 ```
-
-Each `backup schedule add` call creates (or updates) the EventBridge rule **and**
-registers the Lambda as the target. Until `lambda_arn` is set, the CLI creates
-the rule but prints a warning that no target is registered.
 
 ---
 
 ## Teardown
 
 ```bash
-sls remove --stage prod
+sam delete --stack-name <your-stack-name>
 ```
 
-This deletes the CloudFormation stack (Lambda + IAM role). EventBridge rules
-created via `backup schedule add` are managed separately — remove them with:
-
-```bash
-backup schedule remove --source toshi --frequency weekly
-backup schedule remove --source ths --frequency weekly
-```
+Removes the 15 CFN resources. Does **not** remove the per-source
+EventBridge schedules (they're CLI-managed, not CFN-managed). Clean those
+up with `backup schedule remove --source <alias> --frequency daily` per
+source if you want a fully blank slate.
 
 ---
 
 ## Troubleshooting
 
-**`sls deploy` fails with `ExpiredTokenException`**
-Re-export SSO credentials:
+**`sam build` fails with "No such file or directory: /tmp/samcli/source/.venv/bin/python3"**
+Move `.venv` out of the source tree (see note above). The host venv has
+broken symlinks from the container's perspective.
+
+**`sam deploy` fails with "Parameter 'Stage' must be one of AllowedValues"**
+Check `samconfig.toml`'s `parameter_overrides` is a **single-line** string.
+TOML's `"""` multi-line form preserves embedded newlines, which CFN rejects.
+
+**`sam deploy` fails with "Resource handler returned message: log group does not exist"**
+Should not happen — the SAM template declares the log group explicitly.
+If it does, the deploy may be using a stale `.aws-sam/build/` directory.
+`rm -rf .aws-sam && make sam-build` and retry.
+
+**Stack stuck in `ROLLBACK_COMPLETE`**
+CFN can't update a failed-create stack — delete it first:
+
 ```bash
-aws sso login --profile your-sso-profile
-eval "$(aws configure export-credentials --profile your-sso-profile --format env)"
+sam delete --stack-name <your-stack-name> --no-prompts
 ```
 
-**`sls deploy` fails with `No credentials found`**
-Serverless does not read SSO profiles from `~/.aws/config`. You must use the
-`eval` export approach above.
-
-**`serverless-python-requirements` packaging fails**
-Ensure uv is installed and `uv.lock` is up to date:
-```bash
-uv lock
-sls deploy
-```
-
-**`Framework version mismatch` error**
-Confirm you installed v4: `sls --version`. If it shows v3, reinstall:
-```bash
-npm install -g serverless
-```
-
-**Docker not being invoked — stale macOS binaries deployed (e.g. `pydantic_core._pydantic_core` missing)**
-The requirements plugin caches built deps in `~/Library/Caches/serverless-python-requirements/`.
-If this cache was populated before `dockerizePip: true` was set, it will be reused even when
-Docker is configured, and the macOS-compiled `.so` files end up in the Lambda zip.
-
-Clear the cache and force a rebuild:
-```bash
-sls requirements cleanCache          # plugin command (may not always work)
-rm -rf ~/Library/Caches/serverless-python-requirements/   # nuclear option — always works
-rm -rf .serverless
-sls deploy --force
-```
-
-Confirm Docker ran by checking the deploy output for:
-```
-Docker Image: public.ecr.aws/sam/build-python3.10:latest-x86_64
-Running: docker run ...
-```
-If those lines are absent, the cache was still used. Repeat the cache clear.
-
-Note: `rm -rf .serverless` only removes local packaging artifacts — it does **not** clear
-the requirements cache in `~/Library/Caches/`. Both may need clearing independently.
+Then re-attempt `sam deploy`.
