@@ -4,12 +4,17 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import boto3
 from botocore.exceptions import ClientError
 
 from nzshm_backup.s3_backup import apply_lifecycle_policy, bucket_exists, get_account_id, get_region
+
+if TYPE_CHECKING:
+    # mypy_boto3_s3 is pulled in transitively via aws-sam-cli (dev dep).
+    # Imported only under TYPE_CHECKING so runtime doesn't depend on it.
+    from mypy_boto3_s3.type_defs import TagTypeDef
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +136,7 @@ def ensure_dynamodb_backup_bucket_ready(
 
         s3_client.create_bucket(**create_bucket_config)
 
-        tag_set = [
+        tag_set: list[TagTypeDef] = [
             {"Key": "ManagedBy", "Value": "nzshm-backup"},
             {"Key": "Type", "Value": "dynamodb-export"},
             {"Key": "Account", "Value": account_id},
