@@ -6,7 +6,10 @@ All notable changes to this project will be documented here.
 
 ### Deploy mechanism
 
-- **AWS SAM replaces Serverless Framework as the production deploy mechanism.** Translated `serverless.yml` to `sam.yaml`; introduced a Makefile-driven SAM build that produces clean ~55 MB Lambda artefacts (vs the bloated builds the default SAM Python builder would have produced); side-stack-verified 2026-06-23; cut over in production 2026-06-24. The legacy npm-based Serverless Framework toolchain (`serverless.yml`, `package.json`, `package-lock.json`, `node_modules/`) is removed in this release. SAM CLI is now a declared dev dependency in `pyproject.toml`. Issue #48, PR #51 (cutover) + the `serverless.yml`-removal follow-up.
+- **No Node.js dependency.** Removing the Serverless Framework toolchain takes Node out of the development and deploy story entirely. New operators no longer install Node, run `npm install`, manage `serverless-python-requirements` plugin state, or chase `~/Library/Caches/serverless-python-requirements/` cache bugs. Onboarding shrinks to one command: `make sync`. CI gets faster (no `npm ci` step, no `node_modules` cache to warm). Dependabot's npm noise — the bulk of recent open alerts came in via Serverless transitive `axios` / `form-data` / etc. — stops permanently. Repo size on fresh clones drops because the `~250 MB` transitive npm dep tree is no longer pulled.
+
+- **AWS SAM replaces Serverless Framework as the production deploy mechanism.** Translated `serverless.yml` to `sam.yaml`; introduced a Makefile-driven SAM build that produces clean ~55 MB Lambda artefacts (vs the bloated builds the default SAM Python builder would have produced); side-stack-verified 2026-06-23; cut over in production 2026-06-24. The legacy npm-based Serverless Framework toolchain (`serverless.yml`, `package.json`, `package-lock.json`, `node_modules/`) is removed in this release. SAM CLI is now a declared dev dependency in `pyproject.toml`. Issue #48, PR #51 (cutover) + this PR (`serverless.yml` removal).
+
 - `template.yaml` renamed to `sam.yaml`; `samconfig.toml` gains `template_file = "sam.yaml"` for SAM CLI discovery transparency. (Per @voj review feedback.)
 
 ### Internal
