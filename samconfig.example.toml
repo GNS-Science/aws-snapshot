@@ -10,6 +10,11 @@
 
 version = 0.1
 
+[default.global.parameters]
+# Template file is sam.yaml (not the SAM-default template.yaml) — see
+# https://github.com/GNS-Science/nzshm-backup/pull/51#discussion_r3464484646
+template_file = "sam.yaml"
+
 [default]
 [default.deploy.parameters]
 stack_name      = "nzshm-backup-service-prod"

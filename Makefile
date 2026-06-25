@@ -25,7 +25,7 @@ check: lint test
 
 # ---------------------------------------------------------------------------
 # SAM build targets — one per AWS::Serverless::Function logical ID in
-# template.yaml. Invoked by `sam build` (template uses BuildMethod: makefile).
+# sam.yaml. Invoked by `sam build` (template uses BuildMethod: makefile).
 # ---------------------------------------------------------------------------
 # Why Makefile build instead of SAM's default python3.10 BuildMethod:
 #   - Default builder copies the entire CodeUri (project root) into the

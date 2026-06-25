@@ -35,6 +35,10 @@ dev = [
     "tox",
     "tox-uv",
     "pip-audit>=2.9.0,<3.0.0",
+    # SAM CLI for deploys (sam build / sam deploy). Comes with a
+    # large transitive dep tree but bundling it as a dev dep means
+    # `uv sync --all-extras` is the only setup step.
+    "aws-sam-cli>=1.140.0",
 ]
 
 [project.scripts]
