@@ -15,6 +15,7 @@ All notable changes to this project will be documented here.
 ### Internal
 
 - `docs/PROD-DEPLOY-LOG.md` retired in the public repo; authoritative copy now lives in the private `nzshm-backup-ops` shim repo per the shim-strategy decision in PR #49. A redirect note remains at the old path.
+- `backup-config.production.yaml` removed from the public repo; authoritative copy now lives in `nzshm-backup-ops` (same rationale as PROD-DEPLOY-LOG). Added to `.gitignore` to prevent accidental re-tracking. `backup-config.example.yaml` is retained as the OSS-facing template.
 
 ### Other
 

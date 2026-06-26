@@ -73,15 +73,15 @@ def test_setup_lifecycle_dry_run_lists_buckets_without_applying():
                 "--source",
                 "all",
                 "--config",
-                "backup-config.production.yaml",
+                "tests/fixtures/setup-test-config.yaml",
                 "--dry-run",
             ],
         )
 
     assert result.exit_code == 0, result.output
     assert "GLACIER_IR" in result.output
-    # Production config sets source_account_id=210987654321 for each source;
-    # bucket names embed that, not the SSO/backup-account caller id.
+    # Fixture config sets source_account_id=210987654321 for toshi; bucket
+    # names embed that, not the SSO/backup-account caller id.
     assert "bb-toshi-s3-api-prod-ap-southeast-2-210987654321" in result.output
     assert "bb-toshi-dynamo-ap-southeast-2-210987654321" in result.output
     fake_s3.put_bucket_lifecycle_configuration.assert_not_called()
@@ -103,7 +103,7 @@ def test_setup_lifecycle_applies_to_existing_buckets():
                 "--source",
                 "toshi",
                 "--config",
-                "backup-config.production.yaml",
+                "tests/fixtures/setup-test-config.yaml",
             ],
         )
 
