@@ -107,7 +107,7 @@ def test_publish_report_calls_sns_with_expected_args():
 
     msg_id = sns.publish_report(
         session,
-        "arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-reports-prod",
+        "arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod",
         subject="health 2026-05-20 GREEN",
         body="body text",
     )
@@ -115,7 +115,7 @@ def test_publish_report_calls_sns_with_expected_args():
     assert msg_id == "msg-123"
     session.client.assert_called_once_with("sns")
     sns_client.publish.assert_called_once_with(
-        TopicArn="arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-reports-prod",
+        TopicArn="arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod",
         Subject="health 2026-05-20 GREEN",
         Message="body text",
     )

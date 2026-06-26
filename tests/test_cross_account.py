@@ -46,7 +46,7 @@ def _put(s3_client, bucket, key, body=b"data"):
 def test_get_cross_account_session_returns_session(aws_session):
     """get_cross_account_session returns a boto3 Session using assumed-role creds."""
     # moto's sts:AssumeRole always succeeds regardless of the role ARN
-    role_arn = "arn:aws:iam::816711409078:role/nzshm-backup-reader"
+    role_arn = "arn:aws:iam::456789012345:role/nzshm-backup-reader"
     cross_session = get_cross_account_session(aws_session, role_arn)
 
     assert isinstance(cross_session, boto3.Session)
@@ -58,7 +58,7 @@ def test_get_cross_account_session_returns_session(aws_session):
 
 def test_get_cross_account_session_preserves_region(aws_session):
     """Assumed-role session inherits the caller's region."""
-    role_arn = "arn:aws:iam::816711409078:role/nzshm-backup-reader"
+    role_arn = "arn:aws:iam::456789012345:role/nzshm-backup-reader"
     cross_session = get_cross_account_session(aws_session, role_arn)
     assert cross_session.region_name == "ap-southeast-2"
 
@@ -199,6 +199,6 @@ def test_config_source_account_role_arn_set():
         display_name="arkivalist",
         s3_buckets=[],
         dynamodb_tables=[],
-        source_account_role_arn="arn:aws:iam::816711409078:role/nzshm-backup-reader",
+        source_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
     )
-    assert "816711409078" in sc.source_account_role_arn
+    assert "456789012345" in sc.source_account_role_arn

@@ -4,7 +4,7 @@
 
 A malicious attacker gains access to the NSHM PROD account (`210987654321`) and
 deletes every S3 bucket and every DynamoDB table. The breach is detected within
-24 hours. The backup account (`595842668254`) was **not** accessed.
+24 hours. The backup account (`345678901234`) was **not** accessed.
 
 **Deleted from PROD:**
 - `nzshm-toshi-api-data` S3 bucket (8 TB)
@@ -12,9 +12,9 @@ deletes every S3 bucket and every DynamoDB table. The breach is detected within
 - `ToshiFileObject-PROD`, `ToshiIdentity-PROD`, `ToshiTableObject-PROD`, `ToshiThingObject-PROD` DynamoDB tables
 
 **Safe in backup account (separate blast radius):**
-- `bb-toshi-s3-api-ap-southeast-2-595842668254` — last weekly S3 backup
-- `bb-ths-s3-dataset-ap-southeast-2-595842668254` — last weekly S3 backup
-- `bb-toshi-dynamo-ap-southeast-2-595842668254` — last monthly DynamoDB export
+- `bb-toshi-s3-api-ap-southeast-2-345678901234` — last weekly S3 backup
+- `bb-ths-s3-dataset-ap-southeast-2-345678901234` — last weekly S3 backup
+- `bb-toshi-dynamo-ap-southeast-2-345678901234` — last monthly DynamoDB export
 - DynamoDB PITR stream — AWS retains this for **35 days after table deletion**, recoverable to any second
 
 ---
@@ -40,7 +40,7 @@ Regardless of which restore path is chosen, do this first:
 
 1. **Revoke all PROD account credentials** — rotate root account keys, delete
    or disable all IAM users and access keys, invalidate all active sessions
-2. **Verify backup account is clean** — check CloudTrail in `595842668254`
+2. **Verify backup account is clean** — check CloudTrail in `345678901234`
    for any suspicious access; confirm backup buckets are intact with
    `backup status --source toshi --source ths`
 3. **Assess backup currency** — note the timestamp of the last successful
@@ -87,7 +87,7 @@ If the breach went undetected for more than 35 days (PITR window expired):
 # Grant the target account access to the export bucket in backup account,
 # then import from the most recent monthly export:
 aws dynamodb import-table \
-    --s3-bucket-source S3Bucket=bb-toshi-dynamo-ap-southeast-2-595842668254,\
+    --s3-bucket-source S3Bucket=bb-toshi-dynamo-ap-southeast-2-345678901234,\
 S3KeyPrefix=dynamodb-exports/ToshiFileObject-PROD/2026/03/01 \
     --input-format DYNAMODB_JSON \
     --table-creation-parameters \

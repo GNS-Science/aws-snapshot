@@ -58,7 +58,7 @@ For targeted investigation of a specific prefix:
 
 ```bash
 aws s3api list-object-versions \
-    --bucket bb-toshi-s3-api-ap-southeast-2-595842668254 \
+    --bucket bb-toshi-s3-api-ap-southeast-2-345678901234 \
     --prefix models/2026/ \
     --query "Versions[?LastModified >= '2026-03-01' && LastModified <= '2026-03-15']" \
     --output table
@@ -73,7 +73,7 @@ between the current and prior version:
 
 ```bash
 aws s3api list-object-versions \
-    --bucket bb-toshi-s3-api-ap-southeast-2-595842668254 \
+    --bucket bb-toshi-s3-api-ap-southeast-2-345678901234 \
     --prefix models/2026/run-099.h5 \
     --query "Versions[*].{VersionId:VersionId,Modified:LastModified,ETag:ETag,Latest:IsLatest}"
 ```
@@ -127,8 +127,8 @@ Once suspect objects are identified, restore from the prior version:
 ```bash
 # Copy the known-good version back to the current version
 aws s3api copy-object \
-    --bucket bb-toshi-s3-api-ap-southeast-2-595842668254 \
-    --copy-source "bb-toshi-s3-api-ap-southeast-2-595842668254/models/2026/run-099.h5?versionId=<good-version-id>" \
+    --bucket bb-toshi-s3-api-ap-southeast-2-345678901234 \
+    --copy-source "bb-toshi-s3-api-ap-southeast-2-345678901234/models/2026/run-099.h5?versionId=<good-version-id>" \
     --key models/2026/run-099.h5
 ```
 

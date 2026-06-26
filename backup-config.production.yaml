@@ -1,34 +1,34 @@
 general:
   region: ap-southeast-2
   environment: production
-  lambda_arn: arn:aws:lambda:ap-southeast-2:737696831915:function:nzshm-backup-service-prod-backup
-  s3_batch_role_arn: arn:aws:iam::737696831915:role/nzshm-backup-batch-role
+  lambda_arn: arn:aws:lambda:ap-southeast-2:123456789012:function:nzshm-backup-service-prod-backup
+  s3_batch_role_arn: arn:aws:iam::123456789012:role/nzshm-backup-batch-role
   tags:
     Project: NSHM
     ManagedBy: backup-cli
     CostCenter: GNS-Science
 sources:
   toshi:
-    display_name: "ToshiAPI (production \u2014 account 461564345538)"
-    source_account_id: '461564345538'
-    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
-    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    display_name: "ToshiAPI (production \u2014 account 210987654321)"
+    source_account_id: '210987654321'
+    source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
     s3_buckets:
     - arn: arn:aws:s3:::nzshm22-toshi-api-prod
       label: api-prod
     dynamodb_tables:
-    - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiFileObject-PROD
-    - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiIdentity-PROD
-    - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiTableObject-PROD
-    - arn:aws:dynamodb:ap-southeast-2:461564345538:table/ToshiThingObject-PROD
+    - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiFileObject-PROD
+    - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiIdentity-PROD
+    - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiTableObject-PROD
+    - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiThingObject-PROD
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: true
     batch_manifest_mode: inventory
   ths:
-    display_name: "THS dataset (production \u2014 account 461564345538)"
-    source_account_id: '461564345538'
-    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
-    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    display_name: "THS dataset (production \u2014 account 210987654321)"
+    source_account_id: '210987654321'
+    source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
     s3_buckets:
     - arn: arn:aws:s3:::ths-dataset-prod
       label: dataset-prod
@@ -37,10 +37,10 @@ sources:
     use_s3_batch: true
     batch_manifest_mode: inventory
   static:
-    display_name: "Static reports (production \u2014 account 461564345538)"
-    source_account_id: '461564345538'
-    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
-    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    display_name: "Static reports (production \u2014 account 210987654321)"
+    source_account_id: '210987654321'
+    source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
     s3_buckets:
     - arn: arn:aws:s3:::nzshm22-static-reports
       label: static-reports
@@ -49,10 +49,10 @@ sources:
     use_s3_batch: true
     batch_manifest_mode: inventory
   weka:
-    display_name: "Weka UI prod (production \u2014 account 461564345538)"
-    source_account_id: '461564345538'
-    source_account_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-reader
-    source_account_restore_role_arn: arn:aws:iam::461564345538:role/nzshm-backup-restore
+    display_name: "Weka UI prod (production \u2014 account 210987654321)"
+    source_account_id: '210987654321'
+    source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
     s3_buckets:
     - arn: arn:aws:s3:::nzshm22-weka-ui-prod
       label: weka-ui-prod

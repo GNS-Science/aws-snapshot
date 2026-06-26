@@ -15,7 +15,7 @@ This role is assumed by the backup Lambda (running in the BACKUP account)
 to read S3 buckets and initiate DynamoDB exports cross-account.
 
 Account context:
-    Run this while authenticated to the SOURCE account (e.g. Arkivalist 816711409078).
+    Run this while authenticated to the SOURCE account (e.g. Arkivalist 456789012345).
 
 Usage (config-driven — recommended):
     # Derives everything from the config file; writes source_account_role_arn back.
@@ -31,7 +31,7 @@ Usage (config-driven — recommended):
 
 Usage (explicit — for scripting or when config is unavailable):
     python scripts/create-reader-role.py \
-        --backup-account-id 595842668254 \
+        --backup-account-id 345678901234 \
         --s3-buckets arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh \
         --dynamodb-tables arkivalist-api-dev-events arkivalist-api-dev-feedback \
             arkivalist-api-dev-invite-codes arkivalist-api-dev-mission-events \
@@ -39,8 +39,8 @@ Usage (explicit — for scripting or when config is unavailable):
 
     # With S3 Batch support (required when use_s3_batch: true):
     python scripts/create-reader-role.py \
-        --backup-account-id 595842668254 \
-        --batch-role-arn arn:aws:iam::595842668254:role/nzshm-backup-batch-role \
+        --backup-account-id 345678901234 \
+        --batch-role-arn arn:aws:iam::345678901234:role/nzshm-backup-batch-role \
         --s3-buckets nzshm-toshi-api-data \
         --dynamodb-tables ToshiFileObject-PROD ...
 
@@ -48,7 +48,7 @@ After running (explicit mode only):
     Copy the printed ARN into backup-config.yaml under the source:
         sources:
           arkivalist:
-            source_account_role_arn: "arn:aws:iam::816711409078:role/nzshm-backup-reader"
+            source_account_role_arn: "arn:aws:iam::456789012345:role/nzshm-backup-reader"
 
     Config-driven mode writes this back automatically.
 """

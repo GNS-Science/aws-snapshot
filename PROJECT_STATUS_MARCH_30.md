@@ -26,9 +26,9 @@
 - All mutating commands support `--dry-run`
 - Localised datetime input/output across CLI (NZDT/NZST/AEST/AEDT)
 
-## Blockers for NSHM production (461564345538)
+## Blockers for NSHM production (210987654321)
 
-1. **Cross-account IAM roles not configured** — run `scripts/create-source-roles.py` against account 461564345538
+1. **Cross-account IAM roles not configured** — run `scripts/create-source-roles.py` against account 210987654321
 2. **Parallel run not started** — still on AWS Backup for NSHM datasets
 3. **No failure alerting** — Phase 3 minimum required before production cutover
 
@@ -68,6 +68,6 @@
 ## Suggested next actions
 
 1. `git push` + tag a release (multiple commits ahead of origin)
-2. Configure NSHM cross-account IAM: `python scripts/create-source-roles.py` against account 461564345538
+2. Configure NSHM cross-account IAM: `python scripts/create-source-roles.py` against account 210987654321
 3. Phase 3 minimum: Slack/SNS failure alerting before NSHM production cutover
 4. Set a concrete parallel run start date and AWS Backup deprecation timeline

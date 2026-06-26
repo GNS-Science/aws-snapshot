@@ -271,7 +271,7 @@ object plus a delete marker if deleted. Delete markers are negligible in size
 effectively **zero storage cost**.
 
 **Recommendation:** Enable S3 versioning on `ths-dataset-prod`. The backup bucket
-(`bb-ths-s3-dataset-ap-southeast-2-595842668254`) does not need versioning — it
+(`bb-ths-s3-dataset-ap-southeast-2-345678901234`) does not need versioning — it
 already retains deleted objects indefinitely via the no-delete Lambda policy
 and the no-expiry lifecycle ([ADR-006](adr/ADR-006-simplify-storage-tiers-drop-deep-archive.md)).
 

@@ -8,7 +8,7 @@
 #   scripts/sandbox_setup.sh status     # Show state of all resources
 #
 # Prerequisites:
-#   - AWS CLI configured with sandbox account (595842668254) credentials
+#   - AWS CLI configured with sandbox account (345678901234) credentials
 #   - Python venv activated (pip install -e ".[dev]")
 #
 # Production resource mapping:
@@ -19,12 +19,12 @@
 #   PROD DynamoDB: ToshiTableObject-PROD        → SANDBOX: ToshiTableObject-PROD
 #   PROD DynamoDB: ToshiThingObject-PROD        → SANDBOX: ToshiThingObject-PROD
 #
-# Sandbox account: 595842668254   Production account: 461564345538
+# Sandbox account: 345678901234   Production account: 210987654321
 
 set -euo pipefail
 
 REGION="${AWS_DEFAULT_REGION:-ap-southeast-2}"
-SANDBOX_ACCOUNT="595842668254"
+SANDBOX_ACCOUNT="345678901234"
 
 # S3: -prod suffix replaced with -sandbox (bucket names are global)
 TOSHI_S3_BUCKET="nzshm22-toshi-api-sandbox"

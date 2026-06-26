@@ -1,7 +1,7 @@
 # Sandbox Demo Guide
 
 End-to-end test of the Phase 2 feature set against real AWS using the sandbox
-account (595842668254). No production resources are touched.
+account (345678901234). No production resources are touched.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ account (595842668254). No production resources are touched.
 
 ```bash
 # AWS CLI configured for sandbox account
-aws sts get-caller-identity   # should show 595842668254
+aws sts get-caller-identity   # should show 345678901234
 
 # Python venv with package installed
 python -m venv .venv && source .venv/bin/activate
@@ -77,9 +77,9 @@ backup run --source toshi
 ```
 
 This will:
-1. Create `nzshm22-toshi-api-sandbox-backup-ap-southeast-2-595842668254` (S3 backup bucket)
+1. Create `nzshm22-toshi-api-sandbox-backup-ap-southeast-2-345678901234` (S3 backup bucket)
 2. Sync the 5 source objects into it
-3. Create `nzshm-dynamo-backup-toshi-ap-southeast-2-595842668254` (DynamoDB export bucket)
+3. Create `nzshm-dynamo-backup-toshi-ap-southeast-2-345678901234` (DynamoDB export bucket)
 4. Initiate PITR exports for all 4 tables — each returns an `ExportArn`
 
 > **Note — sandbox vs production S3 output:**
@@ -163,7 +163,7 @@ sls deploy --stage sandbox
 
 # Copy the printed ARN into backup-config.sandbox.yaml:
 #   general:
-#     lambda_arn: "arn:aws:lambda:ap-southeast-2:595842668254:function:nzshm-backup-sandbox-backup"
+#     lambda_arn: "arn:aws:lambda:ap-southeast-2:345678901234:function:nzshm-backup-sandbox-backup"
 
 # Re-run schedule add to register the target
 backup schedule add --source toshi --frequency hourly --time 00:05
@@ -208,7 +208,7 @@ See `backup-config.example.yaml` for the full production config template.
 
 **Wrong account error:**
 ```
-[ERROR] Expected sandbox account 595842668254 but got XXXXXXXXXXXX
+[ERROR] Expected sandbox account 345678901234 but got XXXXXXXXXXXX
 ```
 Switch AWS credentials to the sandbox account profile before running.
 
