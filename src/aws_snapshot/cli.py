@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 # too late — the defaults would already have captured the unloaded env.
 load_dotenv()
 
-from nzshm_backup import __version__  # noqa: E402
-from nzshm_backup.state import _state  # noqa: E402
+from aws_snapshot import __version__  # noqa: E402
+from aws_snapshot.state import _state  # noqa: E402
 
 app = typer.Typer(
     name="backup",
@@ -77,19 +77,19 @@ def main(
 
 
 # Import and register subcommand groups (must be after main() to avoid circular imports)
-from nzshm_backup.commands.check import app as check_app  # noqa: E402
-from nzshm_backup.commands.config import app as config_app  # noqa: E402
-from nzshm_backup.commands.costs import app as costs_app  # noqa: E402
-from nzshm_backup.commands.events import app as events_app  # noqa: E402
-from nzshm_backup.commands.health_report import app as health_report_app  # noqa: E402
-from nzshm_backup.commands.notifications import app as notifications_app  # noqa: E402
-from nzshm_backup.commands.report import app as report_app  # noqa: E402
-from nzshm_backup.commands.restore import app as restore_app  # noqa: E402
-from nzshm_backup.commands.run_backup import app as run_app  # noqa: E402
-from nzshm_backup.commands.schedule import app as schedule_app  # noqa: E402
-from nzshm_backup.commands.setup import app as setup_app  # noqa: E402
-from nzshm_backup.commands.status import app as status_app  # noqa: E402
-from nzshm_backup.commands.test import app as test_app  # noqa: E402
+from aws_snapshot.commands.check import app as check_app  # noqa: E402
+from aws_snapshot.commands.config import app as config_app  # noqa: E402
+from aws_snapshot.commands.costs import app as costs_app  # noqa: E402
+from aws_snapshot.commands.events import app as events_app  # noqa: E402
+from aws_snapshot.commands.health_report import app as health_report_app  # noqa: E402
+from aws_snapshot.commands.notifications import app as notifications_app  # noqa: E402
+from aws_snapshot.commands.report import app as report_app  # noqa: E402
+from aws_snapshot.commands.restore import app as restore_app  # noqa: E402
+from aws_snapshot.commands.run_backup import app as run_app  # noqa: E402
+from aws_snapshot.commands.schedule import app as schedule_app  # noqa: E402
+from aws_snapshot.commands.setup import app as setup_app  # noqa: E402
+from aws_snapshot.commands.status import app as status_app  # noqa: E402
+from aws_snapshot.commands.test import app as test_app  # noqa: E402
 
 app.add_typer(check_app, name="check", help="Pre-flight access and configuration checks.")
 app.add_typer(schedule_app, name="schedule", help="Manage backup schedules.")

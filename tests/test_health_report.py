@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
 
-from nzshm_backup import health_report as hr
-from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+from aws_snapshot import health_report as hr
+from aws_snapshot.commands.test import BucketRestoreResult, RestoreTestResult
 
 # ---------------------------------------------------------------------------
 # _classify_source
@@ -338,12 +338,12 @@ def _build_report_mocks():
     return config, source_cfg
 
 
-@patch("nzshm_backup.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     _mock_account, mock_status, mock_inv, mock_delta, mock_restore, _mock_div
 ):
@@ -378,12 +378,12 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     assert called_alias == "weka"
 
 
-@patch("nzshm_backup.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
     _mock_account, mock_status, mock_inv, mock_delta, mock_restore, _mock_div
 ):
@@ -415,12 +415,12 @@ def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
     assert aliases == {"weka", "ths"}
 
 
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_classifies_red_on_backup_missing(
     _mock_account, mock_status, mock_inv, mock_delta, _mock_restore, mock_div
 ):
@@ -452,12 +452,12 @@ def test_build_report_classifies_red_on_backup_missing(
     assert any("missing 3 source keys" in n for n in src.notes)
 
 
-@patch("nzshm_backup.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_counts", return_value=_DEFAULT_DIVERGENCE)
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_source_count_drop_is_class2_informational_only(
     _mock_account, mock_status, mock_inv, mock_delta, _mock_restore, _mock_div
 ):
@@ -484,12 +484,12 @@ def test_build_report_source_count_drop_is_class2_informational_only(
     assert not any("dropped" in n for n in src.notes)
 
 
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_orphan_count_is_class2_info(
     _mock_account, mock_status, mock_inv, mock_delta, _mock_restore, mock_div
 ):
@@ -554,13 +554,13 @@ def _session_with_head_object_results(results: list[object]) -> MagicMock:
     return session
 
 
-@patch("nzshm_backup.health_report.divergence_sample_keys")
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_sample_keys")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_tags_still_missing_when_head_object_404s(
     _mock_account,
     mock_status,
@@ -603,13 +603,13 @@ def test_build_report_tags_still_missing_when_head_object_404s(
     )
 
 
-@patch("nzshm_backup.health_report.divergence_sample_keys")
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_sample_keys")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_tags_auto_healed_when_head_object_200s(
     _mock_account,
     mock_status,
@@ -653,13 +653,13 @@ def test_build_report_tags_auto_healed_when_head_object_200s(
     ), src.notes
 
 
-@patch("nzshm_backup.health_report.divergence_sample_keys")
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_sample_keys")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_tags_mixed_when_some_still_missing_some_healed(
     _mock_account,
     mock_status,
@@ -711,13 +711,13 @@ def test_build_report_tags_mixed_when_some_still_missing_some_healed(
     ), src.notes
 
 
-@patch("nzshm_backup.health_report.divergence_sample_keys")
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_sample_keys")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_falls_back_to_untagged_when_sample_query_fails(
     _mock_account,
     mock_status,
@@ -758,13 +758,13 @@ def test_build_report_falls_back_to_untagged_when_sample_query_fails(
     assert any("head-check sample failed" in n for n in src.notes), src.notes
 
 
-@patch("nzshm_backup.health_report.divergence_sample_keys")
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_sample_keys")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_classifier_unchanged_when_all_auto_healed(
     _mock_account,
     mock_status,
@@ -822,12 +822,12 @@ def test_build_report_classifier_unchanged_when_all_auto_healed(
     )
 
 
-@patch("nzshm_backup.health_report.divergence_counts")
-@patch("nzshm_backup.health_report.restore_test_source")
-@patch("nzshm_backup.health_report.count_delta")
-@patch("nzshm_backup.health_report.inventory_health_for_bucket_pair")
-@patch("nzshm_backup.health_report.get_status_dict")
-@patch("nzshm_backup.health_report.get_account_id", return_value="999")
+@patch("aws_snapshot.health_report.divergence_counts")
+@patch("aws_snapshot.health_report.restore_test_source")
+@patch("aws_snapshot.health_report.count_delta")
+@patch("aws_snapshot.health_report.inventory_health_for_bucket_pair")
+@patch("aws_snapshot.health_report.get_status_dict")
+@patch("aws_snapshot.health_report.get_account_id", return_value="999")
 def test_build_report_skips_athena_when_inventory_disabled(
     _mock_account, mock_status, mock_inv, mock_delta, mock_restore, mock_div
 ):
@@ -862,7 +862,7 @@ def test_build_report_skips_athena_when_inventory_disabled(
 
 
 def test_resolve_topic_arn_prefers_explicit_flag(monkeypatch):
-    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+    from aws_snapshot.commands.health_report import _resolve_reports_topic_arn
 
     monkeypatch.setenv("BACKUP_REPORTS_TOPIC_ARN", "arn:from-env")
     session = MagicMock()
@@ -871,7 +871,7 @@ def test_resolve_topic_arn_prefers_explicit_flag(monkeypatch):
 
 
 def test_resolve_topic_arn_falls_back_to_env(monkeypatch):
-    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+    from aws_snapshot.commands.health_report import _resolve_reports_topic_arn
 
     monkeypatch.setenv("BACKUP_REPORTS_TOPIC_ARN", "arn:from-env")
     session = MagicMock()
@@ -880,7 +880,7 @@ def test_resolve_topic_arn_falls_back_to_env(monkeypatch):
 
 
 def test_resolve_topic_arn_constructs_from_session_when_no_overrides(monkeypatch):
-    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+    from aws_snapshot.commands.health_report import _resolve_reports_topic_arn
 
     monkeypatch.delenv("BACKUP_REPORTS_TOPIC_ARN", raising=False)
     session = MagicMock()
@@ -894,7 +894,7 @@ def test_resolve_topic_arn_constructs_from_session_when_no_overrides(monkeypatch
 
 
 def test_resolve_topic_arn_uses_stage_in_constructed_name(monkeypatch):
-    from nzshm_backup.commands.health_report import _resolve_reports_topic_arn
+    from aws_snapshot.commands.health_report import _resolve_reports_topic_arn
 
     monkeypatch.delenv("BACKUP_REPORTS_TOPIC_ARN", raising=False)
     session = MagicMock()

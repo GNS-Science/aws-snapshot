@@ -7,7 +7,7 @@ import yaml
 from botocore.exceptions import ClientError
 from typer.testing import CliRunner
 
-from nzshm_backup.cli import app
+from aws_snapshot.cli import app
 
 runner = CliRunner()
 
@@ -125,7 +125,7 @@ def test_check_same_account_s3_all_pass(same_account_s3_config, monkeypatch):
     mock_s3.head_bucket.side_effect = _client_error("404")  # backup bucket doesn't exist yet
     mock_session.client.side_effect = lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         result = runner.invoke(app, ["check", "--source", "ths"])
 
     assert result.exit_code == 0
@@ -148,7 +148,7 @@ def test_check_bad_backup_credentials_exits_nonzero(same_account_s3_config, monk
     mock_sts.get_caller_identity.side_effect = _client_error("InvalidClientTokenId")
     mock_session.client.return_value = mock_sts
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         result = runner.invoke(app, ["check", "--source", "ths"])
 
     assert result.exit_code == 1
@@ -200,9 +200,9 @@ def test_check_cross_account_role_pass(cross_account_batch_config, monkeypatch):
         "dynamodb": mock_dynamo,
     }.get(svc, MagicMock())
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         with patch(
-            "nzshm_backup.commands.check.get_cross_account_session",
+            "aws_snapshot.commands.check.get_cross_account_session",
             return_value=mock_source_session,
         ):
             result = runner.invoke(app, ["check", "--source", "toshi"])
@@ -221,9 +221,9 @@ def test_check_cross_account_role_fail(cross_account_batch_config, monkeypatch):
     mock_sts.get_caller_identity.return_value = {"Account": ACCOUNT_ID, "Arn": "arn:backup"}
     mock_session.client.return_value = mock_sts
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         with patch(
-            "nzshm_backup.commands.check.get_cross_account_session",
+            "aws_snapshot.commands.check.get_cross_account_session",
             side_effect=_client_error("AccessDenied"),
         ):
             result = runner.invoke(app, ["check", "--source", "toshi"])
@@ -249,7 +249,7 @@ def test_check_source_bucket_unreadable(same_account_s3_config, monkeypatch):
     mock_s3.head_bucket.side_effect = _client_error("404")
     mock_session.client.side_effect = lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         result = runner.invoke(app, ["check", "--source", "ths"])
 
     assert result.exit_code == 1
@@ -270,7 +270,7 @@ def test_check_backup_bucket_versioning_enabled_passes(same_account_s3_config, m
     mock_s3.get_bucket_versioning.return_value = {"Status": "Enabled"}
     mock_session.client.side_effect = lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         result = runner.invoke(app, ["check", "--source", "ths"])
 
     assert result.exit_code == 0
@@ -291,7 +291,7 @@ def test_check_backup_bucket_versioning_disabled_fails(same_account_s3_config, m
     mock_s3.get_bucket_versioning.return_value = {}
     mock_session.client.side_effect = lambda svc, **kw: mock_sts if svc == "sts" else mock_s3
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         result = runner.invoke(app, ["check", "--source", "ths"])
 
     assert result.exit_code == 1
@@ -354,9 +354,9 @@ def test_check_pitr_disabled_is_warn_not_fail(cross_account_batch_config, monkey
         "dynamodb": mock_dynamo,
     }.get(svc, MagicMock())
 
-    with patch("nzshm_backup.commands.check.boto3.Session", return_value=mock_session):
+    with patch("aws_snapshot.commands.check.boto3.Session", return_value=mock_session):
         with patch(
-            "nzshm_backup.commands.check.get_cross_account_session",
+            "aws_snapshot.commands.check.get_cross_account_session",
             return_value=mock_source_session,
         ):
             result = runner.invoke(app, ["check", "--source", "toshi"])

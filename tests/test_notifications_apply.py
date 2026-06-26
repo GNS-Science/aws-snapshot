@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from nzshm_backup.commands.notifications import _diff_subscriptions
+from aws_snapshot.commands.notifications import _diff_subscriptions
 
 
 def _paginator_with(subs: list[dict]) -> MagicMock:

@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import boto3
 import typer
 
-from nzshm_backup.config import load_config
-from nzshm_backup.event_log import read_events
-from nzshm_backup.s3_backup import get_account_id
+from aws_snapshot.config import load_config
+from aws_snapshot.event_log import read_events
+from aws_snapshot.s3_backup import get_account_id
 
 app = typer.Typer()
 

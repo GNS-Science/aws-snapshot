@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from nzshm_backup.dynamodb_restore import (
+from aws_snapshot.dynamodb_restore import (
     DynamoDBRestoreResult,
     DynamoDBRestoreStatus,
     describe_restore_status,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from nzshm_backup.lambda_schema import BackupTask
+from aws_snapshot.lambda_schema import BackupTask
 
 
 def test_backup_task_valid():

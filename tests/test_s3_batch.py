@@ -4,7 +4,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from nzshm_backup.s3_batch import (
+from aws_snapshot.s3_batch import (
     _build_restore_manifest_rows,
     batch_backup_source,
     batch_restore_bucket,
@@ -215,7 +215,7 @@ def test_batch_backup_skipped_when_nothing_to_copy(aws_session, s3_client):
     backup_name = "src3-backup-ap-southeast-2-123456789012"
 
     # Tag backup bucket so ensure_backup_bucket_ready accepts it
-    from nzshm_backup.s3_backup import create_backup_bucket
+    from aws_snapshot.s3_backup import create_backup_bucket
 
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
     s3_client.copy_object(
@@ -244,7 +244,7 @@ def test_batch_backup_prepare_only_writes_manifest_without_submitting(aws_sessio
     _put_object(s3_client, "src4", "new.txt", b"data")
     backup_name = "src4-backup-ap-southeast-2-123456789012"
 
-    from nzshm_backup.s3_backup import create_backup_bucket
+    from aws_snapshot.s3_backup import create_backup_bucket
 
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
 
@@ -270,7 +270,7 @@ def test_batch_backup_inventory_mode_uses_inventory_builder(aws_session, s3_clie
     _create_bucket(s3_client, "src5")
     backup_name = "src5-backup-ap-southeast-2-123456789012"
 
-    from nzshm_backup.s3_backup import create_backup_bucket
+    from aws_snapshot.s3_backup import create_backup_bucket
 
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
 
@@ -278,17 +278,17 @@ def test_batch_backup_inventory_mode_uses_inventory_builder(aws_session, s3_clie
         # _build_manifest_via_inventory now returns (etag, src_dt, bkp_dt, row_count)
         # and writes the manifest directly — no streaming through write_manifest_to_s3.
         mp.setattr(
-            "nzshm_backup.s3_batch._build_manifest_via_inventory",
+            "aws_snapshot.s3_batch._build_manifest_via_inventory",
             lambda *a, **k: ('"test-etag"', "2026-04-23-00-00", "2026-04-23-00-00", 1),
         )
         mp.setattr(
-            "nzshm_backup.s3_batch._list_bucket",
+            "aws_snapshot.s3_batch._list_bucket",
             lambda *a, **k: (_ for _ in ()).throw(
                 AssertionError("_list_bucket should not be used")
             ),
         )
         mp.setattr(
-            "nzshm_backup.s3_batch.write_manifest_to_s3",
+            "aws_snapshot.s3_batch.write_manifest_to_s3",
             lambda *a, **k: (_ for _ in ()).throw(
                 AssertionError("write_manifest_to_s3 should not be used in inventory mode")
             ),
@@ -315,7 +315,7 @@ def test_batch_backup_inventory_mode_requires_source_alias(aws_session, s3_clien
     _create_bucket(s3_client, "src6")
     backup_name = "src6-backup-ap-southeast-2-123456789012"
 
-    from nzshm_backup.s3_backup import create_backup_bucket
+    from aws_snapshot.s3_backup import create_backup_bucket
 
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
 
@@ -341,7 +341,7 @@ def test_config_requires_batch_role_when_use_s3_batch():
     import pytest
     from pydantic import ValidationError
 
-    from nzshm_backup.config.models import ConfigModel
+    from aws_snapshot.config.models import ConfigModel
 
     with pytest.raises(ValidationError, match="s3_batch_role_arn"):
         ConfigModel(
@@ -461,7 +461,7 @@ def test_batch_restore_excludes_operational_in_dry_run(aws_session, s3_client):
 
 def test_config_accepts_batch_role_when_use_s3_batch():
     """ConfigModel validates when s3_batch_role_arn is provided."""
-    from nzshm_backup.config.models import ConfigModel
+    from aws_snapshot.config.models import ConfigModel
 
     cfg = ConfigModel(
         general={"s3_batch_role_arn": "arn:aws:iam::123456789012:role/nzshm-backup-batch-role"},
@@ -494,7 +494,7 @@ def test_write_manifest_progress_logging(aws_session, s3_client, caplog):
         for i in range(100_001):
             yield f"bucket,key{i}\n"
 
-    with caplog.at_level(logging.INFO, logger="nzshm_backup.s3_batch"):
+    with caplog.at_level(logging.INFO, logger="aws_snapshot.s3_batch"):
         etag, count = write_manifest_to_s3(
             s3_client,
             _rows(),
@@ -520,7 +520,7 @@ def test_write_manifest_progress_unknown_total(aws_session, s3_client, caplog):
         for i in range(100_001):
             yield f"bucket,key{i}\n"
 
-    with caplog.at_level(logging.INFO, logger="nzshm_backup.s3_batch"):
+    with caplog.at_level(logging.INFO, logger="aws_snapshot.s3_batch"):
         write_manifest_to_s3(s3_client, _rows(), "manifest-bucket2", "t.csv")
 
     assert any("total unknown" in msg for msg in caplog.messages)
@@ -554,15 +554,15 @@ def test_wait_for_batch_job_completes():
     """Returns terminal status when job completes."""
     from unittest.mock import MagicMock, patch
 
-    from nzshm_backup.s3_batch import wait_for_batch_job
+    from aws_snapshot.s3_batch import wait_for_batch_job
 
     mock_session = MagicMock()
     mock_s3ctrl = MagicMock()
     mock_session.client.return_value = mock_s3ctrl
     mock_s3ctrl.describe_job.return_value = {"Job": {"Status": "Complete"}}
 
-    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
-        with patch("nzshm_backup.s3_batch.time.sleep"):
+    with patch("aws_snapshot.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("aws_snapshot.s3_batch.time.sleep"):
             status = wait_for_batch_job(mock_session, "123", "job-1", timeout=60)
 
     assert status == "Complete"
@@ -572,7 +572,7 @@ def test_wait_for_batch_job_polls_then_completes():
     """Polls Active then returns Complete."""
     from unittest.mock import MagicMock, patch
 
-    from nzshm_backup.s3_batch import wait_for_batch_job
+    from aws_snapshot.s3_batch import wait_for_batch_job
 
     mock_session = MagicMock()
     mock_s3ctrl = MagicMock()
@@ -583,8 +583,8 @@ def test_wait_for_batch_job_polls_then_completes():
         {"Job": {"Status": "Complete"}},
     ]
 
-    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
-        with patch("nzshm_backup.s3_batch.time.sleep"):
+    with patch("aws_snapshot.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("aws_snapshot.s3_batch.time.sleep"):
             status = wait_for_batch_job(
                 mock_session,
                 "123",
@@ -601,15 +601,15 @@ def test_wait_for_batch_job_returns_failed():
     """Returns Failed status."""
     from unittest.mock import MagicMock, patch
 
-    from nzshm_backup.s3_batch import wait_for_batch_job
+    from aws_snapshot.s3_batch import wait_for_batch_job
 
     mock_session = MagicMock()
     mock_s3ctrl = MagicMock()
     mock_session.client.return_value = mock_s3ctrl
     mock_s3ctrl.describe_job.return_value = {"Job": {"Status": "Failed"}}
 
-    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
-        with patch("nzshm_backup.s3_batch.time.sleep"):
+    with patch("aws_snapshot.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("aws_snapshot.s3_batch.time.sleep"):
             status = wait_for_batch_job(mock_session, "123", "job-3")
 
     assert status == "Failed"
@@ -619,15 +619,15 @@ def test_wait_for_batch_job_timeout():
     """Raises TimeoutError when job doesn't complete."""
     from unittest.mock import MagicMock, patch
 
-    from nzshm_backup.s3_batch import wait_for_batch_job
+    from aws_snapshot.s3_batch import wait_for_batch_job
 
     mock_session = MagicMock()
     mock_s3ctrl = MagicMock()
     mock_session.client.return_value = mock_s3ctrl
     mock_s3ctrl.describe_job.return_value = {"Job": {"Status": "Active"}}
 
-    with patch("nzshm_backup.s3_batch.get_region", return_value="ap-southeast-2"):
-        with patch("nzshm_backup.s3_batch.time.sleep"):
+    with patch("aws_snapshot.s3_batch.get_region", return_value="ap-southeast-2"):
+        with patch("aws_snapshot.s3_batch.time.sleep"):
             with pytest.raises(TimeoutError, match="did not complete"):
                 wait_for_batch_job(
                     mock_session,
@@ -652,7 +652,7 @@ def test_batch_backup_inline_createjob_failure(aws_session, s3_client):
     s3_client.put_object(Bucket="src-cj", Key="a.txt", Body=b"data")
 
     backup_name = "src-cj-backup-ap-southeast-2-123456789012"
-    from nzshm_backup.s3_backup import create_backup_bucket
+    from aws_snapshot.s3_backup import create_backup_bucket
 
     create_backup_bucket(s3_client, backup_name, "ap-southeast-2", "123456789012")
 
@@ -667,7 +667,7 @@ def test_batch_backup_inline_createjob_failure(aws_session, s3_client):
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "nzshm_backup.s3_batch.get_region",
+            "aws_snapshot.s3_batch.get_region",
             lambda s: "ap-southeast-2",
         )
         original_client = aws_session.client

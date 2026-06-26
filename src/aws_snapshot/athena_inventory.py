@@ -9,8 +9,8 @@ from typing import Any
 
 import boto3
 
-from nzshm_backup.integrity import OPERATIONAL_PREFIXES
-from nzshm_backup.inventory_state import _expected_prefix
+from aws_snapshot.integrity import OPERATIONAL_PREFIXES
+from aws_snapshot.inventory_state import _expected_prefix
 
 logger = logging.getLogger(__name__)
 

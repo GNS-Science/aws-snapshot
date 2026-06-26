@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from nzshm_backup.commands.setup import app
+from aws_snapshot.commands.setup import app
 
 runner = CliRunner()
 
 
 def test_setup_inventory_invokes_script_with_required_args():
-    with patch("nzshm_backup.commands.setup.subprocess.run") as run:
+    with patch("aws_snapshot.commands.setup.subprocess.run") as run:
         run.return_value = MagicMock(returncode=0)
         result = runner.invoke(
             app,
@@ -37,7 +37,7 @@ def test_setup_inventory_invokes_script_with_required_args():
 
 
 def test_setup_iam_source_roles_invokes_script():
-    with patch("nzshm_backup.commands.setup.subprocess.run") as run:
+    with patch("aws_snapshot.commands.setup.subprocess.run") as run:
         run.return_value = MagicMock(returncode=0)
         result = runner.invoke(
             app,
@@ -65,7 +65,7 @@ def test_setup_lifecycle_dry_run_lists_buckets_without_applying():
     fake_session = MagicMock()
     fake_session.client.side_effect = lambda name: fake_sts if name == "sts" else fake_s3
 
-    with patch("nzshm_backup.commands.setup.boto3.Session", return_value=fake_session):
+    with patch("aws_snapshot.commands.setup.boto3.Session", return_value=fake_session):
         result = runner.invoke(
             app,
             [
@@ -95,7 +95,7 @@ def test_setup_lifecycle_applies_to_existing_buckets():
     fake_session = MagicMock()
     fake_session.client.side_effect = lambda name: fake_sts if name == "sts" else fake_s3
 
-    with patch("nzshm_backup.commands.setup.boto3.Session", return_value=fake_session):
+    with patch("aws_snapshot.commands.setup.boto3.Session", return_value=fake_session):
         result = runner.invoke(
             app,
             [
@@ -119,7 +119,7 @@ def test_setup_lifecycle_applies_to_existing_buckets():
 
 
 def test_setup_iam_backup_batch_role_invokes_script():
-    with patch("nzshm_backup.commands.setup.subprocess.run") as run:
+    with patch("aws_snapshot.commands.setup.subprocess.run") as run:
         run.return_value = MagicMock(returncode=0)
         result = runner.invoke(
             app,

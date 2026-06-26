@@ -4,7 +4,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from nzshm_backup.dynamodb_backup import (
+from aws_snapshot.dynamodb_backup import (
     ensure_dynamodb_backup_bucket_ready,
     export_dynamodb_table,
 )

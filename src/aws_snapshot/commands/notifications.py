@@ -20,7 +20,7 @@ from typing import Literal
 import boto3
 import typer
 
-from nzshm_backup.config import load_config
+from aws_snapshot.config import load_config
 
 app = typer.Typer(help="Manage SNS topic subscriptions for backup notifications.")
 

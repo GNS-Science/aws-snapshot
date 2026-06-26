@@ -6,8 +6,8 @@ import yaml
 from moto import mock_aws
 from typer.testing import CliRunner
 
-from nzshm_backup import __version__
-from nzshm_backup.cli import app
+from aws_snapshot import __version__
+from aws_snapshot.cli import app
 
 runner = CliRunner()
 
