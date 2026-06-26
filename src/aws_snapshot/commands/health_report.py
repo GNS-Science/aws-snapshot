@@ -14,8 +14,8 @@ import os
 import boto3
 import typer
 
-from nzshm_backup import health_report
-from nzshm_backup.config import load_config
+from aws_snapshot import health_report
+from aws_snapshot.config import load_config
 
 app = typer.Typer(help="Generate and (optionally) deliver the daily health report.")
 
@@ -94,7 +94,7 @@ def health_report_run(
     if dry_run:
         # Stub restore_test_source so the report still builds but doesn't
         # exercise the copy-and-verify path.
-        from nzshm_backup import health_report as _hr
+        from aws_snapshot import health_report as _hr
 
         original = _hr.restore_test_source
         try:

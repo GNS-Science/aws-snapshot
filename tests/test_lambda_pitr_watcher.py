@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from nzshm_backup.lambda_pitr_watcher import _process_source_entries, handler
+from aws_snapshot.lambda_pitr_watcher import _process_source_entries, handler
 
 REGION = "ap-southeast-2"
 TABLE_NAME = "my-table-restore"
@@ -134,8 +134,8 @@ def _make_config(sources: dict):
     return cfg
 
 
-@patch("nzshm_backup.lambda_pitr_watcher._get_config")
-@patch("nzshm_backup.lambda_pitr_watcher.get_account_id", return_value="123456789012")
+@patch("aws_snapshot.lambda_pitr_watcher._get_config")
+@patch("aws_snapshot.lambda_pitr_watcher.get_account_id", return_value="123456789012")
 @patch("boto3.Session")
 def test_handler_disables_rule_when_ssm_empty(mock_session_cls, mock_account_id, mock_config):
     """No pending entries in SSM → EventBridge rule disabled immediately."""
@@ -162,9 +162,9 @@ def test_handler_disables_rule_when_ssm_empty(mock_session_cls, mock_account_id,
     events.disable_rule.assert_called_once_with(Name="nzshm-backup-pitr-watcher")
 
 
-@patch("nzshm_backup.lambda_pitr_watcher.append_event")
-@patch("nzshm_backup.lambda_pitr_watcher._get_config")
-@patch("nzshm_backup.lambda_pitr_watcher.get_account_id", return_value="123456789012")
+@patch("aws_snapshot.lambda_pitr_watcher.append_event")
+@patch("aws_snapshot.lambda_pitr_watcher._get_config")
+@patch("aws_snapshot.lambda_pitr_watcher.get_account_id", return_value="123456789012")
 @patch("boto3.Session")
 def test_handler_enables_pitr_and_removes_entry(
     mock_session_cls, mock_account_id, mock_config, mock_append
@@ -196,8 +196,8 @@ def test_handler_enables_pitr_and_removes_entry(
     events.disable_rule.assert_called_once_with(Name="nzshm-backup-pitr-watcher")
 
 
-@patch("nzshm_backup.lambda_pitr_watcher._get_config")
-@patch("nzshm_backup.lambda_pitr_watcher.get_account_id", return_value="123456789012")
+@patch("aws_snapshot.lambda_pitr_watcher._get_config")
+@patch("aws_snapshot.lambda_pitr_watcher.get_account_id", return_value="123456789012")
 @patch("boto3.Session")
 def test_handler_keeps_rule_enabled_when_still_pending(
     mock_session_cls, mock_account_id, mock_config

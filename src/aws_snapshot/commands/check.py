@@ -5,10 +5,10 @@ import typer
 from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
-from nzshm_backup.config import load_config
-from nzshm_backup.config.models import ConfigModel
-from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
-from nzshm_backup.s3_backup import get_cross_account_session
+from aws_snapshot.config import load_config
+from aws_snapshot.config.models import ConfigModel
+from aws_snapshot.inventory_state import inventory_health_for_bucket_pair
+from aws_snapshot.s3_backup import get_cross_account_session
 
 app = typer.Typer()
 

@@ -8,7 +8,7 @@ import boto3
 import yaml  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError
 
-from nzshm_backup.config.models import ConfigModel
+from aws_snapshot.config.models import ConfigModel
 
 DEFAULT_CONFIG_PATH = Path("backup-config.yaml")
 CONFIG_PATH_ENV_VAR = "BACKUP_CONFIG_PATH"

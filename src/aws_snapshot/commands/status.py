@@ -7,11 +7,11 @@ from typing import Any, Literal
 import boto3
 import typer
 
-from nzshm_backup.config import load_config
-from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
-from nzshm_backup.run_state import read_run_state
-from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
-from nzshm_backup.s3_batch import list_recent_batch_jobs
+from aws_snapshot.config import load_config
+from aws_snapshot.inventory_state import inventory_health_for_bucket_pair
+from aws_snapshot.run_state import read_run_state
+from aws_snapshot.s3_backup import get_account_id, get_cross_account_session
+from aws_snapshot.s3_batch import list_recent_batch_jobs
 
 
 def _fmt_dt(dt: datetime | str) -> str:

@@ -34,7 +34,7 @@ check: lint test
 #   - .aws-samignore is documented but not honored by PythonPipBuilder
 #     during CopySource (see aws-lambda-builders).
 #   - This Makefile produces exactly the artefact each function needs:
-#     `nzshm_backup/` package contents at root + pip deps from uv.lock.
+#     `aws_snapshot/` package contents at root + pip deps from uv.lock.
 
 # Host-side: generate requirements.txt from uv.lock. Run this before
 # `sam build` (or use `make sam-build` which wraps both). The build
@@ -48,13 +48,13 @@ sam-build: sam-prepare
 	sam build --use-container
 
 # Internal helper called by each function's build target. Installs deps
-# into ARTIFACTS_DIR and copies nzshm_backup/ at root so the Handler
-# module path `nzshm_backup.lambda_handler.handler` resolves without
+# into ARTIFACTS_DIR and copies aws_snapshot/ at root so the Handler
+# module path `aws_snapshot.lambda_handler.handler` resolves without
 # a PYTHONPATH workaround. Runs inside SAM's build container.
 _sam_build_one:
 	@mkdir -p $(ARTIFACTS_DIR)
 	@pip install --quiet --target $(ARTIFACTS_DIR) -r requirements.txt
-	@cp -r src/nzshm_backup $(ARTIFACTS_DIR)/nzshm_backup
+	@cp -r src/aws_snapshot $(ARTIFACTS_DIR)/aws_snapshot
 
 build-PitrWatcherFunction:
 	@$(MAKE) _sam_build_one

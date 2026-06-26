@@ -9,8 +9,8 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-from nzshm_backup.integrity import OPERATIONAL_PREFIXES
-from nzshm_backup.s3_backup import bucket_exists, get_region
+from aws_snapshot.integrity import OPERATIONAL_PREFIXES
+from aws_snapshot.s3_backup import bucket_exists, get_region
 
 logger = logging.getLogger(__name__)
 

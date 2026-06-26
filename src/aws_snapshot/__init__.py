@@ -4,6 +4,6 @@
 # Fall back gracefully if it isn't present — e.g. when the package source
 # is copied without invoking the wheel build (SAM Makefile artefacts do this).
 try:
-    from nzshm_backup._version import __version__
+    from aws_snapshot._version import __version__
 except ImportError:
     __version__ = "0.0.dev0+unknown"

@@ -13,8 +13,8 @@ import typer
 from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
-from nzshm_backup.config import load_config
-from nzshm_backup.s3_backup import (
+from aws_snapshot.config import load_config
+from aws_snapshot.s3_backup import (
     LifecycleConfig,
     apply_lifecycle_policy,
     bucket_exists,

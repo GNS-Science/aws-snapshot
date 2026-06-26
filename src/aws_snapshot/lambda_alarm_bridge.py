@@ -15,7 +15,7 @@ from typing import Any
 
 import boto3
 
-from nzshm_backup.notifications.slack import resolve_webhook_url, send_slack
+from aws_snapshot.notifications.slack import resolve_webhook_url, send_slack
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

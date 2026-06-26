@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 from moto import mock_aws
 
-from nzshm_backup.config.models import ConfigModel, GeneralConfig, SourceConfig
-from nzshm_backup.lambda_handler import handler
+from aws_snapshot.config.models import ConfigModel, GeneralConfig, SourceConfig
+from aws_snapshot.lambda_handler import handler
 
 REGION = "ap-southeast-2"
 
@@ -57,7 +57,7 @@ def test_handler_extra_fields_forbidden_returns_400():
 @mock_aws
 def test_handler_valid_event_empty_source_returns_200():
     """Valid event, source with no buckets/tables → 200 with success=True."""
-    with patch("nzshm_backup.lambda_handler.get_config", return_value=_make_config()):
+    with patch("aws_snapshot.lambda_handler.get_config", return_value=_make_config()):
         event = {"source": "testsrc", "dry_run": True, "trigger_type": "manual"}
         result = handler(event, None)
 
@@ -78,7 +78,7 @@ def test_handler_all_sources_runs_each():
             "src2": SourceConfig(display_name="Source 2"),
         },
     )
-    with patch("nzshm_backup.lambda_handler.get_config", return_value=config):
+    with patch("aws_snapshot.lambda_handler.get_config", return_value=config):
         result = handler({"source": "all", "dry_run": True}, None)
 
     assert result["statusCode"] == 200
@@ -87,7 +87,7 @@ def test_handler_all_sources_runs_each():
 @mock_aws
 def test_handler_defaults_dry_run_false():
     """dry_run defaults to False when omitted from event."""
-    with patch("nzshm_backup.lambda_handler.get_config", return_value=_make_config()):
+    with patch("aws_snapshot.lambda_handler.get_config", return_value=_make_config()):
         result = handler({"source": "testsrc"}, None)
 
     body = json.loads(result["body"])
@@ -102,7 +102,7 @@ def test_handler_defaults_dry_run_false():
 @mock_aws
 def test_handler_unknown_source_captured_in_results():
     """Unknown source alias → error recorded per-source, not an unhandled exception."""
-    with patch("nzshm_backup.lambda_handler.get_config", return_value=_make_config()):
+    with patch("aws_snapshot.lambda_handler.get_config", return_value=_make_config()):
         result = handler({"source": "no_such_source", "dry_run": True}, None)
 
     body = json.loads(result["body"])
@@ -112,7 +112,7 @@ def test_handler_unknown_source_captured_in_results():
 
 def test_handler_config_load_failure_returns_500():
     """Exception raised by get_config → 500 with error message."""
-    with patch("nzshm_backup.lambda_handler.get_config", side_effect=Exception("SSM unreachable")):
+    with patch("aws_snapshot.lambda_handler.get_config", side_effect=Exception("SSM unreachable")):
         result = handler({"source": "testsrc", "dry_run": True}, None)
 
     assert result["statusCode"] == 500
@@ -127,20 +127,20 @@ def test_handler_config_load_failure_returns_500():
 
 def test_get_config_uses_ssm_when_stage_set(monkeypatch, tmp_path):
     """NZSHM_STAGE set → tries SSM first, falls back to env/file on FileNotFoundError."""
-    from nzshm_backup.lambda_handler import get_config
+    from aws_snapshot.lambda_handler import get_config
 
     monkeypatch.setenv("NZSHM_STAGE", "test")
 
     fallback_config = _make_config()
     with patch(
-        "nzshm_backup.lambda_handler.load_config_from_ssm",
+        "aws_snapshot.lambda_handler.load_config_from_ssm",
         side_effect=FileNotFoundError("no ssm param"),
     ):
         with patch(
-            "nzshm_backup.lambda_handler.load_config_from_env", side_effect=ValueError("no env")
+            "aws_snapshot.lambda_handler.load_config_from_env", side_effect=ValueError("no env")
         ):
             with patch(
-                "nzshm_backup.lambda_handler.load_config", return_value=fallback_config
+                "aws_snapshot.lambda_handler.load_config", return_value=fallback_config
             ) as mock_file:
                 result = get_config()
 
@@ -150,13 +150,13 @@ def test_get_config_uses_ssm_when_stage_set(monkeypatch, tmp_path):
 
 def test_get_config_uses_env_when_no_stage(monkeypatch):
     """No NZSHM_STAGE → skips SSM, tries env config."""
-    from nzshm_backup.lambda_handler import get_config
+    from aws_snapshot.lambda_handler import get_config
 
     monkeypatch.delenv("NZSHM_STAGE", raising=False)
     fallback_config = _make_config()
 
     with patch(
-        "nzshm_backup.lambda_handler.load_config_from_env", return_value=fallback_config
+        "aws_snapshot.lambda_handler.load_config_from_env", return_value=fallback_config
     ) as mock_env:
         result = get_config()
 
@@ -172,7 +172,7 @@ def test_get_config_uses_env_when_no_stage(monkeypatch):
 def test_handler_health_report_invokes_build_and_send():
     """task_type='health_report' bypasses backup engine and calls health_report.* ."""
 
-    from nzshm_backup.health_report import DeliveryResult, HealthReportData
+    from aws_snapshot.health_report import DeliveryResult, HealthReportData
 
     config = _make_config()
     fake_report = HealthReportData(
@@ -181,12 +181,12 @@ def test_handler_health_report_invokes_build_and_send():
     )
     delivery = DeliveryResult(slack_attempted=True, slack_ok=True)
 
-    with patch("nzshm_backup.lambda_handler.get_config", return_value=config):
+    with patch("aws_snapshot.lambda_handler.get_config", return_value=config):
         with patch(
-            "nzshm_backup.health_report.build_report", return_value=fake_report
+            "aws_snapshot.health_report.build_report", return_value=fake_report
         ) as mock_build:
-            with patch("nzshm_backup.health_report.send", return_value=delivery) as mock_send:
-                with patch("nzshm_backup.event_log.append_event"):
+            with patch("aws_snapshot.health_report.send", return_value=delivery) as mock_send:
+                with patch("aws_snapshot.event_log.append_event"):
                     result = handler({"source": "_health", "task_type": "health_report"}, None)
 
     assert result["statusCode"] == 200
@@ -206,12 +206,12 @@ def test_handler_backup_task_does_not_call_health_report():
     fake_source_result.s3_results = []
     fake_source_result.dynamodb_results = []
 
-    with patch("nzshm_backup.lambda_handler.get_config", return_value=config):
+    with patch("aws_snapshot.lambda_handler.get_config", return_value=config):
         with patch(
-            "nzshm_backup.lambda_handler.run_backup_source",
+            "aws_snapshot.lambda_handler.run_backup_source",
             return_value=fake_source_result,
         ):
-            with patch("nzshm_backup.health_report.build_report") as mock_build:
+            with patch("aws_snapshot.health_report.build_report") as mock_build:
                 result = handler({"source": "testsrc"}, None)
 
     assert result["statusCode"] == 200

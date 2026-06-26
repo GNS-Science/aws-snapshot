@@ -6,12 +6,12 @@ from typing import Literal, cast
 
 import boto3
 
-from nzshm_backup.config.models import ConfigModel
-from nzshm_backup.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
-from nzshm_backup.event_log import append_event
-from nzshm_backup.run_state import write_run_state
-from nzshm_backup.s3_backup import backup_source, get_cross_account_session
-from nzshm_backup.s3_batch import batch_backup_source
+from aws_snapshot.config.models import ConfigModel
+from aws_snapshot.dynamodb_backup import ensure_dynamodb_backup_bucket_ready, export_dynamodb_table
+from aws_snapshot.event_log import append_event
+from aws_snapshot.run_state import write_run_state
+from aws_snapshot.s3_backup import backup_source, get_cross_account_session
+from aws_snapshot.s3_batch import batch_backup_source
 
 logger = logging.getLogger(__name__)
 

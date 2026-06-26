@@ -8,9 +8,9 @@ import boto3
 import typer
 from botocore.exceptions import ClientError
 
-from nzshm_backup.config.loader import load_config
-from nzshm_backup.state import get_state
-from nzshm_backup.time_utils import parse_datetime
+from aws_snapshot.config.loader import load_config
+from aws_snapshot.state import get_state
+from aws_snapshot.time_utils import parse_datetime
 
 app = typer.Typer()
 

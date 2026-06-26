@@ -5,10 +5,10 @@ from typing import TypedDict
 import boto3
 import typer
 
-from nzshm_backup.backup_engine import run_backup_source
-from nzshm_backup.config import load_config
-from nzshm_backup.logging_config import setup_logging
-from nzshm_backup.state import get_state
+from aws_snapshot.backup_engine import run_backup_source
+from aws_snapshot.config import load_config
+from aws_snapshot.logging_config import setup_logging
+from aws_snapshot.state import get_state
 
 app = typer.Typer()
 

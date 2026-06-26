@@ -4,18 +4,18 @@ from unittest.mock import MagicMock, patch  # noqa: I001
 
 import pytest
 
-from nzshm_backup.commands.test import (
+from aws_snapshot.commands.test import (
     _delete_temp_bucket,
     _fmt_dt,
     _verify_restored_object,
 )
-from nzshm_backup.integrity import get_object_checksum
+from aws_snapshot.integrity import get_object_checksum
 
 
 @pytest.fixture(autouse=True)
 def _reset_global_state():
     """Reset singleton state before each test to avoid dry_run leaks."""
-    from nzshm_backup.state import _state
+    from aws_snapshot.state import _state
 
     _state.dry_run = False
     _state.verbose = False
@@ -98,7 +98,7 @@ class TestVerifyRestoredObject:
     def test_checksum_match_returns_none(self):
         s3 = MagicMock()
         with patch(
-            "nzshm_backup.commands.test.get_object_checksum",
+            "aws_snapshot.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), ("ChecksumSHA256", "abc")],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -107,7 +107,7 @@ class TestVerifyRestoredObject:
     def test_checksum_mismatch_returns_error(self):
         s3 = MagicMock()
         with patch(
-            "nzshm_backup.commands.test.get_object_checksum",
+            "aws_snapshot.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), ("ChecksumSHA256", "xyz")],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -121,7 +121,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"etag"'}
         with patch(
-            "nzshm_backup.commands.test.get_object_checksum",
+            "aws_snapshot.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), ("ChecksumCRC32", "def")],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -132,7 +132,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"etag123"'}
         with patch(
-            "nzshm_backup.commands.test.get_object_checksum",
+            "aws_snapshot.commands.test.get_object_checksum",
             return_value=None,
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag123"')
@@ -142,7 +142,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"different"'}
         with patch(
-            "nzshm_backup.commands.test.get_object_checksum",
+            "aws_snapshot.commands.test.get_object_checksum",
             return_value=None,
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"expected"')
@@ -153,7 +153,7 @@ class TestVerifyRestoredObject:
         s3 = MagicMock()
         s3.head_object.return_value = {"ETag": '"etag"'}
         with patch(
-            "nzshm_backup.commands.test.get_object_checksum",
+            "aws_snapshot.commands.test.get_object_checksum",
             side_effect=[("ChecksumSHA256", "abc"), None],
         ):
             result = _verify_restored_object(s3, "src-bucket", "tgt-bucket", "key", '"etag"')
@@ -217,12 +217,12 @@ class TestDeleteTempBucket:
 class TestIntegrityCommand:
     """Tests for the test_integrity CLI command."""
 
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_unknown_source_exits(self, mock_config):
         """Unknown source should exit with code 1."""
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = MagicMock()
         cfg.sources = {"valid-source": MagicMock()}
@@ -233,28 +233,28 @@ class TestIntegrityCommand:
         assert result.exit_code == 1
         assert "unknown source" in result.output.lower()
 
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_config_not_found_exits(self, mock_config):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         mock_config.side_effect = FileNotFoundError("no config")
         runner = CliRunner()
         result = runner.invoke(app, ["integrity", "--source", "foo"])
         assert result.exit_code == 1
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_inventory_mode_shows_warning(
         self, mock_config, mock_boto, mock_account, mock_integrity
     ):
         """Inventory-mode sources should show a slow-listing warning."""
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         source_cfg = MagicMock()
         source_cfg.s3_buckets = [MagicMock()]
@@ -291,11 +291,11 @@ class TestIntegrityCommand:
 class TestRestoreCommand:
     """Tests for the test_restore CLI command."""
 
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_unknown_source_exits(self, mock_config):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = MagicMock()
         cfg.sources = {"valid-source": MagicMock()}
@@ -305,23 +305,23 @@ class TestRestoreCommand:
         result = runner.invoke(app, ["restore", "--source", "nonexistent"])
         assert result.exit_code == 1
 
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_config_not_found_exits(self, mock_config):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         mock_config.side_effect = FileNotFoundError("no config")
         runner = CliRunner()
         result = runner.invoke(app, ["restore", "--source", "foo"])
         assert result.exit_code == 1
 
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
-    @patch("nzshm_backup.commands.test._verify_restored_object", return_value=None)
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test._delete_temp_bucket_silent", return_value=None)
+    @patch("aws_snapshot.commands.test._verify_restored_object", return_value=None)
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_inventory_sampling_path(
         self,
         mock_config,
@@ -334,7 +334,7 @@ class TestRestoreCommand:
         """Inventory-mode sources should sample via Athena."""
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         source_cfg = MagicMock()
         source_cfg.s3_buckets = [MagicMock()]
@@ -361,7 +361,7 @@ class TestRestoreCommand:
         mock_boto.Session.return_value.client.return_value = s3_mock
 
         with patch(
-            "nzshm_backup.athena_inventory.sample_objects_via_inventory",
+            "aws_snapshot.athena_inventory.sample_objects_via_inventory",
             return_value=sample_data,
         ) as mock_sample:
             runner = CliRunner()
@@ -373,14 +373,14 @@ class TestRestoreCommand:
         assert s3_mock.copy_object.call_count == 2
         mock_verify.assert_called()
 
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_inventory_unavailable_guard(self, mock_config, mock_boto, mock_account):
         """When inventory is unavailable, should refuse with message."""
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         source_cfg = MagicMock()
         source_cfg.s3_buckets = [MagicMock()]
@@ -399,7 +399,7 @@ class TestRestoreCommand:
         mock_config.return_value = cfg
 
         with patch(
-            "nzshm_backup.athena_inventory.sample_objects_via_inventory",
+            "aws_snapshot.athena_inventory.sample_objects_via_inventory",
             side_effect=ValueError("No inventory data"),
         ):
             runner = CliRunner()
@@ -408,14 +408,14 @@ class TestRestoreCommand:
         assert result.exit_code == 1
         assert "Inventory unavailable" in result.stderr
 
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_dry_run_skips_copy(self, mock_config, mock_boto, mock_account):
         """Dry run should not create temp bucket or copy objects."""
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         source_cfg = MagicMock()
         source_cfg.s3_buckets = [MagicMock()]
@@ -448,14 +448,14 @@ class TestRestoreCommand:
         assert "DRY RUN" in result.output
         s3_mock.create_bucket.assert_not_called()
 
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_use_batch_requires_role_arn(self, mock_config, mock_boto, mock_account):
         """--use-batch without s3_batch_role_arn should exit with error."""
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         source_cfg = MagicMock()
         source_cfg.s3_buckets = []
@@ -504,14 +504,14 @@ def _make_integrity_mocks(source_cfg_overrides=None):
 class TestIntegrityDirtyResults:
     """Test integrity command with missing/mismatched objects."""
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_missing_objects_reported(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg, _ = _make_integrity_mocks()
         mock_config.return_value = cfg
@@ -536,14 +536,14 @@ class TestIntegrityDirtyResults:
         assert "missing2.txt" in result.output
         assert "2 object(s) missing" in result.output
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_etag_mismatches_reported(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg, _ = _make_integrity_mocks()
         mock_config.return_value = cfg
@@ -571,14 +571,14 @@ class TestIntegrityDirtyResults:
         assert "bad.txt" in result.output
         assert "mismatch" in result.output.lower()
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_integrity_errors_reported(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg, _ = _make_integrity_mocks()
         mock_config.return_value = cfg
@@ -600,14 +600,14 @@ class TestIntegrityDirtyResults:
 class TestIntegrityDynamoDB:
     """Test integrity DynamoDB PITR and export checks."""
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_dynamodb_pitr_enabled(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg, source_cfg = _make_integrity_mocks()
         source_cfg.s3_buckets = []
@@ -637,14 +637,14 @@ class TestIntegrityDynamoDB:
         assert "PITR enabled" in result.output
         assert "1 completed export" in result.output
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_dynamodb_pitr_disabled(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg, source_cfg = _make_integrity_mocks()
         source_cfg.s3_buckets = []
@@ -669,14 +669,14 @@ class TestIntegrityDynamoDB:
         assert "PITR DISABLED" in result.output
         assert "no completed exports" in result.output
 
-    @patch("nzshm_backup.commands.test.check_bucket_integrity")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.check_bucket_integrity")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_dynamodb_pitr_check_error(self, mock_config, mock_boto, mock_account, mock_integrity):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg, source_cfg = _make_integrity_mocks()
         source_cfg.s3_buckets = []
@@ -722,12 +722,12 @@ def _make_restore_mocks(inventory_mode=True):
 class TestRestoreDirectCopy:
     """Test restore command with direct copy path."""
 
-    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
-    @patch("nzshm_backup.commands.test._verify_restored_object", return_value=None)
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test._delete_temp_bucket_silent", return_value=None)
+    @patch("aws_snapshot.commands.test._verify_restored_object", return_value=None)
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_direct_copy_success(
         self,
         mock_config,
@@ -739,7 +739,7 @@ class TestRestoreDirectCopy:
     ):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = _make_restore_mocks()
         mock_config.return_value = cfg
@@ -753,7 +753,7 @@ class TestRestoreDirectCopy:
         mock_boto.Session.return_value.client.return_value = mock_s3
 
         with patch(
-            "nzshm_backup.athena_inventory.sample_objects_via_inventory",
+            "aws_snapshot.athena_inventory.sample_objects_via_inventory",
             return_value=sample,
         ):
             runner = CliRunner()
@@ -763,11 +763,11 @@ class TestRestoreDirectCopy:
         assert mock_s3.copy_object.call_count == 2
         mock_cleanup.assert_called_once()
 
-    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test._delete_temp_bucket_silent", return_value=None)
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_direct_copy_error(
         self,
         mock_config,
@@ -778,7 +778,7 @@ class TestRestoreDirectCopy:
     ):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = _make_restore_mocks()
         mock_config.return_value = cfg
@@ -790,7 +790,7 @@ class TestRestoreDirectCopy:
         mock_boto.Session.return_value.client.return_value = mock_s3
 
         with patch(
-            "nzshm_backup.athena_inventory.sample_objects_via_inventory",
+            "aws_snapshot.athena_inventory.sample_objects_via_inventory",
             return_value=sample,
         ):
             runner = CliRunner()
@@ -800,15 +800,15 @@ class TestRestoreDirectCopy:
         assert "copy error" in result.output.lower()
         mock_cleanup.assert_called_once()
 
-    @patch("nzshm_backup.commands.test._delete_temp_bucket_silent", return_value=None)
+    @patch("aws_snapshot.commands.test._delete_temp_bucket_silent", return_value=None)
     @patch(
-        "nzshm_backup.commands.test._verify_restored_object",
+        "aws_snapshot.commands.test._verify_restored_object",
         return_value="ETag mismatch: a != b",
     )
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_direct_copy_etag_mismatch(
         self,
         mock_config,
@@ -820,7 +820,7 @@ class TestRestoreDirectCopy:
     ):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = _make_restore_mocks()
         mock_config.return_value = cfg
@@ -831,7 +831,7 @@ class TestRestoreDirectCopy:
         mock_boto.Session.return_value.client.return_value = mock_s3
 
         with patch(
-            "nzshm_backup.athena_inventory.sample_objects_via_inventory",
+            "aws_snapshot.athena_inventory.sample_objects_via_inventory",
             return_value=sample,
         ):
             runner = CliRunner()
@@ -840,10 +840,10 @@ class TestRestoreDirectCopy:
         assert result.exit_code == 1
         assert "mismatch" in result.output.lower()
 
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_temp_bucket_creation_failure(
         self,
         mock_config,
@@ -853,7 +853,7 @@ class TestRestoreDirectCopy:
     ):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = _make_restore_mocks()
         mock_config.return_value = cfg
@@ -865,7 +865,7 @@ class TestRestoreDirectCopy:
         mock_boto.Session.return_value.client.return_value = mock_s3
 
         with patch(
-            "nzshm_backup.athena_inventory.sample_objects_via_inventory",
+            "aws_snapshot.athena_inventory.sample_objects_via_inventory",
             return_value=sample,
         ):
             runner = CliRunner()
@@ -874,10 +874,10 @@ class TestRestoreDirectCopy:
         assert result.exit_code == 1
         assert "Failed to create temp bucket" in result.output
 
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_no_copyable_objects(
         self,
         mock_config,
@@ -887,7 +887,7 @@ class TestRestoreDirectCopy:
     ):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = _make_restore_mocks(inventory_mode=False)
         mock_config.return_value = cfg
@@ -911,10 +911,10 @@ class TestRestoreDirectCopy:
 class TestRestoreDynamoDB:
     """Test restore command DynamoDB checks."""
 
-    @patch("nzshm_backup.commands.test.append_event")
-    @patch("nzshm_backup.commands.test.get_account_id", return_value="123456")
-    @patch("nzshm_backup.commands.test.boto3")
-    @patch("nzshm_backup.commands.test.load_config")
+    @patch("aws_snapshot.commands.test.append_event")
+    @patch("aws_snapshot.commands.test.get_account_id", return_value="123456")
+    @patch("aws_snapshot.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.load_config")
     def test_dynamodb_pitr_and_export_check(
         self,
         mock_config,
@@ -924,7 +924,7 @@ class TestRestoreDynamoDB:
     ):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cfg = _make_restore_mocks()
         cfg.sources["mysource"].s3_buckets = []
@@ -965,13 +965,13 @@ class TestRestoreTestResult:
     """Aggregation logic for the programmatic restore-test API."""
 
     def test_overall_skipped_when_no_buckets(self):
-        from nzshm_backup.commands.test import RestoreTestResult
+        from aws_snapshot.commands.test import RestoreTestResult
 
         result = RestoreTestResult(source="x", mode="direct copy")
         assert result.overall == "skipped"
 
     def test_overall_failed_when_any_bucket_failed(self):
-        from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+        from aws_snapshot.commands.test import BucketRestoreResult, RestoreTestResult
 
         result = RestoreTestResult(source="x", mode="direct copy")
         result.buckets = [
@@ -985,7 +985,7 @@ class TestRestoreTestResult:
         assert result.overall == "failed"
 
     def test_overall_passed_when_all_buckets_passed(self):
-        from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+        from aws_snapshot.commands.test import BucketRestoreResult, RestoreTestResult
 
         result = RestoreTestResult(source="x", mode="direct copy")
         result.buckets = [
@@ -999,7 +999,7 @@ class TestRestoreTestResult:
         assert result.overall == "passed"
 
     def test_overall_skipped_when_all_buckets_skipped(self):
-        from nzshm_backup.commands.test import BucketRestoreResult, RestoreTestResult
+        from aws_snapshot.commands.test import BucketRestoreResult, RestoreTestResult
 
         result = RestoreTestResult(source="x", mode="direct copy")
         result.buckets = [
@@ -1013,11 +1013,11 @@ class TestRestoreTestResult:
 class TestTestAlert:
     """`backup test alert` exercises the CloudWatch alarm fast path."""
 
-    @patch("nzshm_backup.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.boto3")
     def test_default_stage_calls_set_alarm_state(self, mock_boto):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cw = MagicMock()
         mock_boto.client.return_value = cw
@@ -1033,11 +1033,11 @@ class TestTestAlert:
         assert kwargs["StateValue"] == "ALARM"
         assert "Manual test" in kwargs["StateReason"]
 
-    @patch("nzshm_backup.commands.test.boto3")
+    @patch("aws_snapshot.commands.test.boto3")
     def test_custom_stage_and_region(self, mock_boto):
         from typer.testing import CliRunner
 
-        from nzshm_backup.commands.test import app
+        from aws_snapshot.commands.test import app
 
         cw = MagicMock()
         mock_boto.client.return_value = cw
