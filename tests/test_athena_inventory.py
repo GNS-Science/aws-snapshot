@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import pytest
 
-from nzshm_backup import athena_inventory as ai
+from aws_snapshot import athena_inventory as ai
 
 
 def test_latest_inventory_partition_detects_latest_dt_and_hive_root():
@@ -613,7 +613,7 @@ def test_wait_for_athena_query_failed():
 def test_wait_for_athena_query_timeout():
     athena = MagicMock()
     athena.get_query_execution.return_value = {"QueryExecution": {"Status": {"State": "RUNNING"}}}
-    with patch("nzshm_backup.athena_inventory.time") as mock_time:
+    with patch("aws_snapshot.athena_inventory.time") as mock_time:
         mock_time.time.side_effect = [0, 0, 1000]  # start, check, past deadline
         mock_time.sleep = MagicMock()
         with pytest.raises(TimeoutError, match="timed out"):

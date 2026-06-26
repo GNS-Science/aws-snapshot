@@ -10,16 +10,16 @@ from typing import Literal
 import boto3
 import typer
 
-from nzshm_backup.config import load_config
-from nzshm_backup.event_log import append_event
-from nzshm_backup.integrity import (
+from aws_snapshot.config import load_config
+from aws_snapshot.event_log import append_event
+from aws_snapshot.integrity import (
     OPERATIONAL_PREFIXES,
     check_bucket_integrity,
     get_object_checksum,
 )
-from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
-from nzshm_backup.s3_batch import batch_restore_bucket, wait_for_batch_job
-from nzshm_backup.state import get_state
+from aws_snapshot.s3_backup import get_account_id, get_cross_account_session
+from aws_snapshot.s3_batch import batch_restore_bucket, wait_for_batch_job
+from aws_snapshot.state import get_state
 
 # ---------------------------------------------------------------------------
 # Programmatic restore-test result types
@@ -276,7 +276,7 @@ def _sample_for_restore(
     """
     use_inventory = source_config.batch_manifest_mode == "inventory"
     if use_inventory:
-        from nzshm_backup.athena_inventory import sample_objects_via_inventory
+        from aws_snapshot.athena_inventory import sample_objects_via_inventory
 
         try:
             sample = sample_objects_via_inventory(
@@ -368,7 +368,7 @@ def _run_bucket_restore_test(
             },
         )
         if use_batch and batch_role_arn:
-            from nzshm_backup.s3_restore import apply_restore_target_policy
+            from aws_snapshot.s3_restore import apply_restore_target_policy
 
             apply_restore_target_policy(s3_client, temp_bucket, batch_role_arn)
     except Exception as e:
@@ -392,7 +392,7 @@ def _run_bucket_restore_test(
                     safe_key = obj["Key"].replace('"', '""')
                     yield f"{_b},{safe_key}\n"
 
-            from nzshm_backup.s3_batch import write_manifest_to_s3 as _write_manifest
+            from aws_snapshot.s3_batch import write_manifest_to_s3 as _write_manifest
 
             manifest_key = (
                 f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"

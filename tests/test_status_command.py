@@ -8,7 +8,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from nzshm_backup.cli import app
+from aws_snapshot.cli import app
 
 runner = CliRunner()
 
@@ -106,8 +106,8 @@ def test_status_dynamodb_no_exports(dynamo_config, monkeypatch):
     """No exports found → shows 'no exports found' for the table."""
     monkeypatch.chdir(dynamo_config)
     mock_session = MagicMock()
-    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[]):
+    with patch("aws_snapshot.commands.status.boto3.Session", return_value=mock_session):
+        with patch("aws_snapshot.commands.status._get_recent_exports", return_value=[]):
             result = runner.invoke(app, ["status", "--source", "toshi"])
 
     assert result.exit_code == 0
@@ -131,8 +131,8 @@ def test_status_dynamodb_completed_export(dynamo_config, monkeypatch):
     mock_session = MagicMock()
     mock_session.client.return_value = mock_client
 
-    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]):
+    with patch("aws_snapshot.commands.status.boto3.Session", return_value=mock_session):
+        with patch("aws_snapshot.commands.status._get_recent_exports", return_value=[mock_export]):
             result = runner.invoke(app, ["status", "--source", "toshi"])
 
     assert result.exit_code == 0
@@ -160,8 +160,8 @@ def test_status_dynamodb_failed_export_shows_reason(dynamo_config, monkeypatch):
     mock_session = MagicMock()
     mock_session.client.return_value = mock_client
 
-    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]):
+    with patch("aws_snapshot.commands.status.boto3.Session", return_value=mock_session):
+        with patch("aws_snapshot.commands.status._get_recent_exports", return_value=[mock_export]):
             result = runner.invoke(app, ["status", "--source", "toshi"])
 
     assert result.exit_code == 0
@@ -185,9 +185,9 @@ def test_status_s3_incremental_with_state(s3_incremental_config, monkeypatch):
         "objects_copied": 42,
     }
 
-    with patch("nzshm_backup.commands.status.read_run_state", return_value=mock_state):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-            with patch("nzshm_backup.commands.status.boto3.Session"):
+    with patch("aws_snapshot.commands.status.read_run_state", return_value=mock_state):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("aws_snapshot.commands.status.boto3.Session"):
                 result = runner.invoke(app, ["status", "--source", "ths"])
 
     assert result.exit_code == 0
@@ -200,9 +200,9 @@ def test_status_s3_incremental_no_state(s3_incremental_config, monkeypatch):
     """Incremental mode with no state file shows nothing for last run."""
     monkeypatch.chdir(s3_incremental_config)
 
-    with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-            with patch("nzshm_backup.commands.status.boto3.Session"):
+    with patch("aws_snapshot.commands.status.read_run_state", return_value=None):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("aws_snapshot.commands.status.boto3.Session"):
                 result = runner.invoke(app, ["status", "--source", "ths"])
 
     assert result.exit_code == 0
@@ -231,12 +231,12 @@ def test_status_s3_batch_with_jobs(s3_batch_config, monkeypatch):
         },
     }
 
-    with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
+    with patch("aws_snapshot.commands.status.read_run_state", return_value=None):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
             with patch(
-                "nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[mock_job]
+                "aws_snapshot.commands.status._get_recent_batch_jobs", return_value=[mock_job]
             ):
-                with patch("nzshm_backup.commands.status.boto3.Session"):
+                with patch("aws_snapshot.commands.status.boto3.Session"):
                     result = runner.invoke(app, ["status", "--source", "arkivalist"])
 
     assert result.exit_code == 0
@@ -248,10 +248,10 @@ def test_status_s3_batch_no_jobs(s3_batch_config, monkeypatch):
     """Batch mode with no jobs shows 'no batch jobs found'."""
     monkeypatch.chdir(s3_batch_config)
 
-    with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-            with patch("nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[]):
-                with patch("nzshm_backup.commands.status.boto3.Session"):
+    with patch("aws_snapshot.commands.status.read_run_state", return_value=None):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("aws_snapshot.commands.status._get_recent_batch_jobs", return_value=[]):
+                with patch("aws_snapshot.commands.status.boto3.Session"):
                     result = runner.invoke(app, ["status", "--source", "arkivalist"])
 
     assert result.exit_code == 0
@@ -269,10 +269,10 @@ def test_status_s3_batch_running_without_job_shows_preparing_message(s3_batch_co
         "objects_in_manifest": 0,
     }
 
-    with patch("nzshm_backup.commands.status.read_run_state", return_value=running_state):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-            with patch("nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[]):
-                with patch("nzshm_backup.commands.status.boto3.Session"):
+    with patch("aws_snapshot.commands.status.read_run_state", return_value=running_state):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("aws_snapshot.commands.status._get_recent_batch_jobs", return_value=[]):
+                with patch("aws_snapshot.commands.status.boto3.Session"):
                     result = runner.invoke(app, ["status", "--source", "arkivalist"])
 
     assert result.exit_code == 0
@@ -288,8 +288,8 @@ def test_status_json_output_structure(dynamo_config, monkeypatch):
     """--output json produces valid JSON keyed by source alias."""
     monkeypatch.chdir(dynamo_config)
     mock_session = MagicMock()
-    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[]):
+    with patch("aws_snapshot.commands.status.boto3.Session", return_value=mock_session):
+        with patch("aws_snapshot.commands.status._get_recent_exports", return_value=[]):
             result = runner.invoke(app, ["status", "--output", "json"])
 
     assert result.exit_code == 0
@@ -316,11 +316,11 @@ def test_status_json_output_includes_s3_batch_jobs(s3_batch_config, monkeypatch)
 
     mock_session = MagicMock()
     mock_session.client.return_value = MagicMock()
-    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-            with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
+    with patch("aws_snapshot.commands.status.boto3.Session", return_value=mock_session):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("aws_snapshot.commands.status.read_run_state", return_value=None):
                 with patch(
-                    "nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[mock_job]
+                    "aws_snapshot.commands.status._get_recent_batch_jobs", return_value=[mock_job]
                 ):
                     result = runner.invoke(
                         app, ["status", "--source", "arkivalist", "--output", "json"]
@@ -380,10 +380,10 @@ def test_status_text_with_job_id_prints_selected_job(s3_batch_config, monkeypatc
         mock_s3control if svc == "s3control" else MagicMock()
     )
 
-    with patch("nzshm_backup.commands.status.boto3.Session", return_value=mock_session):
-        with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-            with patch("nzshm_backup.commands.status.read_run_state", return_value=None):
-                with patch("nzshm_backup.commands.status._get_recent_batch_jobs", return_value=[]):
+    with patch("aws_snapshot.commands.status.boto3.Session", return_value=mock_session):
+        with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+            with patch("aws_snapshot.commands.status.read_run_state", return_value=None):
+                with patch("aws_snapshot.commands.status._get_recent_batch_jobs", return_value=[]):
                     result = runner.invoke(
                         app,
                         [
@@ -408,8 +408,8 @@ def test_status_text_with_job_id_prints_selected_job(s3_batch_config, monkeypatc
 
 def test_get_status_dict_returns_dynamodb_data(dynamo_config, monkeypatch):
     """get_status_dict assembles per-source DynamoDB export data without CLI."""
-    from nzshm_backup.commands.status import get_status_dict
-    from nzshm_backup.config import load_config
+    from aws_snapshot.commands.status import get_status_dict
+    from aws_snapshot.config import load_config
 
     monkeypatch.chdir(dynamo_config)
     config = load_config("backup-config.yaml")
@@ -420,8 +420,8 @@ def test_get_status_dict_returns_dynamodb_data(dynamo_config, monkeypatch):
         "ExportTime": TS,
     }
 
-    with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[mock_export]):
+    with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+        with patch("aws_snapshot.commands.status._get_recent_exports", return_value=[mock_export]):
             out = get_status_dict(["toshi"], config, mock_session)
 
     assert "toshi" in out
@@ -432,15 +432,15 @@ def test_get_status_dict_returns_dynamodb_data(dynamo_config, monkeypatch):
 
 def test_get_status_dict_no_typer_echo(dynamo_config, monkeypatch, capsys):
     """get_status_dict must not emit any stdout/stderr — pure data return."""
-    from nzshm_backup.commands.status import get_status_dict
-    from nzshm_backup.config import load_config
+    from aws_snapshot.commands.status import get_status_dict
+    from aws_snapshot.config import load_config
 
     monkeypatch.chdir(dynamo_config)
     config = load_config("backup-config.yaml")
     mock_session = MagicMock()
 
-    with patch("nzshm_backup.commands.status.get_account_id", return_value=ACCOUNT_ID):
-        with patch("nzshm_backup.commands.status._get_recent_exports", return_value=[]):
+    with patch("aws_snapshot.commands.status.get_account_id", return_value=ACCOUNT_ID):
+        with patch("aws_snapshot.commands.status._get_recent_exports", return_value=[]):
             get_status_dict(["toshi"], config, mock_session)
 
     captured = capsys.readouterr()

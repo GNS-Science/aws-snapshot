@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nzshm_backup.notifications import slack, sns
+from aws_snapshot.notifications import slack, sns
 
 # ---------------------------------------------------------------------------
 # Slack

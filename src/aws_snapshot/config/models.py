@@ -92,7 +92,7 @@ class HealthReportConfig(BaseModel):
     """Tunable thresholds and rotation for the daily health report.
 
     All fields are optional with defaults that match the previously-
-    hardcoded values in src/nzshm_backup/health_report.py.
+    hardcoded values in src/aws_snapshot/health_report.py.
 
     Map keys are ISO weekday numbers (0=Mon … 6=Sun). Add or remove
     entries to change which large source gets restore-tested on which

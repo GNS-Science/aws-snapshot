@@ -8,9 +8,9 @@ import pytest
 import yaml
 from moto import mock_aws
 
-from nzshm_backup.config import ConfigModel, load_config, save_config
-from nzshm_backup.config.loader import load_config_from_ssm
-from nzshm_backup.config.models import RetentionConfig, S3BucketConfig, SourceConfig
+from aws_snapshot.config import ConfigModel, load_config, save_config
+from aws_snapshot.config.loader import load_config_from_ssm
+from aws_snapshot.config.models import RetentionConfig, S3BucketConfig, SourceConfig
 
 
 @pytest.fixture
@@ -255,7 +255,7 @@ def test_load_config_from_ssm_not_found(aws_credentials):
 
 def test_config_push_uploads_to_ssm(aws_credentials, cli_runner, temp_config_file):
     """push command uploads config to SSM as JSON."""
-    from nzshm_backup.commands.config import app
+    from aws_snapshot.commands.config import app
 
     with mock_aws():
         result = cli_runner.invoke(app, ["push", str(temp_config_file), "--stage", "dev"])
@@ -273,7 +273,7 @@ def test_config_push_auto_upgrades_to_advanced_tier_when_oversized(
     aws_credentials, cli_runner, temp_config_file
 ):
     """When the serialised config exceeds 4 KB, push uses Advanced tier."""
-    from nzshm_backup.commands.config import app
+    from aws_snapshot.commands.config import app
 
     # Inject enough source aliases to push the JSON past 4096 bytes.
     cfg = yaml.safe_load(temp_config_file.read_text())
@@ -297,7 +297,7 @@ def test_config_push_auto_upgrades_to_advanced_tier_when_oversized(
 
 def test_config_push_uses_standard_tier_when_small(aws_credentials, cli_runner, temp_config_file):
     """A small (default fixture) config stays on Standard tier."""
-    from nzshm_backup.commands.config import app
+    from aws_snapshot.commands.config import app
 
     with mock_aws():
         result = cli_runner.invoke(app, ["push", str(temp_config_file), "--stage", "dev"])
@@ -307,7 +307,7 @@ def test_config_push_uses_standard_tier_when_small(aws_credentials, cli_runner, 
 
 def test_config_push_dry_run(aws_credentials, cli_runner, temp_config_file):
     """push --dry-run prints a preview but does NOT create the SSM parameter."""
-    from nzshm_backup.commands.config import app
+    from aws_snapshot.commands.config import app
 
     with mock_aws():
         result = cli_runner.invoke(
@@ -325,7 +325,7 @@ def test_config_push_dry_run(aws_credentials, cli_runner, temp_config_file):
 
 def test_config_pull_shows_config(aws_credentials, cli_runner, ssm_config_json):
     """pull command fetches config from SSM and prints it as YAML."""
-    from nzshm_backup.commands.config import app
+    from aws_snapshot.commands.config import app
 
     with mock_aws():
         ssm = boto3.client("ssm", region_name="ap-southeast-2")

@@ -4,7 +4,7 @@ from datetime import timedelta, timezone
 
 import pytest
 
-from nzshm_backup.time_utils import TZ_ABBREV, parse_datetime
+from aws_snapshot.time_utils import TZ_ABBREV, parse_datetime
 
 NZST = timezone(timedelta(hours=12))
 NZDT = timezone(timedelta(hours=13))

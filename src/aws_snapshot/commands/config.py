@@ -7,13 +7,13 @@ from pathlib import Path
 import boto3
 import typer
 
-from nzshm_backup.config import ConfigModel, load_config, save_config
-from nzshm_backup.config.loader import (
+from aws_snapshot.config import ConfigModel, load_config, save_config
+from aws_snapshot.config.loader import (
     CONFIG_PATH_ENV_VAR,
     DEFAULT_CONFIG_PATH,
     load_config_from_ssm,
 )
-from nzshm_backup.state import get_state
+from aws_snapshot.state import get_state
 
 app = typer.Typer()
 

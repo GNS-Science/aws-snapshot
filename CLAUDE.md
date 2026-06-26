@@ -38,9 +38,9 @@ uv run backup notifications show                           # SNS subscription st
 
 ## Architecture
 
-**Package:** `src/nzshm_backup/` (src-layout, installed as `nzshm-backup`)
+**Package:** `src/aws_snapshot/` (src-layout, installed as `aws-snapshot` — renamed from `nzshm-backup` per migration issue #48)
 
-**Entry point:** `src/nzshm_backup/cli.py`
+**Entry point:** `src/aws_snapshot/cli.py`
 
 **Key modules:**
 - `commands/` — one file per subcommand group: `run_backup`, `status`, `schedule`,

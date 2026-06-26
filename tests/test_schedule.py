@@ -9,8 +9,8 @@ import pytest
 from moto import mock_aws
 from typer.testing import CliRunner
 
-from nzshm_backup.commands.schedule import app
-from nzshm_backup.state import AppState
+from aws_snapshot.commands.schedule import app
+from aws_snapshot.state import AppState
 
 REGION = "ap-southeast-2"
 runner = CliRunner()
@@ -93,7 +93,7 @@ def test_show_json_includes_target_metadata(events_client):
         ],
     )
 
-    with patch("nzshm_backup.commands.schedule.get_state", return_value=AppState(output="json")):
+    with patch("aws_snapshot.commands.schedule.get_state", return_value=AppState(output="json")):
         result = runner.invoke(app, ["show"])
     assert result.exit_code == 0
 
@@ -169,7 +169,7 @@ def test_health_reports_codebuild_target_and_latest_build():
 
     session.client.side_effect = client
 
-    with patch("nzshm_backup.commands.schedule.boto3.Session", return_value=session):
+    with patch("aws_snapshot.commands.schedule.boto3.Session", return_value=session):
         result = runner.invoke(app, ["health", "--source", "ths", "--frequency", "weekly"])
 
     assert result.exit_code == 0
@@ -222,7 +222,7 @@ def test_add_health_report_uses_fixed_rule_name_and_payload(events_client):
         Code={"ZipFile": b"def handler(e,c): pass"},
     )
 
-    with patch("nzshm_backup.commands.schedule.load_config") as mock_load:
+    with patch("aws_snapshot.commands.schedule.load_config") as mock_load:
         cfg = MagicMock()
         cfg.general.lambda_arn = fn["FunctionArn"]
         mock_load.return_value = cfg

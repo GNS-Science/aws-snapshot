@@ -5,11 +5,11 @@ from typing import Any
 
 import boto3
 
-from nzshm_backup.backup_engine import run_backup_source
-from nzshm_backup.config.loader import load_config, load_config_from_env, load_config_from_ssm
-from nzshm_backup.config.models import ConfigModel
-from nzshm_backup.lambda_schema import BackupTask
-from nzshm_backup.logging_config import setup_logging
+from aws_snapshot.backup_engine import run_backup_source
+from aws_snapshot.config.loader import load_config, load_config_from_env, load_config_from_ssm
+from aws_snapshot.config.models import ConfigModel
+from aws_snapshot.lambda_schema import BackupTask
+from aws_snapshot.logging_config import setup_logging
 
 logger = setup_logging(json_format=True)
 
@@ -73,8 +73,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if task.task_type == "health_report":
             import os
 
-            from nzshm_backup import health_report
-            from nzshm_backup.event_log import append_event
+            from aws_snapshot import health_report
+            from aws_snapshot.event_log import append_event
 
             data = health_report.build_report(session, config)
             topic_arn = os.environ.get("BACKUP_REPORTS_TOPIC_ARN")

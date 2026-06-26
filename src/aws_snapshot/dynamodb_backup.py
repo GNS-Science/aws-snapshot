@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import boto3
 from botocore.exceptions import ClientError
 
-from nzshm_backup.s3_backup import apply_lifecycle_policy, bucket_exists, get_account_id, get_region
+from aws_snapshot.s3_backup import apply_lifecycle_policy, bucket_exists, get_account_id, get_region
 
 if TYPE_CHECKING:
     # mypy_boto3_s3 is pulled in transitively via aws-sam-cli (dev dep).

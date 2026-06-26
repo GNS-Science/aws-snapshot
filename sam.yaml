@@ -188,7 +188,7 @@ Resources:
     Properties:
       FunctionName: !Sub ${ServiceName}-${Stage}-pitr-watcher
       Description: Re-enable PITR on DynamoDB tables after restore completes
-      Handler: nzshm_backup.lambda_pitr_watcher.handler
+      Handler: aws_snapshot.lambda_pitr_watcher.handler
       Role: !GetAtt BackupLambdaRole.Arn
       MemorySize: 256
       Timeout: 60
@@ -225,7 +225,7 @@ Resources:
     Properties:
       FunctionName: !Sub ${ServiceName}-${Stage}-backup
       Description: Backup orchestration for NSHM datasets
-      Handler: nzshm_backup.lambda_handler.handler
+      Handler: aws_snapshot.lambda_handler.handler
       Role: !GetAtt BackupLambdaRole.Arn
       LoggingConfig:
         LogGroup: !Ref BackupLogGroup
@@ -239,7 +239,7 @@ Resources:
     Properties:
       FunctionName: !Sub ${ServiceName}-${Stage}-alarm-bridge
       Description: SNS -> Slack bridge for backup alerts
-      Handler: nzshm_backup.lambda_alarm_bridge.handler
+      Handler: aws_snapshot.lambda_alarm_bridge.handler
       Role: !GetAtt BackupLambdaRole.Arn
       MemorySize: 256
       Timeout: 30

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from nzshm_backup import lambda_alarm_bridge as ab
+from aws_snapshot import lambda_alarm_bridge as ab
 
 
 def _sns_event(message: dict) -> dict:
