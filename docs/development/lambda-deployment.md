@@ -189,3 +189,19 @@ sam delete --stack-name <your-stack-name> --no-prompts
 ```
 
 Then re-attempt `sam deploy`.
+
+**Deployed Lambda errors at cold-start with `Runtime.ImportModuleError: Unable to import module 'aws_snapshot.lambda_handler': No module named 'aws_snapshot'`**
+The deployed artefact is the source tree itself, not the Makefile's clean
+build output. Almost always caused by `template_file = "sam.yaml"` being
+placed under `[default.global.parameters]` in `samconfig.toml`. A *global*
+`template_file` applies to `sam deploy` too, overriding its default of
+picking up `.aws-sam/build/template.yaml` (the build-output template, which
+points each function at its own clean build dir). `sam deploy` then
+uploads from the source `CodeUri: ./` — packaging the entire repo into the
+Lambda artefact. Since the package lives at `src/aws_snapshot/`, not at
+artefact root, the import fails.
+
+Fix: move `template_file = "sam.yaml"` to `[default.build.parameters]`
+(see `samconfig.example.toml`), rebuild (`rm -rf .aws-sam && make sam-build`),
+and redeploy. Production incident on 2026-06-26 13:00 NZST traced to this
+trap (PR #55 introduced the global setting; PR #56 fixed it).
