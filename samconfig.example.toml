@@ -10,11 +10,6 @@
 
 version = 0.1
 
-[default.global.parameters]
-# Template file is sam.yaml (not the SAM-default template.yaml) — see
-# https://github.com/GNS-Science/nzshm-backup/pull/51#discussion_r3464484646
-template_file = "sam.yaml"
-
 [default]
 [default.deploy.parameters]
 stack_name      = "nzshm-backup-service-prod"
@@ -30,6 +25,18 @@ fail_on_empty_changeset = false
 parameter_overrides = "Stage=prod ServiceName=nzshm-backup-service BatchRoleArn=arn:aws:iam::123456789012:role/nzshm-backup-batch-role SlackWebhookSecretName=backup-slack-webhook"
 
 [default.build.parameters]
+# Template file is sam.yaml, not SAM's default template.yaml — see
+# https://github.com/GNS-Science/nzshm-backup/pull/51#discussion_r3464484646
+#
+# This must live under [default.build.parameters], NOT
+# [default.global.parameters]. A global template_file is honored by
+# `sam deploy` too, which then bypasses `.aws-sam/build/template.yaml`
+# (the output of `sam build`) and uploads from the source `CodeUri: ./`
+# instead — packaging the entire repo into the Lambda artefact. Lambda
+# then errors at cold-start with "No module named '<package>'" because
+# the source code lives in `src/<package>/`, not at root. See PR #56
+# for the post-mortem on the trap.
+template_file = "sam.yaml"
 use_container = true
 
 # Optional: a separate sandbox profile for non-prod testing.
