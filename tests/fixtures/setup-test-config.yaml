@@ -1,0 +1,27 @@
+# Test fixture for tests/test_setup_command.py — minimum config to
+# exercise `backup setup lifecycle` against the toshi source.
+# Account IDs are pinned to the values the existing tests assert on
+# (210987654321 source, 345678901234 caller).
+
+general:
+  region: ap-southeast-2
+  environment: production
+  s3_batch_role_arn: arn:aws:iam::345678901234:role/test-batch-role
+  tags:
+    Project: NSHM
+    ManagedBy: backup-cli
+
+sources:
+  toshi:
+    display_name: "toshi (test fixture)"
+    source_account_id: '210987654321'
+    source_account_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-reader
+    source_account_restore_role_arn: arn:aws:iam::210987654321:role/nzshm-backup-restore
+    s3_buckets:
+      - arn: arn:aws:s3:::nzshm22-toshi-api-prod
+        label: api-prod
+    dynamodb_tables:
+      - arn:aws:dynamodb:ap-southeast-2:210987654321:table/ToshiFileObject-PROD
+    dynamodb_export_format: DYNAMODB_JSON
+    use_s3_batch: true
+    batch_manifest_mode: inventory
