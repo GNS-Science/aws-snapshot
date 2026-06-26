@@ -56,7 +56,7 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
-    logger = logging.getLogger("nzshm_backup")
+    logger = logging.getLogger("aws_snapshot")
     logger.setLevel(level)
 
     if verbose:
@@ -75,11 +75,11 @@ def setup_logging(
     return logger
 
 
-def get_logger(name: str = "nzshm_backup") -> logging.Logger:
+def get_logger(name: str = "aws_snapshot") -> logging.Logger:
     """Get logger instance.
 
     Args:
-        name: Logger name (default: nzshm_backup)
+        name: Logger name (default: aws_snapshot)
 
     Returns:
         Logger instance

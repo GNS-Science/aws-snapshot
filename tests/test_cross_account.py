@@ -4,7 +4,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from nzshm_backup.s3_backup import (
+from aws_snapshot.s3_backup import (
     backup_source,
     get_cross_account_session,
     sync_bucket,
@@ -185,7 +185,7 @@ def test_backup_source_no_source_session_unchanged(aws_session, s3_client):
 
 def test_config_source_account_role_arn_optional():
     """source_account_role_arn defaults to None (same-account backup)."""
-    from nzshm_backup.config.models import SourceConfig
+    from aws_snapshot.config.models import SourceConfig
 
     sc = SourceConfig(display_name="test", s3_buckets=[], dynamodb_tables=[])
     assert sc.source_account_role_arn is None
@@ -193,7 +193,7 @@ def test_config_source_account_role_arn_optional():
 
 def test_config_source_account_role_arn_set():
     """source_account_role_arn accepts a valid ARN."""
-    from nzshm_backup.config.models import SourceConfig
+    from aws_snapshot.config.models import SourceConfig
 
     sc = SourceConfig(
         display_name="arkivalist",

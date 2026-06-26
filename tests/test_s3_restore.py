@@ -5,7 +5,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from nzshm_backup.s3_restore import (
+from aws_snapshot.s3_restore import (
     RestoreResult,
     apply_restore_target_policy,
     make_restore_bucket_name,

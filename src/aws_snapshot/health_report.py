@@ -39,22 +39,22 @@ from typing import Any, Literal
 import boto3
 from botocore.exceptions import ClientError
 
-from nzshm_backup.athena_inventory import (
+from aws_snapshot.athena_inventory import (
     count_delta,
     divergence_counts,
     divergence_sample_keys,
 )
-from nzshm_backup.commands.status import get_status_dict
-from nzshm_backup.commands.test import RestoreTestResult, restore_test_source
-from nzshm_backup.inventory_state import inventory_health_for_bucket_pair
-from nzshm_backup.notifications.slack import (
+from aws_snapshot.commands.status import get_status_dict
+from aws_snapshot.commands.test import RestoreTestResult, restore_test_source
+from aws_snapshot.inventory_state import inventory_health_for_bucket_pair
+from aws_snapshot.notifications.slack import (
     SlackDeliveryError,
     resolve_webhook_url,
     send_slack,
 )
-from nzshm_backup.notifications.sns import SnsDeliveryError, publish_report
-from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
-from nzshm_backup.time_utils import nz_today
+from aws_snapshot.notifications.sns import SnsDeliveryError, publish_report
+from aws_snapshot.s3_backup import get_account_id, get_cross_account_session
+from aws_snapshot.time_utils import nz_today
 
 logger = logging.getLogger(__name__)
 

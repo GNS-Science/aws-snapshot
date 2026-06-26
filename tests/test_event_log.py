@@ -8,7 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from nzshm_backup.event_log import _event_key, append_event, read_events
+from aws_snapshot.event_log import _event_key, append_event, read_events
 
 REGION = "ap-southeast-2"
 BUCKET = "test-backup-bucket"

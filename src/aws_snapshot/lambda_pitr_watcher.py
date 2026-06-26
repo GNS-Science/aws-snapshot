@@ -5,13 +5,13 @@ from typing import Any
 
 import boto3
 
-from nzshm_backup.config.loader import load_config, load_config_from_env, load_config_from_ssm
-from nzshm_backup.config.models import ConfigModel
-from nzshm_backup.dynamodb_restore import PITR_WATCHER_RULE_NAME
-from nzshm_backup.event_log import append_event
-from nzshm_backup.logging_config import setup_logging
-from nzshm_backup.restore_state import read_pending_restores, write_pending_restores
-from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
+from aws_snapshot.config.loader import load_config, load_config_from_env, load_config_from_ssm
+from aws_snapshot.config.models import ConfigModel
+from aws_snapshot.dynamodb_restore import PITR_WATCHER_RULE_NAME
+from aws_snapshot.event_log import append_event
+from aws_snapshot.logging_config import setup_logging
+from aws_snapshot.restore_state import read_pending_restores, write_pending_restores
+from aws_snapshot.s3_backup import get_account_id, get_cross_account_session
 
 logger = setup_logging(json_format=True)
 

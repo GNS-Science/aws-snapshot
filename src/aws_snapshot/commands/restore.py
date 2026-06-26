@@ -6,25 +6,25 @@ import boto3
 import typer
 from botocore.exceptions import ClientError
 
-from nzshm_backup.config import load_config
-from nzshm_backup.dynamodb_restore import (
+from aws_snapshot.config import load_config
+from aws_snapshot.dynamodb_restore import (
     PITR_WATCHER_RULE_NAME,
     describe_restore_status,
     make_restore_table_name,
     restore_dynamodb_table,
 )
-from nzshm_backup.event_log import append_event
-from nzshm_backup.restore_state import add_pending_restore
-from nzshm_backup.s3_backup import get_account_id, get_cross_account_session
-from nzshm_backup.s3_batch import batch_restore_bucket, list_recent_batch_jobs
-from nzshm_backup.s3_restore import (
+from aws_snapshot.event_log import append_event
+from aws_snapshot.restore_state import add_pending_restore
+from aws_snapshot.s3_backup import get_account_id, get_cross_account_session
+from aws_snapshot.s3_batch import batch_restore_bucket, list_recent_batch_jobs
+from aws_snapshot.s3_restore import (
     _ensure_restore_target,
     apply_restore_target_policy,
     make_restore_bucket_name,
     restore_s3_bucket,
 )
-from nzshm_backup.state import get_state
-from nzshm_backup.time_utils import parse_datetime
+from aws_snapshot.state import get_state
+from aws_snapshot.time_utils import parse_datetime
 
 app = typer.Typer()
 
@@ -79,7 +79,7 @@ def _detect_latest_restore_point(
     the latest time at which ALL S3 data was known good, suitable as a DynamoDB
     PITR target for a consistent restore.
     """
-    from nzshm_backup.run_state import read_run_state
+    from aws_snapshot.run_state import read_run_state
 
     checked_ats: list[str] = []
 

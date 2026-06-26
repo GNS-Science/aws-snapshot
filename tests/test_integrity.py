@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import boto3
 from moto import mock_aws
 
-from nzshm_backup.integrity import (
+from aws_snapshot.integrity import (
     IntegrityResult,
     ObjectDiff,
     check_bucket_integrity,

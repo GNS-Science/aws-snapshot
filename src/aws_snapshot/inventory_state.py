@@ -8,7 +8,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-from nzshm_backup.s3_backup import get_account_id
+from aws_snapshot.s3_backup import get_account_id
 
 
 def _expected_prefix(source_alias: str, side: str, bucket: str, root: str = "inventory") -> str:

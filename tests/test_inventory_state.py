@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from nzshm_backup.inventory_state import _latest_object_ts
+from aws_snapshot.inventory_state import _latest_object_ts
 
 
 def _page(contents: list[dict]) -> dict:

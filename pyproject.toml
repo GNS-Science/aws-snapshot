@@ -1,9 +1,9 @@
 [project]
-name = "nzshm-backup"
+name = "aws-snapshot"
 dynamic = ["version"]
-description = "AWS-native backup solution for NSHM datasets"
+description = "Point-in-time snapshots for S3 buckets and DynamoDB tables."
 authors = [
-    {name = "NSHM DevOps Team", email = "admin@gns-nsdm.org.nz"}
+    {name = "Chris B Chamberlain", email = "chrisbc@artisan.co.nz"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-backup = "nzshm_backup.cli:app"
+backup = "aws_snapshot.cli:app"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -52,10 +52,10 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
-version-file = "src/nzshm_backup/_version.py"
+version-file = "src/aws_snapshot/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nzshm_backup"]
+packages = ["src/aws_snapshot"]
 
 [tool.uv]
 exclude-newer = "1 week"
@@ -84,4 +84,4 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
-addopts = "--cov=nzshm_backup --cov-report=term-missing"
+addopts = "--cov=aws_snapshot --cov-report=term-missing"

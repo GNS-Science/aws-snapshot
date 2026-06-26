@@ -5,7 +5,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from nzshm_backup.s3_backup import (
+from aws_snapshot.s3_backup import (
     apply_lifecycle_policy,
     backup_source,
     bucket_exists,
@@ -103,7 +103,7 @@ def test_bucket_is_ours_false_untagged(s3_client):
 
 def test_ensure_backup_bucket_ready_existing_ours(s3_client):
     """ensure_backup_bucket_ready proceeds without error if bucket is ours."""
-    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+    from aws_snapshot.s3_backup import ensure_backup_bucket_ready
 
     bucket_name = "test-managed-bucket"
     create_backup_bucket(s3_client, bucket_name, "ap-southeast-2", "123456789012")
@@ -115,7 +115,7 @@ def test_ensure_backup_bucket_ready_existing_ours(s3_client):
 
 def test_ensure_backup_bucket_ready_existing_foreign(s3_client):
     """ensure_backup_bucket_ready raises if bucket exists but is not ours."""
-    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+    from aws_snapshot.s3_backup import ensure_backup_bucket_ready
 
     bucket_name = "test-foreign-bucket"
     s3_client.create_bucket(
@@ -242,7 +242,7 @@ def test_enable_versioning(s3_client):
 
 def test_apply_lifecycle_policy_includes_noncurrent_expiration(s3_client):
     """Lifecycle rule includes NoncurrentVersionExpiration when version_retention_days > 0."""
-    from nzshm_backup.s3_backup import LifecycleConfig
+    from aws_snapshot.s3_backup import LifecycleConfig
 
     bucket_name = "test-versioned-lifecycle-bucket"
     s3_client.create_bucket(
@@ -260,7 +260,7 @@ def test_apply_lifecycle_policy_includes_noncurrent_expiration(s3_client):
 
 def test_apply_lifecycle_policy_no_noncurrent_expiration_when_zero(s3_client):
     """NoncurrentVersionExpiration is omitted when version_retention_days=0 (retain forever)."""
-    from nzshm_backup.s3_backup import LifecycleConfig
+    from aws_snapshot.s3_backup import LifecycleConfig
 
     bucket_name = "test-no-expiry-bucket"
     s3_client.create_bucket(
@@ -277,7 +277,7 @@ def test_apply_lifecycle_policy_no_noncurrent_expiration_when_zero(s3_client):
 
 def test_ensure_backup_bucket_ready_enables_versioning(s3_client):
     """Newly created backup bucket has versioning enabled."""
-    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+    from aws_snapshot.s3_backup import ensure_backup_bucket_ready
 
     bucket_name = "test-new-backup-bucket"
     session = boto3.Session(region_name="ap-southeast-2")
@@ -291,7 +291,7 @@ def test_ensure_backup_bucket_ready_versioning_access_denied_has_remediation(s3_
     """AccessDenied on PutBucketVersioning raises a remediation-focused error."""
     from unittest.mock import patch
 
-    from nzshm_backup.s3_backup import ensure_backup_bucket_ready
+    from aws_snapshot.s3_backup import ensure_backup_bucket_ready
 
     bucket_name = "test-new-backup-bucket-perm"
     session = boto3.Session(region_name="ap-southeast-2")
