@@ -263,6 +263,78 @@ A handful worth recording for future operational migrations.
 
 ---
 
+## Postscript — 2026-06-26 follow-up + samconfig trap
+
+Two days after the cutover. Three things landed in one session:
+
+### The remaining PR queue cleared
+
+PRs #50 (identifier scrub), #52 (brand-string scrub), #53
+(package rename `nzshm-backup` → `aws-snapshot`), and #55
+(`serverless.yml` removal + @voj's PR #51 review feedback) all
+merged. The repo is now genuinely OSS-shaped: no Node toolchain,
+no GNS account IDs or operator identities in public docs, no
+`nzshm-backup` project-name strings in user-facing prose, and
+the Python package is `aws_snapshot` under the `aws-snapshot`
+PyPI namespace. **The cutover-safety "one clean daily cycle"
+gate landed two greens** (2026-06-25 and 2026-06-26 morning
+fires), which unblocked PR #55's `serverless.yml` deletion.
+
+### Deployed Lambda synced with the renamed package
+
+A code-only `sam deploy` to update the deployed Lambda artefacts
+from the (still-running) pre-rename `nzshm_backup` bundle to
+the new `aws_snapshot` bundle. The CFN stack was structurally
+unchanged — only function code hashes differed. Verified via
+dry-run smoke test.
+
+### A new lesson: samconfig `template_file` scope matters
+
+The first redeploy attempt **failed**. Diagnostic:
+
+- PR #55 added `template_file = "sam.yaml"` in
+  `[default.global.parameters]` of `samconfig.example.toml`
+  so SAM CLI would discover the renamed-from-`template.yaml`
+  template file.
+- *Global* parameters are honored by `sam deploy` too — not just
+  `sam build`. `sam deploy`'s default is to use
+  `.aws-sam/build/template.yaml`, the build-output template
+  with `CodeUri` rewritten to point at each function's clean
+  build directory. With `template_file` set globally,
+  `sam deploy` instead used the source `sam.yaml` with
+  `CodeUri: ./` — and uploaded the entire source tree as the
+  Lambda artefact.
+- Lambda errored at cold-start with
+  `Runtime.ImportModuleError: Unable to import module 'aws_snapshot.lambda_handler': No module named 'aws_snapshot'`
+  because the package lives at `src/aws_snapshot/`, not at the
+  (would-be) artefact root.
+- Fixed in PR #56 by moving `template_file = "sam.yaml"` to
+  `[default.build.parameters]`. The redeploy after that succeeded.
+
+This is the **first real-world fire of the #41 layered
+alarms post-cutover**. Both `lambda-errors-prod` and
+`lambda-log-errors-prod` tripped within ~5 minutes, posted to
+Slack via the alarm-bridge, and auto-cleared once PR #56's fix
+was applied. The whole observability stack worked end-to-end on
+its first real test. Production impact: zero — no scheduled
+fire was due in the affected window.
+
+### Sixth lesson (added to the list above)
+
+6. **Even after one successful real-stack deploy, a config
+   change between deploys can re-introduce trap conditions.**
+   The original cutover (Activity B) deployed cleanly because
+   `template_file` was at its default; PR #55 changed that
+   default in pursuit of a renamed template file (@voj's
+   review feedback) and the change wasn't re-validated against
+   a real deploy. A general principle: changes to deploy
+   *configuration* (samconfig.toml shape, IAM policy scope,
+   build cache settings) deserve the same "verify against a
+   real stack before merging" gate as changes to the deploy
+   *template* itself.
+
+---
+
 *Maintained as a session record. New migration phases — PyPI
 publish, public docs deploy, additional cutovers — get their own
 dated sections appended here.*
