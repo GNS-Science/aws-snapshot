@@ -25,5 +25,11 @@ requirements.txt
 
 # Local config (contains account IDs and ARNs)
 backup-config.sandbox.yaml
+# Operator's production config (per-install GNS-specific values like
+# real source bucket names + IAM role ARNs). The authoritative copy
+# lives in the private nzshm-backup-ops shim repo; this gitignore
+# entry just prevents accidental re-tracking if someone has a working
+# copy in this repo's tree.
+backup-config.production.yaml
 
 audit.txt
