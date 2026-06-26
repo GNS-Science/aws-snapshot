@@ -11,7 +11,7 @@ Creates two roles:
                           PITR re-enable, and tag management.
 
 Account context:
-    Run this while authenticated to the SOURCE account (e.g. Arkivalist 816711409078).
+    Run this while authenticated to the SOURCE account (e.g. Arkivalist 456789012345).
 
 Usage (config-driven — recommended):
     python scripts/create-source-roles.py \
@@ -26,7 +26,7 @@ Usage (config-driven — recommended):
 
 Usage (explicit — for scripting or when config is unavailable):
     python scripts/create-source-roles.py \
-        --backup-account-id 595842668254 \
+        --backup-account-id 345678901234 \
         --s3-buckets my-source-bucket \
         --dynamodb-tables MyTable-PROD
 

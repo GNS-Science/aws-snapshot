@@ -76,7 +76,7 @@ Destinations follow the shim strategy in section 3a below.
 |---------------|--------|
 | `backup-config.production.yaml` | Move to `nzshm-backup-ops` (private); keep `backup-config.example.yaml` here as documented template |
 | `docs/PROD-DEPLOY-LOG.md` | Move to `nzshm-backup-ops` (private) |
-| Account IDs (`737696831915`, `461564345538`) | Replace with placeholders in remaining public docs; real values live only in `nzshm-backup-ops` |
+| Account IDs (`123456789012`, `210987654321`) | Replace with placeholders in remaining public docs; real values live only in `nzshm-backup-ops` |
 | Source names (`toshi`, `ths`, `weka`, `static`) | Replace with generic examples (`myapp`, `mydata`) in public docs; concrete names remain in `nzshm-backup-ops` runbooks |
 | Operator identities (emails, SSO start URL `gnsnz.awsapps.com`, `nshm-backup-admin` profile) | Remove from public docs entirely; live only in `nzshm-backup-ops` |
 | Serverless org `gnssciencenshm` | Removed with `serverless.yml` replacement (section 2) |

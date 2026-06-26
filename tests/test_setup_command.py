@@ -61,7 +61,7 @@ def test_setup_iam_source_roles_invokes_script():
 def test_setup_lifecycle_dry_run_lists_buckets_without_applying():
     fake_s3 = MagicMock()
     fake_sts = MagicMock()
-    fake_sts.get_caller_identity.return_value = {"Account": "595842668254"}
+    fake_sts.get_caller_identity.return_value = {"Account": "345678901234"}
     fake_session = MagicMock()
     fake_session.client.side_effect = lambda name: fake_sts if name == "sts" else fake_s3
 
@@ -80,10 +80,10 @@ def test_setup_lifecycle_dry_run_lists_buckets_without_applying():
 
     assert result.exit_code == 0, result.output
     assert "GLACIER_IR" in result.output
-    # Production config sets source_account_id=461564345538 for each source;
+    # Production config sets source_account_id=210987654321 for each source;
     # bucket names embed that, not the SSO/backup-account caller id.
-    assert "bb-toshi-s3-api-prod-ap-southeast-2-461564345538" in result.output
-    assert "bb-toshi-dynamo-ap-southeast-2-461564345538" in result.output
+    assert "bb-toshi-s3-api-prod-ap-southeast-2-210987654321" in result.output
+    assert "bb-toshi-dynamo-ap-southeast-2-210987654321" in result.output
     fake_s3.put_bucket_lifecycle_configuration.assert_not_called()
 
 
@@ -91,7 +91,7 @@ def test_setup_lifecycle_applies_to_existing_buckets():
     fake_s3 = MagicMock()
     fake_s3.head_bucket.return_value = {}  # bucket_exists returns True
     fake_sts = MagicMock()
-    fake_sts.get_caller_identity.return_value = {"Account": "595842668254"}
+    fake_sts.get_caller_identity.return_value = {"Account": "345678901234"}
     fake_session = MagicMock()
     fake_session.client.side_effect = lambda name: fake_sts if name == "sts" else fake_s3
 

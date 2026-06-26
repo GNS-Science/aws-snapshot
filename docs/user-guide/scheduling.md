@@ -151,7 +151,7 @@ the target. After deploying the Lambda:
 2. Add it to `backup-config.yaml`:
    ```yaml
    general:
-     lambda_arn: arn:aws:lambda:ap-southeast-2:595842668254:function:nzshm-backup-prod-backup
+     lambda_arn: arn:aws:lambda:ap-southeast-2:345678901234:function:nzshm-backup-prod-backup
    ```
 3. Re-run `backup schedule add` — it will register the target against the existing rule
 

@@ -114,10 +114,10 @@ def test_source_config_dynamodb_backup_bucket_name():
     bucket_name = source.get_dynamodb_backup_bucket_name(
         "arkivalist",
         "ap-southeast-2",
-        "816711409078",
+        "456789012345",
     )
 
-    assert bucket_name == "bb-arkivalist-dynamo-ap-southeast-2-816711409078"
+    assert bucket_name == "bb-arkivalist-dynamo-ap-southeast-2-456789012345"
     assert len(bucket_name) <= 63
 
 
@@ -158,7 +158,7 @@ def test_validate_source_account_id_required_with_role_arn():
             sources={
                 "arkivalist": SourceConfig(
                     display_name="Arkivalist",
-                    source_account_role_arn="arn:aws:iam::816711409078:role/nzshm-backup-reader",
+                    source_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
                 )
             }
         )
@@ -172,7 +172,7 @@ def test_validate_source_account_id_mismatch_raises():
                 "arkivalist": SourceConfig(
                     display_name="Arkivalist",
                     source_account_id="999999999999",
-                    source_account_role_arn="arn:aws:iam::816711409078:role/nzshm-backup-reader",
+                    source_account_role_arn="arn:aws:iam::456789012345:role/nzshm-backup-reader",
                 )
             }
         )

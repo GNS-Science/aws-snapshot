@@ -16,7 +16,7 @@ SSO profiles in `~/.aws/config` look like:
 [profile arkivalist-admin]
 sso_start_url = https://your-org.awsapps.com/start
 sso_region = ap-southeast-2
-sso_account_id = 816711409078
+sso_account_id = 456789012345
 sso_role_name = AdministratorAccess
 region = ap-southeast-2
 ```
@@ -160,8 +160,8 @@ aws sts get-caller-identity
 
 | Profile | Account ID | Purpose |
 |---------|-----------|---------|
-| *(your default)* | `595842668254` | Spike/backup account — Lambda runs here |
-| `arkivalist-admin` | `816711409078` | Arkivalist — cross-account backup demo |
+| *(your default)* | `345678901234` | Spike/backup account — Lambda runs here |
+| `arkivalist-admin` | `456789012345` | Arkivalist — cross-account backup demo |
 | *(prod profile)* | `210987654321` | NSHM production — toshi + ths (future) |
 
 ---

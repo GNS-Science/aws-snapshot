@@ -886,11 +886,11 @@ def test_resolve_topic_arn_constructs_from_session_when_no_overrides(monkeypatch
     session = MagicMock()
     session.region_name = "ap-southeast-2"
     sts = MagicMock()
-    sts.get_caller_identity.return_value = {"Account": "737696831915"}
+    sts.get_caller_identity.return_value = {"Account": "123456789012"}
     session.client.return_value = sts
 
     arn = _resolve_reports_topic_arn(None, session, "prod")
-    assert arn == "arn:aws:sns:ap-southeast-2:737696831915:nzshm-backup-reports-prod"
+    assert arn == "arn:aws:sns:ap-southeast-2:123456789012:nzshm-backup-reports-prod"
 
 
 def test_resolve_topic_arn_uses_stage_in_constructed_name(monkeypatch):

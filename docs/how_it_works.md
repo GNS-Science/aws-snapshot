@@ -148,8 +148,8 @@ accidentally writing into an unrelated bucket.
 
 | Data type | Bucket name pattern | Example |
 |-----------|-------------------|---------|
-| S3 source backup | `bb-{source-key}-s3-{label}-{region}-{source-account-id}` | `bb-arkivalist-s3-deploy-ap-southeast-2-816711409078` |
-| DynamoDB export | `bb-{source-key}-dynamo-{region}-{source-account-id}` | `bb-arkivalist-dynamo-ap-southeast-2-816711409078` |
+| S3 source backup | `bb-{source-key}-s3-{label}-{region}-{source-account-id}` | `bb-arkivalist-s3-deploy-ap-southeast-2-456789012345` |
+| DynamoDB export | `bb-{source-key}-dynamo-{region}-{source-account-id}` | `bb-arkivalist-dynamo-ap-southeast-2-456789012345` |
 
 `{source-key}` is the YAML key for the source (e.g. `arkivalist`, `toshi`).
 `{label}` is a short human-readable string set per-bucket in config — no MD5 truncation.
@@ -157,7 +157,7 @@ accidentally writing into an unrelated bucket.
 not the account running the backup Lambda. This means:
 
 - For same-account sources (toshi, ths) the two are identical.
-- For cross-account sources (e.g. Arkivalist, account `816711409078`) the bucket
+- For cross-account sources (e.g. Arkivalist, account `456789012345`) the bucket
   name embeds the source account, making it immediately clear which system the
   backup belongs to.
 
@@ -165,9 +165,9 @@ not the account running the backup Lambda. This means:
 
 | Source | Backup bucket |
 |--------|--------------|
-| `arkivalist` s3 bucket labelled `deploy` (account `816711409078`) | `bb-arkivalist-s3-deploy-ap-southeast-2-816711409078` |
-| DynamoDB tables for `arkivalist` source | `bb-arkivalist-dynamo-ap-southeast-2-816711409078` |
-| DynamoDB tables for `toshi` source (account `595842668254`) | `bb-toshi-dynamo-ap-southeast-2-595842668254` |
+| `arkivalist` s3 bucket labelled `deploy` (account `456789012345`) | `bb-arkivalist-s3-deploy-ap-southeast-2-456789012345` |
+| DynamoDB tables for `arkivalist` source | `bb-arkivalist-dynamo-ap-southeast-2-456789012345` |
+| DynamoDB tables for `toshi` source (account `345678901234`) | `bb-toshi-dynamo-ap-southeast-2-345678901234` |
 
 ## S3 lifecycle tiers
 

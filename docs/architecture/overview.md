@@ -25,7 +25,7 @@ a cross-account role to access source data in each **source account**. See
 
 ```mermaid
 graph TB
-    subgraph backup["Backup Account (595842668254)"]
+    subgraph backup["Backup Account (345678901234)"]
         EB["⏰ EventBridge\nScheduled rules"]
         L["λ backup Lambda\nnzshm-backup-dev"]
         SSM["🗂 SSM\n/nzshm-backup/dev/config"]
@@ -33,7 +33,7 @@ graph TB
         S3DY["🪣 DynamoDB Export Buckets\nbb-{source}-dynamo-…"]
     end
 
-    subgraph source["Source Account (e.g. 816711409078)"]
+    subgraph source["Source Account (e.g. 456789012345)"]
         READER["🔑 nzshm-backup-reader"]
         S3SRC["🪣 Source S3 Buckets"]
         DDB["📋 DynamoDB Tables\n(PITR enabled)"]
@@ -104,14 +104,14 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph backup["Backup Account (595842668254)"]
+    subgraph backup["Backup Account (345678901234)"]
         CLI["💻 backup restore run\n(CLI or Lambda)"]
         PW["λ pitr-watcher\n(rate: 5 min, idle when no restores)"]
         SSM2["🗂 SSM\n/nzshm-backup/pending-restores"]
         EB2["⏰ EventBridge\nnzshm-backup-pitr-watcher"]
     end
 
-    subgraph source["Source Account (e.g. 816711409078)"]
+    subgraph source["Source Account (e.g. 456789012345)"]
         RESTORE["🔑 nzshm-backup-restore"]
         DDB["📋 Source DynamoDB Tables"]
         DDB2["📋 Restored Tables\n(<name>-restore)"]
@@ -185,8 +185,8 @@ sequenceDiagram
 
 | Type | Pattern | Example |
 |------|---------|---------|
-| S3 backup | `bb-{source}-s3-{label}-{region}-{source-acct}` | `bb-arkivalist-s3-deploy-ap-southeast-2-816711409078` |
-| DynamoDB export | `bb-{source}-dynamo-{region}-{source-acct}` | `bb-arkivalist-dynamo-ap-southeast-2-816711409078` |
+| S3 backup | `bb-{source}-s3-{label}-{region}-{source-acct}` | `bb-arkivalist-s3-deploy-ap-southeast-2-456789012345` |
+| DynamoDB export | `bb-{source}-dynamo-{region}-{source-acct}` | `bb-arkivalist-dynamo-ap-southeast-2-456789012345` |
 
 All backup buckets are tagged `ManagedBy: nzshm-backup`, protected against deletion
 (no `s3:DeleteObject` in Lambda IAM), and tiered Standard (0–30d) → Glacier Instant

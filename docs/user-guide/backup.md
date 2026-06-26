@@ -81,7 +81,7 @@ To enable S3 Batch for a source, set in your config:
 
 ```yaml
 general:
-  s3_batch_role_arn: arn:aws:iam::595842668254:role/nzshm-s3-batch-role
+  s3_batch_role_arn: arn:aws:iam::345678901234:role/nzshm-s3-batch-role
 
 sources:
   toshi:
@@ -114,11 +114,11 @@ Backup buckets are named deterministically:
 - DynamoDB: `bb-{source}-dynamo-{region}-{account_id}`
 
 For example, with `source=toshi`, `label=api`, `region=ap-southeast-2`,
-`account=595842668254`:
+`account=345678901234`:
 
 ```
-bb-toshi-s3-api-ap-southeast-2-595842668254
-bb-toshi-dynamo-ap-southeast-2-595842668254
+bb-toshi-s3-api-ap-southeast-2-345678901234
+bb-toshi-dynamo-ap-southeast-2-345678901234
 ```
 
 ## Checking backup status

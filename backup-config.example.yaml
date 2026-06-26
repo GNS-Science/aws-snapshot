@@ -1,5 +1,5 @@
 # NSHM Backup Configuration Template
-# Copy to backup-config.yaml and fill in ACCOUNT_ID (prod: 461564345538)
+# Copy to backup-config.yaml and fill in ACCOUNT_ID (prod: 210987654321)
 
 general:
   region: ap-southeast-2
@@ -37,11 +37,11 @@ sources:
 
   arkivalist:
     display_name: "Arkivalist"
-    # Cross-account source: Arkivalist account 816711409078
-    # Backup Lambda (595842668254) assumes source_account_role_arn to read source data.
+    # Cross-account source: Arkivalist account 456789012345
+    # Backup Lambda (345678901234) assumes source_account_role_arn to read source data.
     # See docs/design/ACCOUNT_ISOLATION.md for IAM setup required.
-    source_account_id: null        # 816711409078
-    source_account_role_arn: null  # arn:aws:iam::816711409078:role/nzshm-backup-reader
+    source_account_id: null        # 456789012345
+    source_account_role_arn: null  # arn:aws:iam::456789012345:role/nzshm-backup-reader
     s3_buckets:
       # Serverless Framework deployment bucket (Lambda zips, CloudFormation templates).
       # Intentional choice: frequent deployments generate real ETag changes, making
@@ -49,11 +49,11 @@ sources:
       - arn: arn:aws:s3:::arkivalist-api-dev-serverlessdeploymentbucket-oztlskap4vrh
         label: deploy
     dynamodb_tables:
-      - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-events
-      - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-feedback
-      - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-invite-codes
-      - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-mission-events
-      - arn:aws:dynamodb:ap-southeast-2:816711409078:table/arkivalist-api-dev-mission-runs
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-events
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-feedback
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-invite-codes
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-mission-events
+      - arn:aws:dynamodb:ap-southeast-2:456789012345:table/arkivalist-api-dev-mission-runs
     dynamodb_export_format: DYNAMODB_JSON
     use_s3_batch: false  # small scale — direct copy_object is fine
 
