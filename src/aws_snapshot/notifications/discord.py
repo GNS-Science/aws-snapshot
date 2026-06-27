@@ -89,7 +89,14 @@ def send_discord(
     request = urllib.request.Request(
         webhook_url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # urllib's default User-Agent ("Python-urllib/3.x") is blocked by
+            # Discord's Cloudflare edge with error code 1010. Use a custom UA
+            # following Discord's documented format
+            # (https://discord.com/developers/docs/reference#user-agent).
+            "User-Agent": "aws-snapshot (https://github.com/GNS-Science/nzshm-backup, 0.1.0)",
+        },
         method="POST",
     )
     try:
