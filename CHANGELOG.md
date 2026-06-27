@@ -6,6 +6,10 @@ All notable changes to this project will be documented here.
 
 ### Observability
 
+- **Health report goes quiet about inventory when a source has opted out.** When `SourceConfig.inventory_enabled` is `false`, the daily report no longer surfaces `inventory_age=n/a` chips in any formatter (text / Slack / Discord) and no longer appends the `inventory disabled for this source — restore test is the dominant signal` info_note. The absence of those signals is itself the signal; restating it daily was noise. Inventory-enabled sources are unaffected.
+
+- **Process-signal classifier accepts `submitted` as a successful run state.** The S3-backup Lambda writes `last_run.status = "submitted"` after submitting the batch job and exits without polling for completion — so on installs without a watcher Lambda the state never advances. Treating `"submitted"` as terminal-successful (alongside `"completed"` and `"skipped"`) matches the Lambda's actual lifecycle. Statuses indicating in-progress or failed attempts (`"running"`, `"prepared"`, `"failed"`) still don't advance `last_backup_at`.
+
 - **Pre-inventory process signals in the daily health report.** The health report previously *required* the inventory pipeline (S3 Inventory + Athena + Glue) to render anything meaningful — installs that hadn't deployed inventory got the same `inventory_age=n/a` / `NoSuchBucket` walls every day. Now the report extracts pre-inventory process signals from the same `commands.status.get_status_dict` data it already collected, so a source can show "GREEN, last backup 2.1h ago, 31/31 DDB exports COMPLETED, 1000/1000 batch tasks succeeded" even without inventory.
   - New `ProcessSignals` dataclass on `SourceHealthData` carries last-backup timestamp, S3 batch job summaries, and DynamoDB export status counts per source.
   - `_extract_process_signals(status_dict, now)` derives the fields from existing status data — no extra AWS calls.
