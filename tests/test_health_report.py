@@ -1095,7 +1095,11 @@ def test_build_report_skips_athena_when_inventory_disabled(
     assert src.divergence is None
     assert src.count_delta is None
     assert src.overall == "green"  # no inventory ≠ red when opt-in is off
-    assert any("inventory disabled" in n for n in src.info_notes)
+    # Inventory-disabled sources surface NO inventory-related notes — the
+    # absence of inventory chips elsewhere is the signal. A daily
+    # "inventory disabled" info_note is daily noise without information.
+    assert not any("inventory" in n.lower() for n in src.info_notes)
+    assert not any("inventory" in n.lower() for n in src.notes)
 
 
 # ---------------------------------------------------------------------------

@@ -239,12 +239,21 @@ def _extract_process_signals(source_status: dict[str, Any], now_utc: datetime) -
 
         # ``last_run`` is the persisted run-state record written by
         # ``run_state.write_run_state`` — see run_state.py for the schema.
-        # Successful runs leave ``status`` as "completed" or "skipped"
-        # ("skipped" = no source changes, still a successful poll).
-        # The only timestamp on the record is ``checked_at`` (written at
-        # state-write time, which is essentially when the run finished).
+        # Successful runs leave ``status`` as:
+        # - "skipped"   — poll found no source changes, nothing to copy
+        # - "submitted" — batch job submitted; the Lambda exits without
+        #                 waiting for the job to complete, so this is
+        #                 the terminal state from the Lambda's perspective
+        #                 even on a healthy run (the watcher Lambda would
+        #                 update this to "completed" later if/when wired)
+        # - "completed" — only reached when an external watcher Lambda
+        #                 polls the batch job and bumps the state
+        # All three count as "the Lambda ran successfully today" — what
+        # we want to surface as `last_backup_at`. The remaining statuses
+        # ("running", "prepared", "failed") indicate the Lambda errored
+        # before submission and must NOT advance last_backup_at.
         last_run = s3_entry.get("last_run") or {}
-        if last_run.get("status") in ("completed", "skipped"):
+        if last_run.get("status") in ("completed", "skipped", "submitted"):
             last_run_ts = _parse_iso_ts(last_run.get("checked_at"))
             if last_run_ts:
                 last_run_ts_candidates.append(last_run_ts)
@@ -561,10 +570,11 @@ def build_report(
                             )
                 except Exception as e:
                     notes.append(f"divergence check failed: {e}")
-        else:
-            info_notes.append(
-                "inventory disabled for this source — restore test is the dominant signal"
-            )
+        # When inventory is opted out, surface nothing about it. The absence
+        # of inventory chips and divergence notes is itself the signal; an
+        # explicit "inventory disabled" info_note adds daily noise without
+        # information (every day, same line). Process signals + restore
+        # test + PITR carry the row instead.
 
         # Restore verification (canary + rotation).
         restore_result: RestoreTestResult | None = None
@@ -692,11 +702,16 @@ def format_email_text(data: HealthReportData) -> str:
     lines.append("Per source:")
     for s in data.sources:
         icon = _STATUS_ICON[s.overall]
-        age = f"{s.inventory_age_hours:.1f}h" if s.inventory_age_hours is not None else "n/a"
         rt = "—"
         if s.restore_test:
             rt = s.restore_test.overall
-        lines.append(f"  {icon} {s.alias:<10}  inventory_age={age:<8}  restore={rt}")
+        # Omit the inventory_age chip entirely when the source has opted
+        # out of inventory verification — there's no signal to convey.
+        if s.inventory_enabled:
+            age = f"{s.inventory_age_hours:.1f}h" if s.inventory_age_hours is not None else "n/a"
+            lines.append(f"  {icon} {s.alias:<10}  inventory_age={age:<8}  restore={rt}")
+        else:
+            lines.append(f"  {icon} {s.alias:<10}  restore={rt}")
         for note in s.notes:
             lines.append(f"        ⚠ {note}")
         if s.pitr_tables:
@@ -734,10 +749,13 @@ def format_slack(data: HealthReportData) -> list[dict[str, Any]]:
         details: list[str] = []
         if s.process.last_backup_age_hours is not None:
             details.append(f"backup_age={s.process.last_backup_age_hours:.1f}h")
-        if s.inventory_age_hours is not None:
-            details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
-        else:
-            details.append("inventory_age=n/a")
+        # Omit the inventory_age chip when the source has opted out — its
+        # absence is the signal; adding "n/a" every day is noise.
+        if s.inventory_enabled:
+            if s.inventory_age_hours is not None:
+                details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
+            else:
+                details.append("inventory_age=n/a")
         if s.restore_test:
             details.append(f"restore={s.restore_test.overall}")
         if details:
@@ -802,10 +820,13 @@ def format_discord(data: HealthReportData) -> list[dict[str, Any]]:
         details: list[str] = []
         if s.process.last_backup_age_hours is not None:
             details.append(f"backup_age={s.process.last_backup_age_hours:.1f}h")
-        if s.inventory_age_hours is not None:
-            details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
-        else:
-            details.append("inventory_age=n/a")
+        # Omit the inventory_age chip when the source has opted out — its
+        # absence is the signal; adding "n/a" every day is noise.
+        if s.inventory_enabled:
+            if s.inventory_age_hours is not None:
+                details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
+            else:
+                details.append("inventory_age=n/a")
         if s.restore_test:
             details.append(f"restore={s.restore_test.overall}")
         if details:
