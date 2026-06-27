@@ -4,6 +4,19 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Observability
+
+- **Pre-inventory process signals in the daily health report.** The health report previously *required* the inventory pipeline (S3 Inventory + Athena + Glue) to render anything meaningful — installs that hadn't deployed inventory got the same `inventory_age=n/a` / `NoSuchBucket` walls every day. Now the report extracts pre-inventory process signals from the same `commands.status.get_status_dict` data it already collected, so a source can show "GREEN, last backup 2.1h ago, 31/31 DDB exports COMPLETED, 1000/1000 batch tasks succeeded" even without inventory.
+  - New `ProcessSignals` dataclass on `SourceHealthData` carries last-backup timestamp, S3 batch job summaries, and DynamoDB export status counts per source.
+  - `_extract_process_signals(status_dict, now)` derives the fields from existing status data — no extra AWS calls.
+  - Classifier (`_classify_source`) gains process-signal branches:
+    - **Red** if last backup > 36h, any recent batch job had > 10% failures, or any DDB export FAILED.
+    - **Yellow** if last backup > 12h (early-warning lane).
+    - **Green** otherwise; pairs naturally with `inventory_enabled: false` for sources that opt out of inventory entirely.
+  - Renderers (Slack + Discord + email) show `backup_age=N.Nh` in the per-source detail row alongside `inventory_age=` and `restore=`.
+  - Process notes (warnings + info) surface alongside the existing inventory notes so an operator can distinguish "process unhealthy" from "correctness unverified."
+  - 8 new tests covering classifier branches and the extractor helper.
+
 ### Notifications
 
 - **Discord support added** as a third notification channel alongside Slack and SNS. Uses Discord's native webhook format with rich embeds (color-coded by status, structured fields per source, footer with build metadata), distinct from Discord's Slack-compatibility `/slack` endpoint which is too restrictive for the engine's Block Kit payload (rejects `header` + `context` blocks).
