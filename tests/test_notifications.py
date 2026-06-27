@@ -1,4 +1,4 @@
-"""Tests for notification senders (Slack webhook + SNS publish)."""
+"""Tests for notification senders (Slack webhook + Discord webhook + SNS publish)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aws_snapshot.notifications import slack, sns
+from aws_snapshot.notifications import discord, slack, sns
 
 # ---------------------------------------------------------------------------
 # Slack
@@ -92,6 +92,78 @@ def test_resolve_webhook_url_fetches_from_secrets_manager():
     assert url == "https://hooks.slack.com/services/AAA/BBB/CCC"
     session.client.assert_called_once_with("secretsmanager")
     secrets.get_secret_value.assert_called_once_with(SecretId="backup-slack-webhook")
+
+
+# ---------------------------------------------------------------------------
+# Discord
+# ---------------------------------------------------------------------------
+
+
+def test_send_discord_posts_embeds_and_content():
+    embeds = [{"title": "hi", "color": 0x2ECC71, "fields": []}]
+    captured: dict = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = request.data
+        return _fake_urlopen_response()
+
+    with patch.object(discord.urllib.request, "urlopen", side_effect=fake_urlopen):
+        discord.send_discord(
+            "https://discord.com/api/webhooks/1/2",
+            embeds=embeds,
+            content="summary",
+        )
+
+    assert captured["url"] == "https://discord.com/api/webhooks/1/2"
+    assert captured["headers"].get("Content-type") == "application/json"
+    payload = json.loads(captured["body"])
+    assert payload["embeds"] == embeds
+    assert payload["content"] == "summary"
+
+
+def test_send_discord_requires_content_or_embeds():
+    with pytest.raises(ValueError, match="content or embeds"):
+        discord.send_discord("https://discord.com/api/webhooks/1/2")
+
+
+def test_send_discord_raises_on_http_error_with_body():
+    import urllib.error
+
+    def fake_urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url, 403, "Forbidden", {}, io.BytesIO(b'{"message":"bad blocks"}')
+        )
+
+    with patch.object(discord.urllib.request, "urlopen", side_effect=fake_urlopen):
+        with pytest.raises(discord.DiscordDeliveryError, match="HTTP 403"):
+            discord.send_discord("https://discord.com/api/webhooks/1/2", content="x")
+
+
+def test_send_discord_raises_on_url_error():
+    import urllib.error
+
+    def fake_urlopen(request, timeout):
+        raise urllib.error.URLError("no route")
+
+    with patch.object(discord.urllib.request, "urlopen", side_effect=fake_urlopen):
+        with pytest.raises(discord.DiscordDeliveryError, match="unreachable"):
+            discord.send_discord("https://discord.com/api/webhooks/1/2", content="x")
+
+
+def test_resolve_discord_webhook_url_strips_whitespace():
+    session = MagicMock()
+    secrets = MagicMock()
+    secrets.get_secret_value.return_value = {
+        "SecretString": "https://discord.com/api/webhooks/1/2\n"
+    }
+    session.client.return_value = secrets
+
+    url = discord.resolve_webhook_url(session, "backup-discord-webhook")
+
+    assert url == "https://discord.com/api/webhooks/1/2"
+    secrets.get_secret_value.assert_called_once_with(SecretId="backup-discord-webhook")
 
 
 # ---------------------------------------------------------------------------

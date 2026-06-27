@@ -30,6 +30,11 @@ Parameters:
     Default: backup-slack-webhook
     Description: Secrets Manager secret holding the Slack incoming-webhook URL for the alarm-bridge. Leave the default unless you renamed the secret.
 
+  DiscordWebhookSecretName:
+    Type: String
+    Default: ""
+    Description: Secrets Manager secret holding the Discord native-webhook URL (no /slack suffix) for the alarm-bridge. Leave empty to use Slack; set to use Discord instead.
+
 Globals:
   Function:
     Runtime: python3.10
@@ -176,7 +181,12 @@ Resources:
                 Resource: !Ref BackupReportsTopic
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SlackWebhookSecretName}-*
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SlackWebhookSecretName}-*
+                  # Discord secret — same Resource constraint pattern. When DiscordWebhookSecretName
+                  # is empty (Slack-only deployment) this resolves to a *-* wildcard which won't
+                  # match anything in Secrets Manager, so it's effectively a no-op.
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${DiscordWebhookSecretName}-*
               # NOTE: NO s3:DeleteObject on backup buckets — they are delete-protected.
 
   # ----------------------------------------------------------------------------
@@ -238,7 +248,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub ${ServiceName}-${Stage}-alarm-bridge
-      Description: SNS -> Slack bridge for backup alerts
+      Description: SNS -> Slack/Discord bridge for backup alerts
       Handler: aws_snapshot.lambda_alarm_bridge.handler
       Role: !GetAtt BackupLambdaRole.Arn
       MemorySize: 256
@@ -246,6 +256,9 @@ Resources:
       Environment:
         Variables:
           SLACK_WEBHOOK_SECRET_ID: !Ref SlackWebhookSecretName
+          # When set, the alarm-bridge POSTs to Discord (native embed format)
+          # instead of Slack. Leave empty for Slack-only deployments.
+          DISCORD_WEBHOOK_SECRET_ID: !Ref DiscordWebhookSecretName
     Metadata:
       BuildMethod: makefile
 

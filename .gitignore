@@ -33,3 +33,4 @@ backup-config.sandbox.yaml
 backup-config.production.yaml
 
 audit.txt
+.claude/

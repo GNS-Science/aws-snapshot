@@ -4,6 +4,16 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Notifications
+
+- **Discord support added** as a third notification channel alongside Slack and SNS. Uses Discord's native webhook format with rich embeds (color-coded by status, structured fields per source, footer with build metadata), distinct from Discord's Slack-compatibility `/slack` endpoint which is too restrictive for the engine's Block Kit payload (rejects `header` + `context` blocks).
+  - New module `aws_snapshot.notifications.discord` with `send_discord(webhook_url, embeds, content)`.
+  - New `DiscordConfig` model under `notifications.discord` (mirrors `SlackConfig`).
+  - `health_report.send()` now delivers to both Slack and Discord independently when each is enabled.
+  - `lambda_alarm_bridge.handler` posts to Discord when `DISCORD_WEBHOOK_SECRET_ID` env var is set, otherwise Slack (preserving default for existing installs).
+  - SAM template gains `DiscordWebhookSecretName` parameter (default empty = Slack-only).
+  - Webhook URLs go in Secrets Manager as the standard form `https://discord.com/api/webhooks/{id}/{token}` — **no `/slack` suffix** (that's the Slack-compat endpoint, which we don't use).
+
 ### Deploy mechanism
 
 - **No Node.js dependency.** Removing the Serverless Framework toolchain takes Node out of the development and deploy story entirely. New operators no longer install Node, run `npm install`, manage `serverless-python-requirements` plugin state, or chase `~/Library/Caches/serverless-python-requirements/` cache bugs. Onboarding shrinks to one command: `make sync`. CI gets faster (no `npm ci` step, no `node_modules` cache to warm). Dependabot's npm noise — the bulk of recent open alerts came in via Serverless transitive `axios` / `form-data` / etc. — stops permanently. Repo size on fresh clones drops because the `~250 MB` transitive npm dep tree is no longer pulled.

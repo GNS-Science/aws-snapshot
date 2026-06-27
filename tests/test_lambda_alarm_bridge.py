@@ -55,6 +55,45 @@ def test_handler_delivers_alarm_to_slack():
     assert "ap-southeast-2" in blocks[2]["elements"][0]["text"]
 
 
+def test_handler_delivers_alarm_to_discord_when_secret_env_set(monkeypatch):
+    event = _sns_event(
+        {
+            "AlarmName": "nzshm-backup-lambda-log-errors-prod",
+            "NewStateValue": "ALARM",
+            "NewStateReason": "Threshold crossed",
+            "Region": "ap-southeast-2",
+            "StateChangeTime": "2026-06-27T02:30:00Z",
+        }
+    )
+
+    monkeypatch.setenv("DISCORD_WEBHOOK_SECRET_ID", "backup-discord-webhook")
+
+    with (
+        patch.object(
+            ab, "resolve_discord_webhook_url", return_value="https://discord.com/api/webhooks/1/2"
+        ) as r,
+        patch.object(ab, "send_discord") as s,
+        patch.object(ab, "send_slack") as slack_mock,
+    ):
+        result = ab.handler(event, None)
+
+    assert result == {"statusCode": 200, "body": "delivered=1 skipped=0"}
+    r.assert_called_once()
+    assert r.call_args[0][1] == "backup-discord-webhook"
+    s.assert_called_once()
+    slack_mock.assert_not_called()
+
+    webhook_url = s.call_args[0][0]
+    embeds = s.call_args.kwargs["embeds"]
+    content = s.call_args.kwargs["content"]
+    assert webhook_url == "https://discord.com/api/webhooks/1/2"
+    assert embeds[0]["title"].startswith("nzshm-backup-lambda-log-errors-prod")
+    assert "ALARM" in content
+    # Reason appears as a field in the embed
+    field_names = [f["name"] for f in embeds[0]["fields"]]
+    assert "Reason" in field_names
+
+
 def test_handler_uses_ok_emoji_on_recovery():
     event = _sns_event(
         {
@@ -66,9 +105,10 @@ def test_handler_uses_ok_emoji_on_recovery():
         }
     )
 
-    with patch.object(ab, "resolve_webhook_url", return_value="https://x"), patch.object(
-        ab, "send_slack"
-    ) as s:
+    with (
+        patch.object(ab, "resolve_webhook_url", return_value="https://x"),
+        patch.object(ab, "send_slack") as s,
+    ):
         ab.handler(event, None)
 
     blocks = s.call_args[0][1]
@@ -97,9 +137,10 @@ def test_handler_resolves_webhook_once_for_batched_records():
         ]
     }
 
-    with patch.object(ab, "resolve_webhook_url", return_value="https://x") as r, patch.object(
-        ab, "send_slack"
-    ) as s:
+    with (
+        patch.object(ab, "resolve_webhook_url", return_value="https://x") as r,
+        patch.object(ab, "send_slack") as s,
+    ):
         result = ab.handler(event, None)
 
     assert result["body"] == "delivered=2 skipped=0"

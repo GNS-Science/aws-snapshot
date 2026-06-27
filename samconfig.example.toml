@@ -22,7 +22,12 @@ fail_on_empty_changeset = false
 # multi-line TOML form (""" """) through with embedded newlines, which
 # CloudFormation rejects with "Parameter 'Stage' must be one of AllowedValues"
 # (the trailing newline ends up in the value of each parameter).
-parameter_overrides = "Stage=prod ServiceName=nzshm-backup-service BatchRoleArn=arn:aws:iam::123456789012:role/nzshm-backup-batch-role SlackWebhookSecretName=backup-slack-webhook"
+parameter_overrides = "Stage=prod ServiceName=nzshm-backup-service BatchRoleArn=arn:aws:iam::123456789012:role/nzshm-backup-batch-role SlackWebhookSecretName=backup-slack-webhook DiscordWebhookSecretName="
+# DiscordWebhookSecretName left empty above = Slack-only deployment
+# (default). To use Discord native embeds in the alarm-bridge instead,
+# set DiscordWebhookSecretName=backup-discord-webhook. The Discord
+# secret should hold a webhook URL of the form
+# https://discord.com/api/webhooks/{id}/{token} (NO /slack suffix).
 
 [default.build.parameters]
 # Template file is sam.yaml, not SAM's default template.yaml — see

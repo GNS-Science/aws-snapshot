@@ -56,6 +56,36 @@ class SlackConfig(BaseModel):
     ]
 
 
+class DiscordConfig(BaseModel):
+    """Discord notification configuration.
+
+    Uses Discord's native webhook format (rich embeds), not the
+    Slack-compatibility ``/slack`` endpoint. The webhook URL stored in
+    the named secret should be the standard form
+    ``https://discord.com/api/webhooks/{id}/{token}`` (no ``/slack``
+    suffix). Native embeds support colour-coded status, structured
+    fields, and footer/timestamp — better-suited to a daily status
+    report than the restricted Slack-compat path.
+    """
+
+    enabled: bool = False
+    webhook_url_secret: str = "backup-discord-webhook"
+    notify_on: list[
+        Literal[
+            "backup_success",
+            "backup_failure",
+            "restore_initiated",
+            "restore_completed",
+            "test_failure",
+        ]
+    ] = [
+        "backup_success",
+        "backup_failure",
+        "restore_initiated",
+        "restore_completed",
+    ]
+
+
 class SESConfig(BaseModel):
     """SES email notification configuration."""
 
@@ -122,10 +152,13 @@ class NotificationConfig(BaseModel):
     reports: ReportsConfig = Field(default_factory=ReportsConfig)
     ses: SESConfig = Field(default_factory=SESConfig)
     slack: SlackConfig | None = None
+    discord: DiscordConfig | None = None
 
     def model_post_init(self, __context) -> None:
         if self.slack is None:
             self.slack = SlackConfig()
+        if self.discord is None:
+            self.discord = DiscordConfig()
 
 
 class CostTrackingConfig(BaseModel):
