@@ -108,6 +108,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                             "healthy": data.healthy_count,
                             "total": len(data.sources),
                             "slack_ok": delivery.slack_ok,
+                            "discord_ok": delivery.discord_ok,
                             "sns_ok": delivery.sns_ok,
                         },
                     )
@@ -123,6 +124,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         "healthy_count": data.healthy_count,
                         "total_sources": len(data.sources),
                         "slack_ok": delivery.slack_ok,
+                        "discord_ok": delivery.discord_ok,
                         "sns_ok": delivery.sns_ok,
                     }
                 ),

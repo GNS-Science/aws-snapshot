@@ -47,6 +47,16 @@ from aws_snapshot.athena_inventory import (
 from aws_snapshot.commands.status import get_status_dict
 from aws_snapshot.commands.test import RestoreTestResult, restore_test_source
 from aws_snapshot.inventory_state import inventory_health_for_bucket_pair
+from aws_snapshot.notifications.discord import (
+    COLOUR_AMBER,
+    COLOUR_GREEN,
+    COLOUR_RED,
+    DiscordDeliveryError,
+    send_discord,
+)
+from aws_snapshot.notifications.discord import (
+    resolve_webhook_url as resolve_discord_webhook_url,
+)
 from aws_snapshot.notifications.slack import (
     SlackDeliveryError,
     resolve_webhook_url,
@@ -517,6 +527,73 @@ def format_slack(data: HealthReportData) -> list[dict[str, Any]]:
     return blocks
 
 
+_DISCORD_COLOUR_BY_STATUS = {
+    "green": COLOUR_GREEN,
+    "amber": COLOUR_AMBER,
+    "red": COLOUR_RED,
+}
+
+
+def format_discord(data: HealthReportData) -> list[dict[str, Any]]:
+    """Discord rich-embed message body.
+
+    Returns a single embed with one field per source. Discord caps each
+    field value at 1024 chars and allows up to 25 fields per embed, so
+    this fits even very large source rosters.
+    """
+    icon = _STATUS_ICON[data.overall]
+    title = (
+        f"{icon} NSHM backup health {data.report_date.isoformat()} — "
+        f"{_STATUS_TEXT[data.overall]} ({data.healthy_count}/{len(data.sources)})"
+    )
+
+    fields: list[dict[str, Any]] = []
+    for s in data.sources:
+        lines: list[str] = []
+        details: list[str] = []
+        if s.inventory_age_hours is not None:
+            details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
+        else:
+            details.append("inventory_age=n/a")
+        if s.restore_test:
+            details.append(f"restore={s.restore_test.overall}")
+        if details:
+            lines.append("   ".join(details))
+        for note in s.notes:
+            lines.append(f"⚠ _{note}_")
+        if s.pitr_tables:
+            failing = [t for t, v in s.pitr_tables.items() if not v.get("enabled")]
+            if failing:
+                lines.append(f"⚠ _DynamoDB PITR disabled: {', '.join(failing)}_")
+        for info in s.info_notes:
+            lines.append(f"ℹ _{info}_")
+        # Discord field value cap is 1024 chars; truncate defensively.
+        value = "\n".join(lines) if lines else "_no notes_"
+        if len(value) > 1024:
+            value = value[:1020] + "…"
+        fields.append(
+            {
+                "name": f"{_STATUS_ICON[s.overall]} {s.alias}",
+                "value": value,
+                "inline": False,
+            }
+        )
+
+    embed = {
+        "title": title,
+        "color": _DISCORD_COLOUR_BY_STATUS.get(data.overall, COLOUR_RED),
+        "fields": fields,
+        "footer": {
+            "text": (
+                f"Build {data.duration_seconds:.1f}s • Canary {data.canary_source} • "
+                f"Freshness threshold {data.freshness_threshold_hours}h"
+            )
+        },
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    return [embed]
+
+
 # ---------------------------------------------------------------------------
 # Delivery
 # ---------------------------------------------------------------------------
@@ -527,6 +604,9 @@ class DeliveryResult:
     slack_attempted: bool = False
     slack_ok: bool = False
     slack_error: str | None = None
+    discord_attempted: bool = False
+    discord_ok: bool = False
+    discord_error: str | None = None
     sns_attempted: bool = False
     sns_ok: bool = False
     sns_error: str | None = None
@@ -564,6 +644,24 @@ def send(
         except Exception as e:
             result.slack_error = f"unexpected: {e}"
             logger.exception("Slack delivery failed (unexpected)")
+
+    discord_cfg = getattr(notifications_config, "discord", None)
+    if discord_cfg and getattr(discord_cfg, "enabled", False):
+        result.discord_attempted = True
+        try:
+            webhook = resolve_discord_webhook_url(session, discord_cfg.webhook_url_secret)
+            send_discord(
+                webhook,
+                embeds=format_discord(data),
+                content=format_email_subject(data),
+            )
+            result.discord_ok = True
+        except DiscordDeliveryError as e:
+            result.discord_error = str(e)
+            logger.exception("Discord delivery failed")
+        except Exception as e:
+            result.discord_error = f"unexpected: {e}"
+            logger.exception("Discord delivery failed (unexpected)")
 
     reports_cfg = getattr(notifications_config, "reports", None)
     reports_email_cfg = getattr(reports_cfg, "email", None) if reports_cfg else None

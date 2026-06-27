@@ -1,9 +1,18 @@
-"""SNS -> Slack bridge for CloudWatch alarm notifications.
+"""SNS -> Slack/Discord bridge for CloudWatch alarm notifications.
 
 Subscribed to BackupAlertsTopic. Each invocation receives one or more
 CloudWatch alarm state-change events (wrapped in an SNS event envelope);
-this handler decodes the payload and posts a Block Kit notification to
-the Slack channel via the existing backup-slack-webhook secret.
+this handler decodes the payload and posts a notification to whichever
+chat channel is configured via the environment.
+
+Channel selection:
+- ``DISCORD_WEBHOOK_SECRET_ID`` set → Discord native embed
+- else ``SLACK_WEBHOOK_SECRET_ID`` set → Slack Block Kit
+- else fallback to legacy ``SLACK_WEBHOOK_SECRET_ID`` default
+
+This keeps Slack the default for installs that haven't migrated, while
+letting Discord-first installs (e.g. public-record-backup) opt in via a
+single env-var override on the SAM stack.
 """
 
 from __future__ import annotations
@@ -15,12 +24,21 @@ from typing import Any
 
 import boto3
 
+from aws_snapshot.notifications.discord import (
+    COLOUR_BLUE,
+    COLOUR_GREEN,
+    COLOUR_RED,
+    send_discord,
+)
+from aws_snapshot.notifications.discord import (
+    resolve_webhook_url as resolve_discord_webhook_url,
+)
 from aws_snapshot.notifications.slack import resolve_webhook_url, send_slack
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-_DEFAULT_SECRET_ID = "backup-slack-webhook"
+_DEFAULT_SLACK_SECRET_ID = "backup-slack-webhook"
 
 _STATE_EMOJI = {
     "ALARM": ":rotating_light:",
@@ -28,8 +46,14 @@ _STATE_EMOJI = {
     "INSUFFICIENT_DATA": ":grey_question:",
 }
 
+_STATE_COLOUR = {
+    "ALARM": COLOUR_RED,
+    "OK": COLOUR_GREEN,
+    "INSUFFICIENT_DATA": COLOUR_BLUE,
+}
 
-def _build_blocks(alarm: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+
+def _build_slack_blocks(alarm: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
     name = alarm.get("AlarmName", "(unknown alarm)")
     new_state = alarm.get("NewStateValue", "(unknown)")
     reason = alarm.get("NewStateReason", "")
@@ -59,13 +83,39 @@ def _build_blocks(alarm: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
     return blocks, text
 
 
+def _build_discord_embed(alarm: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    name = alarm.get("AlarmName", "(unknown alarm)")
+    new_state = alarm.get("NewStateValue", "(unknown)")
+    reason = alarm.get("NewStateReason", "")
+    region = alarm.get("Region", "")
+    timestamp = alarm.get("StateChangeTime", "")
+
+    title = f"{name} → {new_state}"
+    fields = [
+        {"name": "Reason", "value": reason[:1024] if reason else "_(no reason)_", "inline": False}
+    ]
+    if region:
+        fields.append({"name": "Region", "value": region, "inline": True})
+    if timestamp:
+        fields.append({"name": "Time", "value": timestamp, "inline": True})
+
+    embed = {
+        "title": title,
+        "color": _STATE_COLOUR.get(new_state, COLOUR_BLUE),
+        "fields": fields,
+    }
+    return [embed], title
+
+
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     session = boto3.Session()
-    secret_id = os.environ.get("SLACK_WEBHOOK_SECRET_ID", _DEFAULT_SECRET_ID)
+    discord_secret_id = os.environ.get("DISCORD_WEBHOOK_SECRET_ID")
+    slack_secret_id = os.environ.get("SLACK_WEBHOOK_SECRET_ID", _DEFAULT_SLACK_SECRET_ID)
 
     delivered = 0
     skipped = 0
-    webhook_url: str | None = None
+    slack_webhook: str | None = None
+    discord_webhook: str | None = None
 
     for record in event.get("Records", []):
         sns = record.get("Sns", {})
@@ -82,12 +132,16 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             skipped += 1
             continue
 
-        blocks, text = _build_blocks(alarm)
-
-        if webhook_url is None:
-            webhook_url = resolve_webhook_url(session, secret_id)
-
-        send_slack(webhook_url, blocks, text=text)
+        if discord_secret_id:
+            embeds, content = _build_discord_embed(alarm)
+            if discord_webhook is None:
+                discord_webhook = resolve_discord_webhook_url(session, discord_secret_id)
+            send_discord(discord_webhook, embeds=embeds, content=content)
+        else:
+            blocks, text = _build_slack_blocks(alarm)
+            if slack_webhook is None:
+                slack_webhook = resolve_webhook_url(session, slack_secret_id)
+            send_slack(slack_webhook, blocks, text=text)
         delivered += 1
 
     return {"statusCode": 200, "body": f"delivered={delivered} skipped={skipped}"}
