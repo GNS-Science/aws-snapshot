@@ -122,7 +122,9 @@ class ProcessSignals:
     """
 
     # Last successful backup-run timestamp aggregated across all S3 batches
-    # for the source (max of per-bucket ``last_run.last_complete`` values).
+    # for the source (max of per-bucket ``last_run.checked_at`` values where
+    # ``last_run.status`` is ``"completed"`` or ``"skipped"`` — see
+    # ``run_state.py``; "skipped" is the no-source-changes happy path).
     last_backup_at: datetime | None = None
     # Age in hours from last_backup_at to the report build time. None when
     # no run has ever completed (fresh source / never-deployed).
@@ -235,13 +237,23 @@ def _extract_process_signals(source_status: dict[str, Any], now_utc: datetime) -
             )
             continue
 
+        # ``last_run`` is the persisted run-state record written by
+        # ``run_state.write_run_state`` — see run_state.py for the schema.
+        # Successful runs leave ``status`` as "completed" or "skipped"
+        # ("skipped" = no source changes, still a successful poll).
+        # The only timestamp on the record is ``checked_at`` (written at
+        # state-write time, which is essentially when the run finished).
         last_run = s3_entry.get("last_run") or {}
-        last_complete_ts = _parse_iso_ts(last_run.get("last_complete"))
-        if last_complete_ts:
-            last_run_ts_candidates.append(last_complete_ts)
+        if last_run.get("status") in ("completed", "skipped"):
+            last_run_ts = _parse_iso_ts(last_run.get("checked_at"))
+            if last_run_ts:
+                last_run_ts_candidates.append(last_run_ts)
 
         # Most recent batch job for this bucket pair (recent_jobs is sorted
-        # newest-first by get_status_dict).
+        # newest-first by get_status_dict). Schema from commands.status
+        # ``_job_json``: ``job_id``, ``status``, ``description``,
+        # ``creation_time`` (str of datetime), plus the progress fields
+        # (``total``, ``succeeded``, ``failed``).
         recent_jobs = s3_entry.get("recent_jobs") or []
         if recent_jobs:
             j = recent_jobs[0]
@@ -258,7 +270,10 @@ def _extract_process_signals(source_status: dict[str, Any], now_utc: datetime) -
                     "succeeded": succeeded,
                     "failed": failed,
                     "failure_pct": (failed / total) if total else 0.0,
-                    "completed_at": j.get("completed"),
+                    # creation_time is the only timestamp in _job_json. For a
+                    # Complete job it's the closest proxy to "when did this
+                    # finish" available from the existing status data.
+                    "creation_time": j.get("creation_time"),
                 }
             )
 

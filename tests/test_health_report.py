@@ -234,17 +234,28 @@ def test_extract_empty_status_returns_defaults():
 
 
 def test_extract_aggregates_last_backup_across_buckets():
+    """Fields read from run-state must match the run_state.py write schema.
+
+    Specifically: ``status`` is the run phase ("completed"/"skipped"
+    are the success values), ``checked_at`` is the only timestamp.
+    See https://github.com/GNS-Science/nzshm-backup#63 regression that
+    used wrong field names.
+    """
     now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
     status = {
         "s3_batches": [
             {
                 "source_bucket": "a",
                 "backup_bucket": "ba",
-                "last_run": {"last_complete": "2026-06-27T10:00:00+00:00"},
+                "last_run": {
+                    "status": "completed",
+                    "checked_at": "2026-06-27T10:00:00+00:00",
+                },
                 "recent_jobs": [
                     {
                         "job_id": "j1",
                         "status": "Complete",
+                        "creation_time": "2026-06-27T10:00:00+00:00",
                         "total": 10,
                         "succeeded": 10,
                         "failed": 0,
@@ -255,7 +266,10 @@ def test_extract_aggregates_last_backup_across_buckets():
                 "source_bucket": "b",
                 "backup_bucket": "bb",
                 # b is older — should not become the aggregate "last backup"
-                "last_run": {"last_complete": "2026-06-27T05:00:00+00:00"},
+                "last_run": {
+                    "status": "skipped",
+                    "checked_at": "2026-06-27T05:00:00+00:00",
+                },
                 "recent_jobs": [],
             },
         ]
@@ -265,6 +279,42 @@ def test_extract_aggregates_last_backup_across_buckets():
     assert sig.last_backup_age_hours == 2.0
     assert len(sig.last_s3_batch_jobs) == 1  # only bucket a had a recent_jobs entry
     assert sig.last_s3_batch_jobs[0]["job_id"] == "j1"
+    assert sig.last_s3_batch_jobs[0]["creation_time"] == "2026-06-27T10:00:00+00:00"
+
+
+def test_extract_ignores_unfinished_or_failed_run_state():
+    """Only ``completed`` and ``skipped`` runs count as "last backup".
+
+    Other statuses (``running``, ``prepared``, ``submitted``, ``failed``)
+    represent in-flight or failed attempts and must not silently advance
+    the last-backup timestamp.
+    """
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    status = {
+        "s3_batches": [
+            {
+                "source_bucket": "a",
+                "backup_bucket": "ba",
+                "last_run": {
+                    "status": "failed",
+                    "checked_at": "2026-06-27T11:00:00+00:00",
+                },
+                "recent_jobs": [],
+            },
+            {
+                "source_bucket": "b",
+                "backup_bucket": "bb",
+                "last_run": {
+                    "status": "running",
+                    "checked_at": "2026-06-27T11:30:00+00:00",
+                },
+                "recent_jobs": [],
+            },
+        ]
+    }
+    sig = hr._extract_process_signals(status, now)
+    assert sig.last_backup_at is None
+    assert sig.last_backup_age_hours is None
 
 
 def test_extract_summarises_ddb_exports_by_status():
