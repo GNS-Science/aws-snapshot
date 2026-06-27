@@ -110,6 +110,198 @@ def test_classify_red_when_inventory_disabled_but_restore_failed():
     assert hr._classify_source(s) == "red"
 
 
+# ---------------------------------------------------------------------------
+# Process-signal classification (pre-inventory health)
+# ---------------------------------------------------------------------------
+
+
+def _proc(**overrides) -> hr.ProcessSignals:
+    return hr.ProcessSignals(**overrides)
+
+
+def test_classify_red_when_last_backup_older_than_red_threshold():
+    """A backup older than _BACKUP_AGE_RED_HOURS reds the source regardless
+    of inventory state. Process signal — the schedule stopped firing."""
+    s = _make_src(process=_proc(last_backup_age_hours=hr._BACKUP_AGE_RED_HOURS + 1))
+    assert hr._classify_source(s) == "red"
+
+
+def test_classify_yellow_when_last_backup_in_yellow_lane():
+    """Backups between yellow and red age thresholds surface yellow."""
+    s = _make_src(process=_proc(last_backup_age_hours=hr._BACKUP_AGE_YELLOW_HOURS + 1))
+    assert hr._classify_source(s) == "yellow"
+
+
+def test_classify_green_when_last_backup_fresh():
+    s = _make_src(process=_proc(last_backup_age_hours=1.0))
+    assert hr._classify_source(s) == "green"
+
+
+def test_classify_red_when_s3_batch_failure_rate_exceeds_threshold():
+    """A recent batch job with >10% failures reds the source."""
+    s = _make_src(
+        process=_proc(
+            last_backup_age_hours=2.0,
+            last_s3_batch_jobs=[
+                {
+                    "source_bucket": "src",
+                    "total": 100,
+                    "succeeded": 80,
+                    "failed": 20,
+                    "failure_pct": 0.20,
+                }
+            ],
+        ),
+    )
+    assert hr._classify_source(s) == "red"
+
+
+def test_classify_green_when_batch_failure_rate_under_threshold():
+    """A handful of failures in a large batch stays green."""
+    s = _make_src(
+        process=_proc(
+            last_backup_age_hours=2.0,
+            last_s3_batch_jobs=[
+                {
+                    "source_bucket": "src",
+                    "total": 1_000,
+                    "succeeded": 998,
+                    "failed": 2,
+                    "failure_pct": 0.002,
+                }
+            ],
+        ),
+    )
+    assert hr._classify_source(s) == "green"
+
+
+def test_classify_red_when_ddb_export_failed():
+    s = _make_src(
+        process=_proc(
+            last_backup_age_hours=2.0,
+            ddb_export_summary={"completed": 5, "failed": 1, "in_progress": 0, "no_recent": 0},
+        )
+    )
+    assert hr._classify_source(s) == "red"
+
+
+def test_classify_green_when_inventory_disabled_and_process_healthy():
+    """The user's intended steady-state: opt out of inventory, rely on
+    process signals + restore test + PITR. Source classifies GREEN."""
+    s = _make_src(
+        inventory_age_hours=None,
+        inventory_stale=False,
+        count_delta=None,
+        divergence=None,
+        backup_missing_count=None,
+        backup_orphan_count=None,
+        inventory_enabled=False,
+        process=_proc(
+            last_backup_age_hours=2.0,
+            ddb_export_summary={"completed": 5, "failed": 0, "in_progress": 0, "no_recent": 0},
+            last_s3_batch_jobs=[
+                {
+                    "source_bucket": "src",
+                    "total": 1000,
+                    "succeeded": 1000,
+                    "failed": 0,
+                    "failure_pct": 0.0,
+                }
+            ],
+        ),
+    )
+    assert hr._classify_source(s) == "green"
+
+
+# ---------------------------------------------------------------------------
+# _extract_process_signals
+# ---------------------------------------------------------------------------
+
+
+def test_extract_empty_status_returns_defaults():
+    now = datetime(2026, 6, 27, 0, 0, tzinfo=timezone.utc)
+    sig = hr._extract_process_signals({}, now)
+    assert sig.last_backup_at is None
+    assert sig.last_backup_age_hours is None
+    assert sig.last_s3_batch_jobs == []
+    assert sig.ddb_export_summary == {
+        "completed": 0,
+        "in_progress": 0,
+        "failed": 0,
+        "no_recent": 0,
+        "errored": 0,
+    }
+
+
+def test_extract_aggregates_last_backup_across_buckets():
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    status = {
+        "s3_batches": [
+            {
+                "source_bucket": "a",
+                "backup_bucket": "ba",
+                "last_run": {"last_complete": "2026-06-27T10:00:00+00:00"},
+                "recent_jobs": [
+                    {
+                        "job_id": "j1",
+                        "status": "Complete",
+                        "total": 10,
+                        "succeeded": 10,
+                        "failed": 0,
+                    }
+                ],
+            },
+            {
+                "source_bucket": "b",
+                "backup_bucket": "bb",
+                # b is older — should not become the aggregate "last backup"
+                "last_run": {"last_complete": "2026-06-27T05:00:00+00:00"},
+                "recent_jobs": [],
+            },
+        ]
+    }
+    sig = hr._extract_process_signals(status, now)
+    assert sig.last_backup_at == datetime(2026, 6, 27, 10, 0, tzinfo=timezone.utc)
+    assert sig.last_backup_age_hours == 2.0
+    assert len(sig.last_s3_batch_jobs) == 1  # only bucket a had a recent_jobs entry
+    assert sig.last_s3_batch_jobs[0]["job_id"] == "j1"
+
+
+def test_extract_summarises_ddb_exports_by_status():
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    status = {
+        "dynamodb_tables": {
+            "ok-1": [{"status": "COMPLETED", "export_time": "2026-06-27T11:00:00+00:00"}],
+            "ok-2": [{"status": "COMPLETED", "export_time": "2026-06-27T11:00:00+00:00"}],
+            "running": [{"status": "IN_PROGRESS", "export_time": ""}],
+            "broken": [{"status": "FAILED", "export_time": ""}],
+            "never": [],
+            "errored": {"error": "DescribeContinuousBackups: AccessDenied"},
+        }
+    }
+    sig = hr._extract_process_signals(status, now)
+    assert sig.ddb_export_summary == {
+        "completed": 2,
+        "in_progress": 1,
+        "failed": 1,
+        "no_recent": 1,
+        "errored": 1,
+    }
+
+
+def test_extract_uses_ddb_export_ts_when_no_s3_batches():
+    """A DDB-only source (or s3 not yet run) gets last_backup_at from DDB."""
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    status = {
+        "dynamodb_tables": {
+            "t": [{"status": "COMPLETED", "export_time": "2026-06-27T11:30:00+00:00"}],
+        }
+    }
+    sig = hr._extract_process_signals(status, now)
+    assert sig.last_backup_at == datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)
+    assert sig.last_backup_age_hours == 0.5
+
+
 def test_classify_green_despite_large_source_count_change():
     """ADR-009 reclassifies source-count delta as informational only.
 

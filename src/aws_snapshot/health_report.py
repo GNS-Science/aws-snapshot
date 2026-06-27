@@ -83,12 +83,59 @@ _ROTATION_BY_WEEKDAY: dict[int, str] = {
 _FRESHNESS_THRESHOLD_HOURS = 30.0  # ADR-007 mit. 4
 _RESTORE_SAMPLE_SIZE = 10
 
+# Process-signal thresholds (see ProcessSignals docstring + _classify_source).
+# A backup older than this is a class-1 red — the system stopped firing or
+# every recent attempt failed. Default sits at "more than one missed daily
+# cycle plus a buffer" so a single late run doesn't red.
+_BACKUP_AGE_RED_HOURS = 36.0
+# Backups in the (12, _BACKUP_AGE_RED_HOURS) range surface a yellow note
+# without classifying the source red. Useful as an early-warning lane —
+# typical operational expectation is sub-12h.
+_BACKUP_AGE_YELLOW_HOURS = 12.0
+# An S3 batch job is "alarming" when this fraction of its tasks failed.
+# Calibrated against the public-record-backup baseline where a chronic
+# KMS-cross-account issue was producing 340/371 failures pre-remediation
+# (92%); the 0.10 threshold catches that class while tolerating the rare
+# transient 1-2 failure in a small batch.
+_BATCH_FAILURE_RED_PCT = 0.10
+
 Status = Literal["green", "yellow", "red"]
 
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class ProcessSignals:
+    """Pre-inventory backup-process health for a single source.
+
+    Distinct from the inventory-driven *correctness* signals (divergence,
+    count delta, restore sample) elsewhere on ``SourceHealthData``. Process
+    signals tell you the conveyor belt is moving; correctness signals tell
+    you the right boxes are coming out the other end. Both layers are
+    useful and answer different questions — see CHANGELOG / ADR-009.
+
+    Sourced from ``commands.status.get_status_dict`` output already
+    collected during ``build_report``; no extra AWS calls.
+    """
+
+    # Last successful backup-run timestamp aggregated across all S3 batches
+    # for the source (max of per-bucket ``last_run.last_complete`` values).
+    last_backup_at: datetime | None = None
+    # Age in hours from last_backup_at to the report build time. None when
+    # no run has ever completed (fresh source / never-deployed).
+    last_backup_age_hours: float | None = None
+    # Last S3 batch job per bucket — kept in the order the bucket configs
+    # appear, with status + failure count per job. Used to surface partial
+    # success ("complete, but 340/371 failed").
+    last_s3_batch_jobs: list[dict[str, Any]] = field(default_factory=list)
+    # Counts across all DynamoDB tables for the source's last export run:
+    # {"completed": N, "in_progress": M, "failed": K, "no_recent": L}.
+    # ``no_recent`` means the table is configured but no recent export was
+    # found (could indicate a config drift / first-run case).
+    ddb_export_summary: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -107,8 +154,11 @@ class SourceHealthData:
     pitr_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     # When False, the source has opted out of S3 Inventory (see
     # ``SourceConfig.inventory_enabled``). The classifier must not red on
-    # missing inventory data — restore test becomes the dominant red signal.
+    # missing inventory data — restore test becomes the dominant red signal,
+    # AND process signals (below) become the primary day-to-day signal.
     inventory_enabled: bool = True
+    # Pre-inventory process health (see ProcessSignals).
+    process: ProcessSignals = field(default_factory=ProcessSignals)
     overall: Status = "green"
     # Operational errors and class-1/3 detail strings (warning glyph).
     notes: list[str] = field(default_factory=list)
@@ -145,6 +195,107 @@ class HealthReportData:
 # ---------------------------------------------------------------------------
 
 
+def _parse_iso_ts(s: str | None) -> datetime | None:
+    """Best-effort parse of an ISO timestamp string from get_status_dict.
+
+    The status dict surfaces timestamps as ``str(datetime)`` of the
+    boto3-returned (already TZ-aware) value, which round-trips through
+    ``datetime.fromisoformat`` cleanly. Returns None for empty/garbage.
+    """
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_process_signals(source_status: dict[str, Any], now_utc: datetime) -> ProcessSignals:
+    """Distill backup-process health from a single source's status dict.
+
+    Reads only what ``commands.status.get_status_dict`` already
+    collected — no extra AWS calls. Returns a ProcessSignals with the
+    derived fields populated; leaves defaults when the underlying data
+    is missing (e.g. a brand-new source that has never run).
+    """
+    sig = ProcessSignals()
+
+    # ----- S3 batch jobs (one entry per source-bucket × backup-bucket pair) -----
+    last_run_ts_candidates: list[datetime] = []
+    for s3_entry in source_status.get("s3_batches", []):
+        if "error" in s3_entry:
+            # Status collection itself errored for this bucket pair — surface
+            # via last_s3_batch_jobs so the renderer can show the error.
+            sig.last_s3_batch_jobs.append(
+                {
+                    "source_bucket": s3_entry.get("source_bucket"),
+                    "backup_bucket": s3_entry.get("backup_bucket"),
+                    "error": s3_entry["error"],
+                }
+            )
+            continue
+
+        last_run = s3_entry.get("last_run") or {}
+        last_complete_ts = _parse_iso_ts(last_run.get("last_complete"))
+        if last_complete_ts:
+            last_run_ts_candidates.append(last_complete_ts)
+
+        # Most recent batch job for this bucket pair (recent_jobs is sorted
+        # newest-first by get_status_dict).
+        recent_jobs = s3_entry.get("recent_jobs") or []
+        if recent_jobs:
+            j = recent_jobs[0]
+            total = j.get("total") or 0
+            succeeded = j.get("succeeded") or 0
+            failed = j.get("failed") or 0
+            sig.last_s3_batch_jobs.append(
+                {
+                    "source_bucket": s3_entry.get("source_bucket"),
+                    "backup_bucket": s3_entry.get("backup_bucket"),
+                    "job_id": j.get("job_id"),
+                    "status": j.get("status"),
+                    "total": total,
+                    "succeeded": succeeded,
+                    "failed": failed,
+                    "failure_pct": (failed / total) if total else 0.0,
+                    "completed_at": j.get("completed"),
+                }
+            )
+
+    if last_run_ts_candidates:
+        sig.last_backup_at = max(last_run_ts_candidates)
+        sig.last_backup_age_hours = (now_utc - sig.last_backup_at).total_seconds() / 3600.0
+
+    # ----- DynamoDB exports (per-table list of recent exports) -----
+    summary = {"completed": 0, "in_progress": 0, "failed": 0, "no_recent": 0, "errored": 0}
+    for _table_name, exports in source_status.get("dynamodb_tables", {}).items():
+        if isinstance(exports, dict) and "error" in exports:
+            summary["errored"] += 1
+            continue
+        if not exports:
+            summary["no_recent"] += 1
+            continue
+        # exports is newest-first; classify by the most recent one's status
+        latest = exports[0]
+        status = (latest.get("status") or "").upper()
+        if status == "COMPLETED":
+            summary["completed"] += 1
+            # Track the most recent COMPLETED ts to feed last_backup_at too
+            ts = _parse_iso_ts(latest.get("export_time"))
+            if ts and (sig.last_backup_at is None or ts > sig.last_backup_at):
+                sig.last_backup_at = ts
+                sig.last_backup_age_hours = (now_utc - ts).total_seconds() / 3600.0
+        elif status in ("IN_PROGRESS",):
+            summary["in_progress"] += 1
+        elif status in ("FAILED",):
+            summary["failed"] += 1
+        else:
+            summary["no_recent"] += 1
+    sig.ddb_export_summary = summary
+
+    return sig
+
+
 def _check_dynamodb_pitr(
     session: boto3.Session,
     source_config,
@@ -175,7 +326,7 @@ def _check_dynamodb_pitr(
 
 
 def _classify_source(s: SourceHealthData) -> Status:
-    """Map signals → green / yellow / red per ADR-009.
+    """Map signals → green / yellow / red per ADR-009 + process additions.
 
     Class 1 → red (any of):
       - restore-test failure
@@ -184,13 +335,21 @@ def _classify_source(s: SourceHealthData) -> Status:
         for the source; opted-out sources don't red on missing inventory)
       - backup is missing keys that source has
         (``backup_missing_count`` > 0)
+      - **process: last backup older than ``_BACKUP_AGE_RED_HOURS``** —
+        the schedule stopped firing or every recent attempt failed
+      - **process: most recent S3 batch job had > ``_BATCH_FAILURE_RED_PCT``
+        of tasks fail** — backups are running but losing data
+      - **process: any DynamoDB table's most recent export status is FAILED**
 
     Class 3 → yellow (and no class 1):
       - inventory present but stale (> threshold)
+      - **process: last backup older than ``_BACKUP_AGE_YELLOW_HOURS``** —
+        early-warning lane for a single missed cycle
 
     Class 2 signals (source-count delta, backup orphan accumulation) never
     affect colour; they appear in the report body via ``info_notes``.
     """
+    # Class-1 inventory-correctness signals
     if s.restore_test and s.restore_test.overall == "failed":
         return "red"
     if any(not t.get("enabled") for t in s.pitr_tables.values()):
@@ -199,7 +358,23 @@ def _classify_source(s: SourceHealthData) -> Status:
         return "red"
     if s.backup_missing_count and s.backup_missing_count > 0:
         return "red"
+    # Class-1 process signals
+    if (
+        s.process.last_backup_age_hours is not None
+        and s.process.last_backup_age_hours > _BACKUP_AGE_RED_HOURS
+    ):
+        return "red"
+    if any(j.get("failure_pct", 0) > _BATCH_FAILURE_RED_PCT for j in s.process.last_s3_batch_jobs):
+        return "red"
+    if s.process.ddb_export_summary.get("failed", 0) > 0:
+        return "red"
+    # Class-3 signals
     if s.inventory_stale:
+        return "yellow"
+    if (
+        s.process.last_backup_age_hours is not None
+        and s.process.last_backup_age_hours > _BACKUP_AGE_YELLOW_HOURS
+    ):
         return "yellow"
     return "green"
 
@@ -393,6 +568,62 @@ def build_report(
 
         pitr = _check_dynamodb_pitr(session, source_config, source_config.source_account_role_arn)
 
+        # Pre-inventory process signals — derived from status_data which is
+        # already collected above. No extra AWS calls.
+        process = _extract_process_signals(status_data.get(alias, {}), now_utc)
+
+        # Surface process detail into notes / info_notes so the rendering
+        # picks them up without touching the formatters' per-source loop.
+        # Notes appear with the warning glyph and contribute to operator
+        # diagnosis; info_notes are quieter (Class-2 framing).
+        if process.last_backup_age_hours is None:
+            notes.append("no recent backup run on record (never run? config drift?)")
+        elif process.last_backup_age_hours > _BACKUP_AGE_RED_HOURS:
+            notes.append(
+                f"last backup {process.last_backup_age_hours:.1f}h ago "
+                f"(> {_BACKUP_AGE_RED_HOURS:.0f}h red threshold)"
+            )
+        elif process.last_backup_age_hours > _BACKUP_AGE_YELLOW_HOURS:
+            notes.append(
+                f"last backup {process.last_backup_age_hours:.1f}h ago "
+                f"(> {_BACKUP_AGE_YELLOW_HOURS:.0f}h yellow threshold)"
+            )
+        else:
+            info_notes.append(f"last backup {process.last_backup_age_hours:.1f}h ago")
+
+        for j in process.last_s3_batch_jobs:
+            if "error" in j:
+                notes.append(
+                    f"S3 batch status check failed for {j.get('source_bucket')}: {j['error']}"
+                )
+                continue
+            failed = j.get("failed", 0)
+            total = j.get("total", 0)
+            pct = j.get("failure_pct", 0)
+            label = j.get("source_bucket") or "(unknown bucket)"
+            if total and pct > _BATCH_FAILURE_RED_PCT:
+                notes.append(
+                    f"S3 batch {label}: {failed:,}/{total:,} failed "
+                    f"({pct * 100:.0f}%, > {_BATCH_FAILURE_RED_PCT * 100:.0f}% red threshold)"
+                )
+            elif failed:
+                info_notes.append(
+                    f"S3 batch {label}: {failed:,}/{total:,} failed ({pct * 100:.1f}%)"
+                )
+
+        ddb = process.ddb_export_summary
+        if ddb.get("failed"):
+            notes.append(f"DynamoDB exports: {ddb['failed']} table(s) FAILED on last run")
+        if ddb.get("errored"):
+            notes.append(f"DynamoDB exports: status check errored on {ddb['errored']} table(s)")
+        if ddb.get("no_recent") and (ddb.get("completed") or ddb.get("in_progress")):
+            # Only surface "no recent" when other tables DID export — avoids
+            # noise on a brand-new source where nothing has run yet (caught
+            # by the last_backup_age_hours is None branch above).
+            info_notes.append(
+                f"DynamoDB exports: {ddb['no_recent']} table(s) with no recent export"
+            )
+
         src = SourceHealthData(
             alias=alias,
             status_data=status_data.get(alias, {}),
@@ -405,6 +636,7 @@ def build_report(
             restore_test=restore_result,
             pitr_tables=pitr,
             inventory_enabled=source_config.inventory_enabled,
+            process=process,
             notes=notes,
             info_notes=info_notes,
         )
@@ -485,6 +717,8 @@ def format_slack(data: HealthReportData) -> list[dict[str, Any]]:
         lines: list[str] = []
         line = f"*{_STATUS_ICON[s.overall]} {s.alias}*"
         details: list[str] = []
+        if s.process.last_backup_age_hours is not None:
+            details.append(f"backup_age={s.process.last_backup_age_hours:.1f}h")
         if s.inventory_age_hours is not None:
             details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
         else:
@@ -551,6 +785,8 @@ def format_discord(data: HealthReportData) -> list[dict[str, Any]]:
     for s in data.sources:
         lines: list[str] = []
         details: list[str] = []
+        if s.process.last_backup_age_hours is not None:
+            details.append(f"backup_age={s.process.last_backup_age_hours:.1f}h")
         if s.inventory_age_hours is not None:
             details.append(f"inventory_age={s.inventory_age_hours:.1f}h")
         else:
