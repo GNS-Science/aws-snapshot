@@ -190,6 +190,96 @@ No further action needed.
 
 ---
 
+## Discord channel (peer to Slack)
+
+Discord is supported as a separate chat channel from Slack. The
+engine uses Discord's **native webhook format** (rich embeds) — not
+the Slack-compatibility `/slack`-suffixed endpoint, which is too
+restrictive for the engine's per-source message template. See
+[ADR-013](../design/adr/ADR-013-discord-notification-support.md) for
+the design rationale.
+
+Both Slack and Discord can be enabled simultaneously; each delivers
+independently per the `<channel>.enabled` flag.
+
+### Create the webhook
+
+1. In Discord: open the target channel → **Edit Channel** (gear icon)
+   → **Integrations** → **Webhooks** → **New Webhook**.
+2. Name the webhook (e.g. "NSHM Backup Reports"); optionally pick an
+   avatar.
+3. Confirm the destination channel.
+4. Click **Copy Webhook URL** — it is the credential. Treat like a
+   password.
+
+The URL form is
+`https://discord.com/api/webhooks/{webhook-id}/{webhook-token}`.
+**Do not append `/slack`** — that's a different compatibility endpoint
+the engine deliberately does not use.
+
+### Store in Secrets Manager
+
+```bash
+aws secretsmanager create-secret \
+  --name backup-discord-webhook \
+  --secret-string 'https://discord.com/api/webhooks/...your-real-url...'
+```
+
+(If the secret already exists, use `put-secret-value --secret-id`.)
+
+### Enable
+
+```yaml
+notifications:
+  discord:
+    enabled: true                       # was false (default)
+    webhook_url_secret: backup-discord-webhook
+```
+
+`backup config push --stage prod` if you maintain the SSM-stored
+copy. Lambda picks up the change on the next invocation — no
+`sam deploy` required.
+
+### Enable Discord for the alarm-bridge (optional)
+
+The daily health-report Lambda reads `notifications.discord` from
+the YAML directly. The CloudWatch alarm-bridge Lambda is configured
+via a SAM template parameter:
+
+```toml
+# samconfig.toml — your install's deploy config
+parameter_overrides = "... DiscordWebhookSecretName=backup-discord-webhook ..."
+```
+
+If `DiscordWebhookSecretName` is set on the SAM stack, the
+alarm-bridge posts CloudWatch alarms to Discord (using the same
+native-embed format). If left empty, the alarm-bridge falls back to
+Slack via `SlackWebhookSecretName`. Run `sam deploy` after
+changing the parameter.
+
+### Verify
+
+```bash
+uv run backup health-report run --send
+```
+
+Expect `Discord: ok` in the Delivery summary.
+
+### Rotating the webhook
+
+If the URL leaks, delete the webhook in Discord (invalidates the URL)
+and create a new one. Then update the secret:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id backup-discord-webhook \
+  --secret-string 'https://discord.com/api/webhooks/...new-url...'
+```
+
+No further action needed.
+
+---
+
 ## Disabling
 
 To temporarily snooze one channel:

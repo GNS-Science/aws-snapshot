@@ -16,10 +16,39 @@ issues that don't throw exceptions.
 
 ## What gets checked
 
+Two layers of signals, answering different questions
+(see [ADR-014](../design/adr/ADR-014-inventory-optional-health-signals.md)
+for the design):
+
+| Layer | Question | Required infra |
+|---|---|---|
+| **Process** | "Did the conveyor belt run?" | None — derived from existing CLI status data |
+| **Correctness** | "Did the right boxes come out?" | S3 Inventory + Athena + Glue pipeline |
+
+Installs with `inventory_enabled: false` on a source see only the
+process layer for that source (plus PITR + restore-test on the
+canary); installs with inventory deployed see both layers.
+
+### Process signals (no inventory required)
+
 Per source, every day:
 
-- **Backup state** — last run status (skipped / submitted / failed),
-  recent S3 Batch jobs, DynamoDB exports.
+- **Last backup age** (`backup_age=N.Nh` chip on the per-source row).
+  *Red* if more than 36 hours since the last successful run; *yellow*
+  between 12 and 36 hours.
+- **Recent S3 Batch job result** — *red* if the most recent batch
+  job had more than 10% of tasks fail. Defends against silent
+  partial-success backups.
+- **DynamoDB export status** — *red* if any configured table's most
+  recent export ended `FAILED`.
+- **Backup state** — last run status (skipped / submitted / failed /
+  completed), recent S3 Batch jobs, DynamoDB exports — visible in
+  the per-source notes.
+
+### Correctness signals (require inventory pipeline)
+
+When `inventory_enabled: true` on a source:
+
 - **Inventory freshness** — most recent S3 Inventory report's age. Stale
   inventory means the diff query is running against old data
   (*class 3 → yellow*).
@@ -250,11 +279,12 @@ entry is silently ignored.
 ### Per-source opt-out: `inventory_enabled`
 
 Set `inventory_enabled: false` on a `SourceConfig` to declare that the
-source intentionally has no S3 Inventory pipeline:
+source does not use the S3 Inventory + Athena pipeline for health
+verification:
 
 ```yaml
 sources:
-  toy-noinv:
+  pr-static:
     inventory_enabled: false   # default true
     s3_buckets: [...]
 ```
@@ -263,40 +293,53 @@ When false:
 
 - `inventory_age` / `freshness` / `divergence` / `count_delta` are all
   **skipped** for this source (no Athena calls, no false-positive red)
-- The row carries a single `ℹ` info line: *"inventory disabled for this
-  source — restore test is the dominant signal"*
-- The row reds only on **restore-test failure** or **PITR disabled**
-- Default `true` preserves existing behaviour for every production source
+- The row's per-source detail line omits the `inventory_age` chip
+  entirely — the absence of the chip is the signal, no daily restating
+  of "inventory disabled"
+- Classification falls back to **process signals** (backup age, batch
+  failure rate, DDB export status) + **restore-test** + **PITR**.
+  See ADR-014 for the two-layer model.
+- Default `true` preserves existing behaviour for every source that
+  uses inventory
 
-Use this for sources where the daily Inventory cost or pipeline isn't
-worth standing up — small config buckets, validation toys, etc. For
-production datasets, leave it `true`: Inventory is the cheapest way to
-catch silent backup-side data loss at scale.
+The choice is **scale-driven, not temporal**. S3 Inventory is
+designed for buckets where listing the entire contents via
+`ListObjectsV2` becomes prohibitive — at that scale the daily
+Inventory CSV is the cheapest way to catch silent backup-side data
+loss. Below that scale, the Inventory pipeline is operational
+overhead without proportional benefit and `inventory_enabled: false`
+may be the steady-state choice. See
+[ADR-014](../design/adr/ADR-014-inventory-optional-health-signals.md)
+for the decision framework.
 
 ---
 
 ## Delivery channels
 
-Two independent channels — turn either or both on. Setup procedure for
-each is in `docs/operations/enabling-notifications.md`.
+Three independent channels — turn any combination on. Setup procedure
+for each is in `docs/operations/enabling-notifications.md`.
 
 | Channel | Config key | Setup prerequisites |
 |---|---|---|
 | Slack | `notifications.slack.enabled: true` | Incoming webhook URL stored as `backup-slack-webhook` in Secrets Manager |
+| Discord | `notifications.discord.enabled: true` | Native Discord webhook URL (no `/slack` suffix) stored as `backup-discord-webhook` in Secrets Manager. See [ADR-013](../design/adr/ADR-013-discord-notification-support.md). |
 | SNS email | `notifications.reports.email.enabled: true` + `address: ...` | Subscription confirmed by clicking AWS confirmation email link |
 
-Channels are independent: if Slack fails, SNS still tries (and vice
-versa). The CLI prints per-channel status in the Delivery summary:
+Channels are independent: if Slack fails, Discord and SNS still try
+(and vice versa). The CLI prints per-channel status in the Delivery
+summary:
 
 ```
 Delivery:
-  Slack: ok
-  SNS:   ok (MessageId=...)
+  Slack:   ok
+  Discord: ok
+  SNS:     ok (MessageId=...)
 ```
 
-To temporarily snooze one channel: set its `enabled: false` and push the
-config (no deploy needed for Slack; SNS subscription is managed by
-CloudFormation so removing the address requires a deploy).
+To temporarily snooze one channel: set its `enabled: false` and push
+the config (no deploy needed for Slack or Discord; SNS subscription
+is managed by CloudFormation so removing the address requires a
+deploy).
 
 ---
 
