@@ -3,6 +3,15 @@
 - Status: Fully implemented (fast path shipped 2026-05-19; slow path code shipped 2026-05-20; daily trigger shipped 2026-05-22)
 - Date: 2026-05-12 (revised 2026-05-19, 2026-05-20, 2026-05-22)
 
+> **2026-06-27 update — extended for inventory-optional installs by
+> [ADR-014](ADR-014-inventory-optional-health-signals.md).** ADR-005
+> assumed the inventory pipeline as the source of correctness signals.
+> ADR-014 adds a process-signal layer (backup age, batch failure rate,
+> DDB export status) so the daily report is useful regardless of
+> whether inventory is deployed. Delivery channels (slack / discord
+> via [ADR-013](ADR-013-discord-notification-support.md) / sns) are
+> unchanged.
+
 > **2026-05-20 revision — SES dropped in favour of SNS email.** ADR-005's
 > original design specified SES for HTML email delivery of the daily
 > report. On review, SES was rejected: it requires domain verification,

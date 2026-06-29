@@ -30,9 +30,12 @@ S3 Inventory is designed for large buckets where listing the entire
 contents (via `ListObjectsV2`) becomes prohibitively expensive. At
 the scale where it's the right tool, Inventory delivers value:
 daily CSV reports of every object's key, size, ETag, encryption,
-storage class. Below that scale, the same information is cheap to
-obtain ad-hoc and the daily Inventory delivery — which the operator
-does not control the timing of — becomes overhead.
+storage class. [ADR-002](ADR-002-inventory-manifest-pipeline-ths.md)
+established the engine's Inventory-driven manifest pipeline for
+exactly this case (THS at millions of objects). Below that scale,
+the same information is cheap to obtain ad-hoc and the daily
+Inventory delivery — which the operator does not control the
+timing of — becomes overhead.
 
 Two operator profiles fall on the inventory-optional side of this
 line:
@@ -191,6 +194,13 @@ is, for many installs, the preferred steady state.
   mistake won't see a daily reminder of that decision. Acceptable
   trade-off; `make status` and `backup check` both still surface
   inventory state explicitly when queried.
+- **Compatibility with [ADR-011](ADR-011-four-color-signal-taxonomy.md)**
+  (proposed): the process classifier emits red / yellow / green from
+  ADR-009's three-tier output. When the four-colour taxonomy
+  (blue / green / amber / red) lands, both inventory and process
+  classifiers migrate together. The thresholds defined here
+  (`_BACKUP_AGE_RED_HOURS`, `_BACKUP_AGE_YELLOW_HOURS`) map cleanly
+  onto the future AMBER / RED gradient.
 
 ## Implementation history
 

@@ -4,6 +4,15 @@
 - Date: 2026-04-21
 - Updated: 2026-05-04
 
+> **2026-06-27 framing note — see [ADR-014](ADR-014-inventory-optional-health-signals.md).**
+> ADR-002 established S3 Inventory as the manifest mechanism for THS,
+> where scale (millions of objects) made `ListObjectsV2`-based manifest
+> building prohibitive. ADR-014 frames Inventory more generally as a
+> scale-appropriate verification mechanism — not a universal one —
+> and introduces `inventory_enabled: false` as a first-class operating
+> mode for installs below that scale. ADR-002's design is unchanged
+> for installs above it.
+
 ## Context
 
 Current THS manifest prep uses live source+backup listing and in-process diff.
