@@ -3,6 +3,14 @@
 - Status: Implemented
 - Date: 2026-05-22
 
+> **2026-06-27 update — extended by
+> [ADR-013](ADR-013-discord-notification-support.md).** ADR-008 set
+> the YAML-driven recipients/config pattern for Slack + SES. ADR-013
+> adds Discord as a peer chat channel under the same model: a
+> `notifications.discord` block in the production YAML, secret name
+> for the webhook URL, independent enable flag. The recipients-from-
+> YAML invariant is unchanged.
+
 ## Context
 
 PR #20 (ADR-005 fast path, 2026-05-19) and PR #21 (ADR-005 slow path,
