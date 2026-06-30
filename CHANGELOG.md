@@ -4,6 +4,23 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+## [v0.3.0] - 2026-06-30
+
+First public release on PyPI under the `aws-snapshot` name (the project
+was previously developed internally as `nzshm-backup`; see PR #48 / the
+OSS migration thread for the rename rationale). Packaging gains AGPL-3.0
+licensing, complete PyPI metadata, and an automated tag-triggered
+release workflow with PyPI Trusted Publishing OIDC. The functional
+content of this release accumulated under `## Unreleased` since v0.1.0
+and is preserved verbatim below.
+
+### Packaging
+
+- **`aws-snapshot` package name.** Renamed from `nzshm-backup`. Source layout already migrated (`src/aws_snapshot/`); `pyproject.toml` `name` and `[tool.hatch.build.targets.wheel].packages` updated; the engine imports as `aws_snapshot.*` throughout.
+- **AGPL-3.0-or-later license.** Full text in `LICENSE`. `pyproject.toml` carries the SPDX expression and `license-files` reference.
+- **PyPI metadata.** Added `keywords`, `classifiers` (Development Status :: 4 - Beta, target Python versions, topics), `[project.urls]` (Homepage, Documentation, Repository, Issues, Changelog).
+- **Tag-triggered release workflow.** `.github/workflows/release.yml` builds sdist + wheel on `v*` tag push, publishes via PyPI Trusted Publishing (OIDC; no stored API tokens), gates on the `pypi` GitHub Environment with required reviewer approval, and auto-creates a GitHub Release with the artefacts and auto-generated notes. Operator runbook in `docs/development/release.md`.
+
 ### Observability
 
 - **Health report goes quiet about inventory when a source has opted out.** When `SourceConfig.inventory_enabled` is `false`, the daily report no longer surfaces `inventory_age=n/a` chips in any formatter (text / Slack / Discord) and no longer appends the `inventory disabled for this source — restore test is the dominant signal` info_note. The absence of those signals is itself the signal; restating it daily was noise. Inventory-enabled sources are unaffected.

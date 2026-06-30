@@ -1,0 +1,121 @@
+# Tag-triggered release to PyPI via Trusted Publishing.
+#
+# How to release:
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# Prerequisites (one-time, operator-side):
+#   1. Project must exist on PyPI (placeholder upload OK).
+#   2. Configure a Trusted Publisher on the PyPI project page:
+#      Project → Manage → Publishing → Add a new pending publisher
+#        Owner:           GNS-Science
+#        Repository name: aws-snapshot
+#        Workflow name:   release.yml
+#        Environment:     pypi
+#   3. Create the matching GitHub Environment in this repo:
+#      Settings → Environments → New environment → "pypi"
+#      Add at least one required reviewer (the publish step pauses
+#      for manual approval before posting to PyPI).
+#
+# After tag push:
+#   - The `build` job builds sdist + wheel and uploads as a workflow
+#     artefact. No secrets needed.
+#   - The `publish` job downloads the artefact and posts to PyPI via
+#     OIDC. Pauses on the `pypi` environment for reviewer approval.
+#   - On success, `gh-release` creates a GitHub Release with the
+#     uploaded artefacts and auto-generated notes.
+#
+# See docs/development/release.md for the full operator runbook.
+
+name: Release to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Concurrency: at most one release in flight per tag. Subsequent pushes
+# of the same tag (rare; only happens via force-push) cancel in-flight
+# runs cleanly.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+        with:
+          # hatch-vcs derives the version from git tags; full history
+          # isn't required, but the tag itself + recent commits are.
+          # fetch-depth: 0 keeps it simple and reliable.
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Build
+        run: uv build
+
+      - name: Show artefacts
+        run: ls -la dist/
+
+      - name: Upload artefacts for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: pypi
+      url: https://pypi.org/project/aws-snapshot/
+    permissions:
+      # Required for PyPI Trusted Publishing OIDC token issuance.
+      id-token: write
+    steps:
+      - name: Download build artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish via Trusted Publishing
+        # No API token configured — the action exchanges the GitHub
+        # Actions OIDC token for a short-lived PyPI upload credential.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  gh-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+
+      - name: Download build artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag

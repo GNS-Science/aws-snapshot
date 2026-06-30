@@ -6,7 +6,26 @@ authors = [
     {name = "Chris B Chamberlain", email = "chrisbc@artisan.co.nz"}
 ]
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+keywords = ["aws", "s3", "dynamodb", "backup", "snapshot", "disaster-recovery", "pitr"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: System :: Recovery Tools",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "typer>=0.9.0",
     "boto3>=1.34.0",
@@ -16,6 +35,13 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/GNS-Science/aws-snapshot"
+Documentation = "https://github.com/GNS-Science/aws-snapshot#readme"
+Repository = "https://github.com/GNS-Science/aws-snapshot"
+Issues = "https://github.com/GNS-Science/aws-snapshot/issues"
+Changelog = "https://github.com/GNS-Science/aws-snapshot/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 docs = [

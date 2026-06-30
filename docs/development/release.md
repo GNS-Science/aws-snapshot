@@ -15,26 +15,88 @@ uv run backup --version
 
 Between tags, dev builds get versions like `0.1.1.dev3+gabcdef1`.
 
-## Release steps
+## One-time setup (operator, on PyPI)
 
-1. **Run tests and checks**:
-   ```bash
-   uv run tox --skip-missing-interpreters -e py312,format,lint,build-linux
-   ```
+The first release of `aws-snapshot` to PyPI required a one-time
+Trusted Publisher configuration. If you're cutting a release for the
+first time on a new account or after a project transfer, repeat
+these steps:
 
-2. **Tag and push**:
-   ```bash
-   git tag v0.4.0
-   git push origin main --tags
-   ```
+1. **Ensure the project exists on PyPI.** Either a previous release,
+   a manual placeholder upload, or an initial release flow that
+   creates it.
+2. **Configure a Trusted Publisher on the PyPI project page**:
+   - Sign in to https://pypi.org.
+   - Navigate to *Project* → *Manage* → *Publishing*.
+   - Add a new *pending publisher* (or regular publisher if the
+     project already exists) with:
 
-   The version is derived from the tag — no file edits needed.
+     | Field | Value |
+     |---|---|
+     | Owner | `GNS-Science` |
+     | Repository name | `aws-snapshot` |
+     | Workflow name | `release.yml` |
+     | Environment | `pypi` |
 
-3. **Build and publish** (if publishing to PyPI):
-   ```bash
-   uv build
-   uv publish
-   ```
+3. **Configure the `pypi` GitHub Environment in this repo**:
+   - *Settings* → *Environments* → *New environment* → `pypi`.
+   - Add at least one **required reviewer** (the release workflow's
+     publish job pauses for manual approval before posting to PyPI;
+     anyone on the reviewer list can approve).
+
+No API tokens or secrets are stored anywhere — Trusted Publishing
+uses short-lived OIDC tokens issued by GitHub Actions and exchanged
+for upload credentials at publish time.
+
+## Releasing
+
+Once one-time setup is in place, a release is a tag push:
+
+1. **Run tests and checks** locally first if you want:
+
+    ```bash
+    uv run tox --skip-missing-interpreters -e py312,format,lint,build-linux
+    ```
+
+2. **Update the CHANGELOG** — move the `## Unreleased` block under a
+   new `## [vX.Y.Z] - YYYY-MM-DD` header. Commit on `main` via PR
+   (this is the only commit that touches `CHANGELOG.md`).
+
+3. **Tag and push**:
+
+    ```bash
+    git tag vX.Y.Z
+    git push origin vX.Y.Z
+    ```
+
+   The version is derived from the tag — no file edits needed in
+   source.
+
+4. **Approve the publish step** in GitHub Actions:
+   - The `release.yml` workflow's `publish` job pauses on the `pypi`
+     environment for reviewer approval.
+   - Click *Review deployments* on the workflow run and approve.
+
+5. **Verify**:
+   - PyPI page updates within a minute:
+     https://pypi.org/project/aws-snapshot/
+   - GitHub Release auto-created at
+     https://github.com/GNS-Science/aws-snapshot/releases with
+     auto-generated notes and the sdist + wheel attached.
+
+## Manual fallback
+
+If Trusted Publishing is unavailable for some reason (PyPI outage,
+OIDC misconfig, etc.), the workflow can be bypassed and built /
+published locally:
+
+```bash
+uv build
+uv publish  # requires a PyPI API token in ~/.pypirc or env
+```
+
+This is the previous-generation flow; prefer the tag-triggered
+workflow unless something is broken.
 
 ## Docs versioning with mike
 
@@ -43,7 +105,7 @@ The docs site uses [mike](https://github.com/jimporter/mike) for versioned docs
 
 ```bash
 # Deploy a new version
-uv run mike deploy 0.4.0 latest --update-aliases --push
+uv run mike deploy X.Y.Z latest --update-aliases --push
 
 # List deployed versions
 uv run mike list
