@@ -14,10 +14,36 @@ def cli_runner():
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Unset shell env vars that leak from a developer's real AWS session."""
-    monkeypatch.delenv("AWS_PROFILE", raising=False)
-    monkeypatch.delenv("AWS_CONFIG_FILE", raising=False)
-    monkeypatch.delenv("BACKUP_CONFIG_PATH", raising=False)
+    """Unset shell env vars that leak from a developer's real AWS session.
+
+    A non-exhaustive ``AWS_PROFILE`` / ``AWS_CONFIG_FILE`` unset used to
+    let credential env vars leak through — tests that instantiate
+    ``boto3.Session`` (or call boto3 directly without the
+    ``mock_s3`` / ``mock_dynamodb`` fixtures) would then pick up the
+    operator's ambient credentials. When the operator's SSO session
+    was expired the test suite failed with ``InvalidClientTokenId``
+    instead of running offline.
+
+    Unset every AWS_* env var pytest might inherit; the tox ``[testenv]``
+    block sets fake values back as a second layer of defence.
+    """
+    for var in (
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_CONFIG_FILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SECURITY_TOKEN",
+        "AWS_SESSION_TOKEN",
+        "AWS_DEFAULT_REGION",
+        "AWS_REGION",
+        "AWS_ENDPOINT_URL",
+        "BACKUP_CONFIG_PATH",
+        "BACKUP_CONFIG",
+        "NZSHM_STAGE",
+    ):
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture
