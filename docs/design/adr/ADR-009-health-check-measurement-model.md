@@ -3,6 +3,14 @@
 - Status: Accepted (2026-05-25, implemented under #23)
 - Date: 2026-05-25
 
+> **2026-06-27 update — extended by [ADR-014](ADR-014-inventory-optional-health-signals.md).**
+> ADR-014 layers a *process signals* classifier on top of this model
+> (backup age, batch failure rate, DDB export status). The existing
+> class-1/2/3 inventory-driven branches are unchanged; the process
+> branches apply additively. Installs with `inventory_enabled: false`
+> rely on the process layer + restore-test + PITR as their primary
+> daily health signals.
+
 > **Implementation note (2026-05-25):** Class-1 backup-missing signal,
 > class-2 reclassification of the source-count delta, the orphan-count
 > signal, and the manual-purge runbook (`docs/operations/purge-from-backup.md`)

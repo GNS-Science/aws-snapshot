@@ -3,6 +3,16 @@
 - Status: Proposed
 - Date: 2026-06-10
 
+> **2026-06-27 forward-compatibility note — see
+> [ADR-014](ADR-014-inventory-optional-health-signals.md).** ADR-014
+> introduces a process-signal classifier producing red / yellow /
+> green; the implementation deliberately uses ADR-009's three-tier
+> output so that when this ADR (four-colour) lands, both inventory
+> and process signal classifiers migrate together. The thresholds in
+> ADR-014 (`_BACKUP_AGE_RED_HOURS=36`, `_BACKUP_AGE_YELLOW_HOURS=12`)
+> would map cleanly onto the AMBER / RED gradient once the four-tier
+> classifier is in place.
+
 ## Context
 
 [ADR-009](ADR-009-health-check-measurement-model.md) established a three-tier
