@@ -66,6 +66,7 @@ sources:
 | `source_account_role_arn` | string | `null` | IAM role to assume for read/backup access |
 | `source_account_restore_role_arn` | string | `null` | IAM role to assume for restore operations |
 | `use_s3_batch` | bool | `false` | Use S3 Batch Operations instead of per-object copy |
+| `inventory_enabled` | bool | `true` | Drive health verification from the S3 Inventory + Athena pipeline. Set `false` for sources where Inventory is not scale-appropriate — see [ADR-014](../design/adr/ADR-014-inventory-optional-health-signals.md). When false, the daily health report classifies on process signals + restore-test + PITR alone, and inventory chips are suppressed in the report. |
 
 ### `retention`
 
@@ -98,8 +99,36 @@ sources:
 |-------|---------|-------------|
 | `enabled` | `true` | Enable Slack notifications |
 | `webhook_url_secret` | `backup-slack-webhook` | AWS Secrets Manager secret name |
-| `channel` | `#nsdm-backups` | Slack channel |
+| `channel` | `#nsdm-backups` | Slack channel (informational only — actual destination is the channel the webhook was created in) |
 | `notify_on` | backup_success, backup_failure, restore_* | Events to notify on |
+
+### `notifications.discord`
+
+Peer to `notifications.slack`. Discord uses its native webhook format
+(rich embeds) — distinct from Discord's Slack-compatibility
+`/slack`-suffixed endpoint, which the engine does not use. Both
+channels can run simultaneously. See
+[ADR-013](../design/adr/ADR-013-discord-notification-support.md) for
+the design rationale, and
+[`enabling-notifications.md`](../operations/enabling-notifications.md#discord-channel-peer-to-slack)
+for the setup procedure.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Enable Discord notifications |
+| `webhook_url_secret` | `backup-discord-webhook` | AWS Secrets Manager secret name (URL must be the native Discord form — no `/slack` suffix) |
+| `notify_on` | backup_success, backup_failure, restore_* | Events to notify on |
+
+### `notifications.reports.health`
+
+Tunable thresholds and rotation for the daily health report.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `canary_source` | `weka` | Source alias whose freshness + restore-sample is exercised every daily run. Override per-install (e.g. `pr-static` for the public-record-backup deployment). |
+| `rotation_by_weekday` | `{0: ths, 2: toshi, 4: static}` | Day-of-week → source rotation for the larger restore test |
+| `freshness_threshold_hours` | `30.0` | Inventory freshness threshold; yellow above |
+| `restore_sample_size` | `10` | Number of objects to restore-test per canary run |
 
 ### `cost_tracking`
 
