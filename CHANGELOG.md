@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+- deps: major (transitive): backrefs 7→8, cryptography 48→50 (with pyopenssl 26.4, aws-sam-cli 1.171), filelock 3→4, pymdown-extensions 10→12, python-slugify 8→9, setuptools 82→84
+- deps: minor upgrades (39 pkgs, incl. mypy 2.4, ruff 0.17, pytest 9.2, typer 0.27, certifi, urllib3 2.8, virtualenv 21.15)
+- deps: patch upgrades (27 pkgs, incl. boto3/botocore, moto 5.2.5, msgpack 1.2.4, werkzeug 3.1.9)
+
 ## [v0.3.0] - 2026-06-30
 
 First public release on PyPI under the `aws-snapshot` name (the project
