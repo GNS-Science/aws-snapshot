@@ -7,6 +7,8 @@ All notable changes to this project will be documented here.
 - deps: major (transitive): backrefs 7→8, cryptography 48→50 (with pyopenssl 26.4, aws-sam-cli 1.171), filelock 3→4, pymdown-extensions 10→12, python-slugify 8→9, setuptools 82→84
 - deps: minor upgrades (39 pkgs, incl. mypy 2.4, ruff 0.17, pytest 9.2, typer 0.27, certifi, urllib3 2.8, virtualenv 21.15)
 - deps: patch upgrades (27 pkgs, incl. boto3/botocore, moto 5.2.5, msgpack 1.2.4, werkzeug 3.1.9)
+- Python: require >=3.12,<4 (drop 3.10, 3.11); test matrix 3.12–3.14; Lambda runtime python3.12
+- deps: filelock 4.1.0→4.2.10 (fixes open security alerts)
 
 ## [v0.3.0] - 2026-06-30
 
