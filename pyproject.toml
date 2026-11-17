@@ -8,7 +8,7 @@ authors = [
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.12,<4"
 keywords = ["aws", "s3", "dynamodb", "backup", "snapshot", "disaster-recovery", "pitr"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,9 +17,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Archiving :: Backup",
     "Topic :: System :: Recovery Tools",
     "Topic :: Utilities",
@@ -101,7 +101,7 @@ ignore = ["B008"]
 quote-style = "preserve"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
