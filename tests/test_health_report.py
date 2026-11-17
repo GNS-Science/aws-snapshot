@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
@@ -219,7 +219,7 @@ def test_classify_green_when_inventory_disabled_and_process_healthy():
 
 
 def test_extract_empty_status_returns_defaults():
-    now = datetime(2026, 6, 27, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 0, 0, tzinfo=UTC)
     sig = hr._extract_process_signals({}, now)
     assert sig.last_backup_at is None
     assert sig.last_backup_age_hours is None
@@ -241,7 +241,7 @@ def test_extract_aggregates_last_backup_across_buckets():
     See https://github.com/GNS-Science/nzshm-backup#63 regression that
     used wrong field names.
     """
-    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=UTC)
     status = {
         "s3_batches": [
             {
@@ -275,7 +275,7 @@ def test_extract_aggregates_last_backup_across_buckets():
         ]
     }
     sig = hr._extract_process_signals(status, now)
-    assert sig.last_backup_at == datetime(2026, 6, 27, 10, 0, tzinfo=timezone.utc)
+    assert sig.last_backup_at == datetime(2026, 6, 27, 10, 0, tzinfo=UTC)
     assert sig.last_backup_age_hours == 2.0
     assert len(sig.last_s3_batch_jobs) == 1  # only bucket a had a recent_jobs entry
     assert sig.last_s3_batch_jobs[0]["job_id"] == "j1"
@@ -289,7 +289,7 @@ def test_extract_ignores_unfinished_or_failed_run_state():
     represent in-flight or failed attempts and must not silently advance
     the last-backup timestamp.
     """
-    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=UTC)
     status = {
         "s3_batches": [
             {
@@ -318,7 +318,7 @@ def test_extract_ignores_unfinished_or_failed_run_state():
 
 
 def test_extract_summarises_ddb_exports_by_status():
-    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=UTC)
     status = {
         "dynamodb_tables": {
             "ok-1": [{"status": "COMPLETED", "export_time": "2026-06-27T11:00:00+00:00"}],
@@ -341,14 +341,14 @@ def test_extract_summarises_ddb_exports_by_status():
 
 def test_extract_uses_ddb_export_ts_when_no_s3_batches():
     """A DDB-only source (or s3 not yet run) gets last_backup_at from DDB."""
-    now = datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, 0, tzinfo=UTC)
     status = {
         "dynamodb_tables": {
             "t": [{"status": "COMPLETED", "export_time": "2026-06-27T11:30:00+00:00"}],
         }
     }
     sig = hr._extract_process_signals(status, now)
-    assert sig.last_backup_at == datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)
+    assert sig.last_backup_at == datetime(2026, 6, 27, 11, 30, tzinfo=UTC)
     assert sig.last_backup_age_hours == 0.5
 
 
@@ -594,7 +594,7 @@ def test_build_report_assembles_sources_and_runs_canary_only_on_off_day(
     config.sources = {"weka": source_cfg, "toshi": source_cfg}
 
     mock_status.return_value = {"weka": {}, "toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": 0,
@@ -634,7 +634,7 @@ def test_build_report_runs_canary_plus_rotated_source_on_rotation_day(
     config.sources = {"weka": source_cfg, "ths": source_cfg, "toshi": source_cfg}
 
     mock_status.return_value = {"weka": {}, "ths": {}, "toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": 0,
@@ -671,7 +671,7 @@ def test_build_report_classifies_red_on_backup_missing(
     config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": 0,
@@ -708,7 +708,7 @@ def test_build_report_source_count_drop_is_class2_informational_only(
     config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": -50_000,
@@ -740,7 +740,7 @@ def test_build_report_orphan_count_is_class2_info(
     config.sources = {"toshi": source_cfg}
 
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {
         "available": True,
         "delta": 0,
@@ -820,7 +820,7 @@ def test_build_report_tags_still_missing_when_head_object_404s(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -870,7 +870,7 @@ def test_build_report_tags_auto_healed_when_head_object_200s(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -915,7 +915,7 @@ def test_build_report_tags_mixed_when_some_still_missing_some_healed(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -978,7 +978,7 @@ def test_build_report_falls_back_to_untagged_when_sample_query_fails(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,
@@ -1024,7 +1024,7 @@ def test_build_report_classifier_unchanged_when_all_auto_healed(
     config, source_cfg = _build_report_mocks()
     config.sources = {"toshi": source_cfg}
     mock_status.return_value = {"toshi": {}}
-    mock_inv.return_value = {"effective_data_ts": datetime.now(timezone.utc) - timedelta(hours=2)}
+    mock_inv.return_value = {"effective_data_ts": datetime.now(UTC) - timedelta(hours=2)}
     mock_delta.return_value = {"available": True, "delta": 0, "delta_pct": 0.0}
     mock_div.return_value = {
         "available": True,

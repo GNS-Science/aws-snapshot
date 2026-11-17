@@ -1,7 +1,7 @@
 """Tests for the status command."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +14,7 @@ runner = CliRunner()
 
 REGION = "ap-southeast-2"
 ACCOUNT_ID = "123456789012"
-TS = datetime(2026, 3, 18, 10, 0, tzinfo=timezone.utc)
+TS = datetime(2026, 3, 18, 10, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------

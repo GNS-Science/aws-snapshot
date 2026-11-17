@@ -3,7 +3,7 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from botocore.exceptions import ClientError
@@ -27,7 +27,7 @@ class DynamoDBRestoreResult:
     status: Literal["INITIATED", "SKIPPED", "FAILED"] = "INITIATED"
     errors: list[dict[str, Any]] = field(default_factory=list)
     dry_run: bool = False
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def success(self) -> bool:
@@ -157,7 +157,7 @@ def describe_restore_status(
 
     restore_dt = summary.get("RestoreDateTime")
     if restore_dt and restore_dt.tzinfo is None:
-        restore_dt = restore_dt.replace(tzinfo=timezone.utc)
+        restore_dt = restore_dt.replace(tzinfo=UTC)
 
     return DynamoDBRestoreStatus(
         table_name=table_name,

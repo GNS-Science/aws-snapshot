@@ -80,7 +80,7 @@ Propose a commit after each logical unit of work is verified working. Check `git
 ## Code Style
 
 - Line length: 100 (ruff)
-- Target Python: 3.10+
+- Target Python: 3.12+
 - Type annotations expected (mypy configured)
 - Ruff selects: E, F, W, I, N, UP, B, C4
 - DRY — docs and tests must stay in sync with code

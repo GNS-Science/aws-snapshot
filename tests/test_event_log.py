@@ -1,7 +1,7 @@
 """Tests for the append-only JSONL event log."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import boto3
@@ -38,12 +38,12 @@ def s3_session():
 
 
 def test_event_key_format():
-    dt = datetime(2026, 3, 25, 7, 50, tzinfo=timezone.utc)
+    dt = datetime(2026, 3, 25, 7, 50, tzinfo=UTC)
     assert _event_key(dt) == "_events/2026-03/events.jsonl"
 
 
 def test_event_key_december():
-    dt = datetime(2025, 12, 1, tzinfo=timezone.utc)
+    dt = datetime(2025, 12, 1, tzinfo=UTC)
     assert _event_key(dt) == "_events/2025-12/events.jsonl"
 
 
@@ -56,7 +56,7 @@ class TestAppendEvent:
     def test_creates_new_file(self, s3_session):
         append_event(s3_session, BUCKET, "backup_run", "toshi", {"status": "started"})
         s3 = s3_session.client("s3")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         key = _event_key(now)
         body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
         event = json.loads(body.strip())
@@ -69,7 +69,7 @@ class TestAppendEvent:
         append_event(s3_session, BUCKET, "backup_run", "toshi", {"n": 1})
         append_event(s3_session, BUCKET, "backup_run_complete", "toshi", {"n": 2})
         s3 = s3_session.client("s3")
-        key = _event_key(datetime.now(timezone.utc))
+        key = _event_key(datetime.now(UTC))
         lines = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode().splitlines()
         assert len(lines) == 2
         assert json.loads(lines[0])["event_type"] == "backup_run"
@@ -78,7 +78,7 @@ class TestAppendEvent:
     def test_includes_actor_when_provided(self, s3_session):
         append_event(s3_session, BUCKET, "restore_submitted", "toshi", {}, actor="cli-user")
         s3 = s3_session.client("s3")
-        key = _event_key(datetime.now(timezone.utc))
+        key = _event_key(datetime.now(UTC))
         body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
         event = json.loads(body.strip())
         assert event["actor"] == "cli-user"
@@ -86,7 +86,7 @@ class TestAppendEvent:
     def test_no_actor_field_when_not_provided(self, s3_session):
         append_event(s3_session, BUCKET, "backup_run", "toshi", {})
         s3 = s3_session.client("s3")
-        key = _event_key(datetime.now(timezone.utc))
+        key = _event_key(datetime.now(UTC))
         body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
         event = json.loads(body.strip())
         assert "actor" not in event
@@ -110,13 +110,13 @@ class TestAppendEvent:
     def test_timestamp_is_utc_iso(self, s3_session):
         append_event(s3_session, BUCKET, "backup_run", "toshi", {})
         s3 = s3_session.client("s3")
-        key = _event_key(datetime.now(timezone.utc))
+        key = _event_key(datetime.now(UTC))
         body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
         event = json.loads(body.strip())
         dt = datetime.fromisoformat(event["timestamp"])
         assert dt.tzinfo is not None
         # Should be close to now
-        delta = abs((dt.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds())
+        delta = abs((dt.astimezone(UTC) - datetime.now(UTC)).total_seconds())
         assert delta < 5
 
 
@@ -165,7 +165,7 @@ class TestReadEvents:
         assert events == []
 
     def test_filters_by_since(self, s3_session):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cutoff = now - timedelta(minutes=1)
         # Write one event with a past timestamp manually
         old_ts = (now - timedelta(hours=2)).isoformat()
@@ -184,7 +184,7 @@ class TestReadEvents:
         assert all(e["event_type"] == "backup_run_complete" for e in events)
 
     def test_scans_previous_month(self, s3_session):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         prev = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
         prev_key = _event_key(prev)
         old_event = {
@@ -199,13 +199,13 @@ class TestReadEvents:
         assert any(e["event_type"] == "backup_run" for e in events)
 
     def test_skips_malformed_lines(self, s3_session):
-        key = _event_key(datetime.now(timezone.utc))
+        key = _event_key(datetime.now(UTC))
         s3 = s3_session.client("s3")
         good = json.dumps(
             {
                 "event_type": "backup_run",
                 "source": "toshi",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "details": {},
             }
         )

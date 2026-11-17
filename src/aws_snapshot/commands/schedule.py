@@ -1,7 +1,7 @@
 """Schedule management commands (EventBridge)."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import boto3
@@ -68,7 +68,7 @@ def _schedule_expr_local_desc(expr: str) -> str:
 
 def _human_schedule_desc(frequency: str, hh_utc: int, mm_utc: int, weekday_utc: str | None) -> str:
     """Return a human-readable localised description of when the schedule fires."""
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
 
     if frequency == "weekly" and weekday_utc:
         # Find the next (or current) occurrence of weekday_utc
@@ -131,7 +131,7 @@ def _metric_window_summary(
     window_minutes: int,
 ) -> tuple[float, datetime | None]:
     """Return (sum, latest_nonzero_timestamp) for an EventBridge rule metric window."""
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(minutes=window_minutes)
     resp = cloudwatch.get_metric_statistics(
         Namespace="AWS/Events",
@@ -193,7 +193,7 @@ def _parse_schedule_time(time_str: str) -> tuple[int, int, str | None]:
     # Localised formats — delegate to parse_datetime and convert to UTC
     try:
         dt = parse_datetime(ts)
-        dt_utc = dt.astimezone(timezone.utc)
+        dt_utc = dt.astimezone(UTC)
         weekday = _EB_WEEKDAY[dt_utc.isoweekday()] if has_date else None
         return dt_utc.hour, dt_utc.minute, weekday
     except ValueError:

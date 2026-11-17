@@ -1,6 +1,6 @@
 """Tests for DynamoDB restore operations."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from aws_snapshot.dynamodb_restore import (
@@ -14,7 +14,7 @@ from aws_snapshot.dynamodb_restore import (
 REGION = "ap-southeast-2"
 ACCOUNT_ID = "123456789012"
 TABLE_ARN = f"arn:aws:dynamodb:{REGION}:{ACCOUNT_ID}:table/ToshiAPI-FileTable"
-RESTORE_POINT = datetime(2026, 3, 15, 9, 0, tzinfo=timezone.utc)
+RESTORE_POINT = datetime(2026, 3, 15, 9, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------

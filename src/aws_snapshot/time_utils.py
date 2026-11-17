@@ -1,11 +1,11 @@
 """Shared timezone and datetime parsing utilities."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 # Offset lookup for common timezone abbreviations (matches _fmt_dt display output)
 TZ_ABBREV: dict[str, timezone] = {
-    "UTC": timezone.utc,
+    "UTC": UTC,
     "NZST": timezone(timedelta(hours=12)),
     "NZDT": timezone(timedelta(hours=13)),
     "AEST": timezone(timedelta(hours=10)),
@@ -48,7 +48,7 @@ def parse_datetime(ts: str) -> datetime:
     try:
         dt = datetime.fromisoformat(ts)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except ValueError:
         pass

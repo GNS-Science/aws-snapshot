@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class IntegrityResult:
     backup_object_count: int = 0  # objects in backup (operational prefixes excluded)
     diffs: list[ObjectDiff] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = None
 
     @property
@@ -123,7 +123,7 @@ def check_bucket_integrity(
     except Exception as e:
         logger.error(f"Failed to list source bucket {source_bucket}: {e}")
         result.errors.append({"bucket": source_bucket, "error": str(e)})
-        result.end_time = datetime.now(timezone.utc)
+        result.end_time = datetime.now(UTC)
         return result
 
     # Index backup objects: key → ETag
@@ -137,7 +137,7 @@ def check_bucket_integrity(
     except Exception as e:
         logger.error(f"Failed to list backup bucket {backup_bucket}: {e}")
         result.errors.append({"bucket": backup_bucket, "error": str(e)})
-        result.end_time = datetime.now(timezone.utc)
+        result.end_time = datetime.now(UTC)
         return result
 
     # Compare
@@ -177,7 +177,7 @@ def check_bucket_integrity(
     if checksum_verified:
         logger.info(f"{checksum_verified} object(s) with differing ETags verified via checksum")
 
-    result.end_time = datetime.now(timezone.utc)
+    result.end_time = datetime.now(UTC)
     logger.info(
         f"Integrity check: {result.source_object_count} source objects, "
         f"{result.backup_object_count} backup objects, "

@@ -13,7 +13,7 @@ jobs:
     with:
       fail-fast: false
       operating-systems: "['ubuntu-latest']"
-      python-versions: "['3.10', '3.11', '3.12']"
+      python-versions: "['3.12', '3.13', '3.14']"
       delete-uv-lock: ${{ github.event_name == 'schedule' }}
       optional-dependency-groups: dev
     secrets: inherit
