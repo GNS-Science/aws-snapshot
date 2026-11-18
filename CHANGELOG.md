@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented here.
 
-## Unreleased
+## [v0.3.1] - 2026-11-18
 
 - python: requires >=3.12,<4 (dropped 3.10, 3.11); test matrix 3.12, 3.13, 3.14; Lambda runtime python3.12; ruff/mypy targets 3.12
 
