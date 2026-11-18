@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from aws_snapshot.inventory_state import _latest_object_ts
@@ -28,19 +28,19 @@ def test_latest_object_ts_picks_freshest_non_empty():
                 {
                     "Key": "old.parquet",
                     "Size": 1024,
-                    "LastModified": datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc),
+                    "LastModified": datetime(2026, 5, 25, 10, 0, tzinfo=UTC),
                 },
                 {
                     "Key": "newer.parquet",
                     "Size": 2048,
-                    "LastModified": datetime(2026, 5, 26, 10, 0, tzinfo=timezone.utc),
+                    "LastModified": datetime(2026, 5, 26, 10, 0, tzinfo=UTC),
                 },
             ]
         )
     ]
     s3 = _mock_s3_with_pages(pages)
     ts = _latest_object_ts(s3, "bucket", "prefix")
-    assert ts == datetime(2026, 5, 26, 10, 0, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 5, 26, 10, 0, tzinfo=UTC)
 
 
 def test_latest_object_ts_skips_zero_byte_placeholders():
@@ -56,13 +56,13 @@ def test_latest_object_ts_skips_zero_byte_placeholders():
                 {
                     "Key": "real-data.parquet",
                     "Size": 4096,
-                    "LastModified": datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc),
+                    "LastModified": datetime(2026, 5, 25, 10, 0, tzinfo=UTC),
                 },
                 # Placeholder created at setup time — should be ignored
                 {
                     "Key": "data/",
                     "Size": 0,
-                    "LastModified": datetime(2026, 5, 26, 10, 0, tzinfo=timezone.utc),
+                    "LastModified": datetime(2026, 5, 26, 10, 0, tzinfo=UTC),
                 },
             ]
         )
@@ -71,7 +71,7 @@ def test_latest_object_ts_skips_zero_byte_placeholders():
     ts = _latest_object_ts(s3, "bucket", "prefix")
     # The 0-byte placeholder is newer but excluded → falls back to the
     # real parquet's older timestamp.
-    assert ts == datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 5, 25, 10, 0, tzinfo=UTC)
 
 
 def test_latest_object_ts_returns_none_when_only_placeholders():
@@ -82,7 +82,7 @@ def test_latest_object_ts_returns_none_when_only_placeholders():
                 {
                     "Key": "data/",
                     "Size": 0,
-                    "LastModified": datetime(2026, 5, 27, 3, 10, tzinfo=timezone.utc),
+                    "LastModified": datetime(2026, 5, 27, 3, 10, tzinfo=UTC),
                 }
             ]
         )

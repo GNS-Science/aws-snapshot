@@ -18,7 +18,7 @@ status once a batch_job_id exists.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 import boto3
@@ -42,7 +42,7 @@ def write_run_state(
     """Write last-run state to _state/last-run.json in the backup bucket."""
     state = {
         "source_bucket": source_bucket,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
         "status": status,
         "objects_copied": objects_copied,
         "bytes_transferred": bytes_transferred,

@@ -4,7 +4,7 @@ import random
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 import boto3
@@ -351,7 +351,7 @@ def _run_bucket_restore_test(
             copy_errors=["No copyable objects found in backup bucket"],
         )
 
-    ts = int(datetime.now(timezone.utc).timestamp())
+    ts = int(datetime.now(UTC).timestamp())
     temp_bucket = f"bb-restore-test-{ts}-{account_id}"
     try:
         kwargs: dict = {"Bucket": temp_bucket, "ACL": "private"}
@@ -394,9 +394,7 @@ def _run_bucket_restore_test(
 
             from aws_snapshot.s3_batch import write_manifest_to_s3 as _write_manifest
 
-            manifest_key = (
-                f"_manifests/test-restore-{int(datetime.now(timezone.utc).timestamp())}.csv"
-            )
+            manifest_key = f"_manifests/test-restore-{int(datetime.now(UTC).timestamp())}.csv"
             manifest_etag, manifest_row_count = _write_manifest(
                 s3_client, _sample_rows(), backup_bucket, manifest_key
             )

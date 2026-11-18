@@ -8,7 +8,7 @@ Non-fatal: write failures log a warning but never fail the calling operation.
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -34,7 +34,7 @@ def append_event(
 
     Non-fatal: logs a warning on failure rather than raising.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     event: dict[str, Any] = {
         "event_type": event_type,
         "source": source,
@@ -82,7 +82,7 @@ def read_events(
     onwards when provided.
     """
     s3 = session.client("s3")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Build list of month start datetimes to scan
     if since:

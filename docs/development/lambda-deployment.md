@@ -37,7 +37,7 @@ docker info >/dev/null   # should succeed
 ```
 
 The first `sam build` after a clean install pulls
-`public.ecr.aws/sam/build-python3.10:latest-x86_64` (~600 MB). Subsequent
+`public.ecr.aws/sam/build-python3.12:latest-x86_64` (~600 MB). Subsequent
 builds reuse the image.
 
 ### 3. AWS credentials

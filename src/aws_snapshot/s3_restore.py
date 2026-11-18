@@ -3,7 +3,7 @@
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -87,12 +87,12 @@ class RestoreResult:
     objects_skipped: int = 0  # already present with matching ETag
     errors: list[dict[str, Any]] = field(default_factory=list)
     prefix_filter: str | None = None
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = None
 
     @property
     def duration_seconds(self) -> float:
-        end = self.end_time or datetime.now(timezone.utc)
+        end = self.end_time or datetime.now(UTC)
         return (end - self.start_time).total_seconds()
 
     @property
@@ -121,7 +121,7 @@ def _ensure_restore_target(s3_client, bucket_name: str, region: str) -> None:
         Tagging={
             "TagSet": [
                 {"Key": "RestoredBy", "Value": "nzshm-backup"},
-                {"Key": "RestoredAt", "Value": datetime.now(timezone.utc).isoformat()},
+                {"Key": "RestoredAt", "Value": datetime.now(UTC).isoformat()},
             ]
         },
     )
@@ -201,7 +201,7 @@ def restore_s3_bucket(
                 logger.error(f"Failed to restore {key}: {e}")
                 result.errors.append({"key": key, "error": str(e)})
 
-    result.end_time = datetime.now(timezone.utc)
+    result.end_time = datetime.now(UTC)
     logger.info(
         f"Restore complete: {result.objects_copied} copied, "
         f"{result.objects_skipped} skipped, {len(result.errors)} errors"

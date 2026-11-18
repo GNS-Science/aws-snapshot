@@ -37,7 +37,7 @@ Parameters:
 
 Globals:
   Function:
-    Runtime: python3.10
+    Runtime: python3.12
     MemorySize: 1024
     Timeout: 900
     # Each function uses BuildMethod: makefile (see per-function

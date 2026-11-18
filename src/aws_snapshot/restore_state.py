@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from botocore.exceptions import ClientError
 
@@ -48,7 +48,7 @@ def add_pending_restore(
             "source": source,
             "source_table_arn": source_table_arn,
             "restore_point": restore_point_iso,
-            "submitted_at": datetime.now(timezone.utc).isoformat(),
+            "submitted_at": datetime.now(UTC).isoformat(),
         }
     )
     write_pending_restores(ssm_client, entries)

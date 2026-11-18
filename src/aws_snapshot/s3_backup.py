@@ -3,7 +3,7 @@
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -20,13 +20,13 @@ class SyncResult:
     bytes_transferred: int = 0
     objects_skipped: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     end_time: datetime | None = None
     dry_run: bool = False
 
     @property
     def duration_seconds(self) -> float:
-        end = self.end_time or datetime.now(timezone.utc)
+        end = self.end_time or datetime.now(UTC)
         return (end - self.start_time).total_seconds()
 
     @property
@@ -358,7 +358,7 @@ def sync_bucket(
             result.objects_skipped += 1
             logger.debug(f"Skipped (unchanged): {key}")
 
-    result.end_time = datetime.now(timezone.utc)
+    result.end_time = datetime.now(UTC)
 
     logger.info(
         f"Sync complete: {result.objects_copied} copied, "

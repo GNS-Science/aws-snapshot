@@ -1,6 +1,6 @@
 """Backup event log commands."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import boto3
 import typer
@@ -68,7 +68,7 @@ def events(
         try:
             since_dt = datetime.fromisoformat(since)
             if since_dt.tzinfo is None:
-                since_dt = since_dt.replace(tzinfo=timezone.utc)
+                since_dt = since_dt.replace(tzinfo=UTC)
         except ValueError:
             typer.echo(
                 f"Error: invalid --since value '{since}'. Use YYYY-MM-DD or ISO datetime.", err=True

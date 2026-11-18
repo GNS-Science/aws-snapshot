@@ -1,6 +1,6 @@
 """Tests for shared timezone / datetime parsing utilities."""
 
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta, timezone
 
 import pytest
 
@@ -8,7 +8,7 @@ from aws_snapshot.time_utils import TZ_ABBREV, parse_datetime
 
 NZST = timezone(timedelta(hours=12))
 NZDT = timezone(timedelta(hours=13))
-UTC = timezone.utc
+UTC = UTC
 
 
 class TestParseDateTime:

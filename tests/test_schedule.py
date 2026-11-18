@@ -1,7 +1,7 @@
 """Tests for schedule management commands (EventBridge)."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import boto3
@@ -113,7 +113,7 @@ def test_health_reports_missing_rule(events_client):
 
 def test_health_reports_codebuild_target_and_latest_build():
     """health should include target and latest CodeBuild build info."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     events = MagicMock()
     events.describe_rule.return_value = {
@@ -216,7 +216,7 @@ def test_add_health_report_uses_fixed_rule_name_and_payload(events_client):
     )
     fn = lambda_client.create_function(
         FunctionName="backup",
-        Runtime="python3.10",
+        Runtime="python3.12",
         Role=iam_client.get_role(RoleName="lambda-exec")["Role"]["Arn"],
         Handler="h.handler",
         Code={"ZipFile": b"def handler(e,c): pass"},

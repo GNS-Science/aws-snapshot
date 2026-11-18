@@ -27,7 +27,7 @@ check: lint test
 # SAM build targets — one per AWS::Serverless::Function logical ID in
 # sam.yaml. Invoked by `sam build` (template uses BuildMethod: makefile).
 # ---------------------------------------------------------------------------
-# Why Makefile build instead of SAM's default python3.10 BuildMethod:
+# Why Makefile build instead of SAM's default python3.12 BuildMethod:
 #   - Default builder copies the entire CodeUri (project root) into the
 #     artefact — bloats it with docs/, tests/, .venv/, AND ships
 #     backup-config.production.yaml. Unacceptable.
@@ -38,7 +38,7 @@ check: lint test
 
 # Host-side: generate requirements.txt from uv.lock. Run this before
 # `sam build` (or use `make sam-build` which wraps both). The build
-# targets below run INSIDE SAM's container which has python3.10 + pip
+# targets below run INSIDE SAM's container which has python3.12 + pip
 # but not uv — so requirements.txt must be pre-generated on the host.
 sam-prepare:
 	uv export --format requirements-txt --no-emit-project --no-dev -o requirements.txt

@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 import boto3
@@ -444,7 +444,7 @@ def build_report(
         rotation_by_weekday=rotation_map,
         freshness_threshold_hours=freshness_threshold_hours,
     )
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
 
     for alias in aliases:
         source_config = config.sources[alias]
@@ -861,7 +861,7 @@ def format_discord(data: HealthReportData) -> list[dict[str, Any]]:
                 f"Freshness threshold {data.freshness_threshold_hours}h"
             )
         },
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
     }
     return [embed]
 
